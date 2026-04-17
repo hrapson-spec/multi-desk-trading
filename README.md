@@ -84,13 +84,20 @@ redeployment.
       `phase-a-v0.1`, `phase-b-v0.1`, `phase-c-v0.1`, `phases-abc-v0.1`.
 - [x] Spec v1.4 revision — §12.2 Logic-gate / Reliability-gate split
       + §14.9 operator-side Reliability-gate commitment.
-- [ ] Real HDP-HMM regime classifier (v0.2; debit logged in Phase A
-      classifier docstring).
+- [x] HMM regime classifier (v0.2) — 4-state Gaussian HMM via
+      `hmmlearn`, causal inference, seed-deterministic fingerprint.
+      Tag `hmm-classifier-v0.2`. HDP-HMM (non-parametric K) remains
+      v0.3+.
+- [x] LLM two-tier routing postcondition gate (§6.4) — `LLMArtefact`
+      contract type + `commit_gate` validator; citations override
+      auto-reclassifies cross-desk synthesis. Tag `llm-routing-v0.1`.
+- [x] Spec v1.5 revision — §0 change log + §15 derivation-trace row
+      for the HMM + LLM routing follow-ups.
 - [ ] Real data ingest pipelines (EIA WPSR / CFTC COT / JODI / FRED /
       news scraping for geopolitics LLM extraction).
-- [ ] LLM two-tier routing postcondition gate (§6.4).
 - [ ] Reliability gate: 28-day wall-clock soak test (§14.9 — operator
       commitment required).
+- [ ] HDP-HMM regime classifier (v0.3+).
 - [ ] Phase 2: equity-VRP portability test (3 months after Phase 1 exit).
 
 ## License
