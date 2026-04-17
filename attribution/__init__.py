@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from .lodo import (
     LODO_METRIC_POSITION_SIZE_DELTA,
+    LODO_METRIC_SQUARED_ERROR_DELTA,
+    compute_lodo_grading_space,
     compute_lodo_signal_space,
     persist_lodo_rows,
 )
@@ -25,8 +27,10 @@ from .shapley import (
 
 __all__ = [
     "LODO_METRIC_POSITION_SIZE_DELTA",
+    "LODO_METRIC_SQUARED_ERROR_DELTA",
     "SHAPLEY_EXACT_MAX_N",
     "SHAPLEY_METRIC_POSITION_SIZE_DELTA",
+    "compute_lodo_grading_space",
     "compute_lodo_signal_space",
     "compute_shapley_signal_space",
     "persist_lodo_rows",

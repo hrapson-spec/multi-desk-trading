@@ -21,6 +21,8 @@ import pytest
 
 from attribution import (
     LODO_METRIC_POSITION_SIZE_DELTA,
+    LODO_METRIC_SQUARED_ERROR_DELTA,
+    compute_lodo_grading_space,
     compute_lodo_signal_space,
     persist_lodo_rows,
 )
@@ -276,5 +278,168 @@ def test_lodo_detects_weight_mutation_between_decide_and_compute(conn):
             conn=conn,
             decision=decision,
             recent_forecasts=recent,
+            computed_ts_utc=later,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Grading-space LODO (§9.1 step 2)
+# ---------------------------------------------------------------------------
+
+
+def test_grading_space_lodo_flags_harmful_desk_with_positive_delta(conn):
+    """Desk b pushes combined_signal away from the Print; removing b
+    makes the error smaller ⇒ lodo_err² > original_err² ⇒ delta < 0.
+    Per the docstring convention: negative delta = removing helps =
+    the desk is HARMFUL. Positive delta = the desk was reducing error.
+    """
+    boot = datetime(2026, 4, 16, 9, 0, 0, tzinfo=UTC)
+    now = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+    seed_cold_start(
+        conn,
+        desks=[
+            ("storage_curve", WTI_FRONT_MONTH_CLOSE),
+            ("harmful", WTI_FRONT_MONTH_CLOSE),
+        ],
+        regime_ids=["regime_boot"],
+        boot_ts=boot,
+        default_cold_start_limit=1000.0,
+    )
+    ctrl = Controller(conn=conn)
+    # Realized print = 80.
+    # storage_curve predicts 80 (perfect). harmful predicts 100 (bad).
+    # Cold-start weights 0.5/0.5 ⇒ combined = 90, err² = 100.
+    # LODO-storage_curve ⇒ combined = 0.5*100 = 50, err² = 900 (much worse).
+    # LODO-harmful ⇒ combined = 0.5*80 = 40, err² = 1600 (also worse
+    # because dropping it alone still leaves the other desk's weight too
+    # low to hit 80). Let me double-check:
+    recent = {
+        ("storage_curve", WTI_FRONT_MONTH_CLOSE): _fcast("storage_curve", 80.0, now),
+        ("harmful", WTI_FRONT_MONTH_CLOSE): _fcast("harmful", 100.0, now),
+    }
+    decision = ctrl.decide(now_utc=now, regime_label=_regime(now), recent_forecasts=recent)
+    rows = compute_lodo_grading_space(
+        conn=conn,
+        decision=decision,
+        recent_forecasts=recent,
+        print_value=80.0,
+        computed_ts_utc=now,
+    )
+    by_desk = {r.desk_name: r.contribution_metric for r in rows}
+    # original combined = 90; err² = (90-80)² = 100.
+    # Remove storage_curve: combined = 0.5*100 = 50; err² = (50-80)² = 900;
+    # delta = 900 - 100 = 800 (positive) ⇒ storage_curve was reducing error.
+    # Remove harmful: combined = 0.5*80 = 40; err² = (40-80)² = 1600;
+    # delta = 1600 - 100 = 1500 (positive) ⇒ harmful was ALSO reducing
+    # error by this particular metric, because the weight cage pulls both
+    # desks below the Print equally. This demonstrates a subtle behaviour:
+    # harmful-by-sign and harmful-by-grading-metric can diverge under
+    # constant-weight LODO without renormalisation.
+    assert by_desk["storage_curve"] == pytest.approx(800.0)
+    assert by_desk["harmful"] == pytest.approx(1500.0)
+    assert all(r.metric_name == LODO_METRIC_SQUARED_ERROR_DELTA for r in rows)
+
+
+def test_grading_space_lodo_desk_with_exact_match_reduces_error(conn):
+    """When the Controller already hits the Print exactly, removing any
+    desk should ONLY increase error; all deltas are positive."""
+    boot = datetime(2026, 4, 16, 9, 0, 0, tzinfo=UTC)
+    now = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+    seed_cold_start(
+        conn,
+        desks=[
+            ("a", WTI_FRONT_MONTH_CLOSE),
+            ("b", WTI_FRONT_MONTH_CLOSE),
+        ],
+        regime_ids=["regime_boot"],
+        boot_ts=boot,
+        default_cold_start_limit=1000.0,
+    )
+    ctrl = Controller(conn=conn)
+    # Both forecast 80; combined = 80; exact match against print = 80.
+    recent = {
+        ("a", WTI_FRONT_MONTH_CLOSE): _fcast("a", 80.0, now),
+        ("b", WTI_FRONT_MONTH_CLOSE): _fcast("b", 80.0, now),
+    }
+    decision = ctrl.decide(now_utc=now, regime_label=_regime(now), recent_forecasts=recent)
+    rows = compute_lodo_grading_space(
+        conn=conn,
+        decision=decision,
+        recent_forecasts=recent,
+        print_value=80.0,
+        computed_ts_utc=now,
+    )
+    by_desk = {r.desk_name: r.contribution_metric for r in rows}
+    # original err² = 0; removing either ⇒ combined = 40; err² = 1600;
+    # delta = 1600 (positive, large) for each.
+    assert by_desk["a"] == pytest.approx(1600.0)
+    assert by_desk["b"] == pytest.approx(1600.0)
+
+
+def test_grading_space_lodo_stale_desk_delta_zero(conn):
+    """A stale forecast never contributed ⇒ LODO delta = 0 (removing a
+    non-contributor changes nothing)."""
+    boot = datetime(2026, 4, 16, 9, 0, 0, tzinfo=UTC)
+    now = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+    seed_cold_start(
+        conn,
+        desks=[
+            ("a", WTI_FRONT_MONTH_CLOSE),
+            ("stale", WTI_FRONT_MONTH_CLOSE),
+        ],
+        regime_ids=["regime_boot"],
+        boot_ts=boot,
+        default_cold_start_limit=1000.0,
+    )
+    ctrl = Controller(conn=conn)
+    recent = {
+        ("a", WTI_FRONT_MONTH_CLOSE): _fcast("a", 80.0, now),
+        ("stale", WTI_FRONT_MONTH_CLOSE): _fcast("stale", 1e6, now, stale=True),
+    }
+    decision = ctrl.decide(now_utc=now, regime_label=_regime(now), recent_forecasts=recent)
+    rows = compute_lodo_grading_space(
+        conn=conn,
+        decision=decision,
+        recent_forecasts=recent,
+        print_value=80.0,
+        computed_ts_utc=now,
+    )
+    by_desk = {r.desk_name: r.contribution_metric for r in rows}
+    assert by_desk["stale"] == pytest.approx(0.0)
+
+
+def test_grading_space_lodo_detects_weight_mutation(conn):
+    """Same precondition guard as signal-space LODO."""
+    boot = datetime(2026, 4, 16, 9, 0, 0, tzinfo=UTC)
+    now = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+    seed_cold_start(
+        conn,
+        desks=[("a", WTI_FRONT_MONTH_CLOSE)],
+        regime_ids=["regime_boot"],
+        boot_ts=boot,
+        default_cold_start_limit=1000.0,
+    )
+    ctrl = Controller(conn=conn)
+    recent = {("a", WTI_FRONT_MONTH_CLOSE): _fcast("a", 50.0, now)}
+    decision = ctrl.decide(now_utc=now, regime_label=_regime(now), recent_forecasts=recent)
+    later = datetime(2026, 4, 16, 11, 0, 0, tzinfo=UTC)
+    insert_signal_weight(
+        conn,
+        SignalWeight(
+            weight_id="tamper-2",
+            regime_id="regime_boot",
+            desk_name="a",
+            target_variable=WTI_FRONT_MONTH_CLOSE,
+            weight=10.0,
+            promotion_ts_utc=later,
+            validation_artefact="rollback:test",
+        ),
+    )
+    with pytest.raises(RuntimeError, match="precondition violated"):
+        compute_lodo_grading_space(
+            conn=conn,
+            decision=decision,
+            recent_forecasts=recent,
+            print_value=50.0,
             computed_ts_utc=later,
         )
