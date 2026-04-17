@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.pyre/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.claude/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Project data (see spec §3.2 — local DuckDB / snapshots / models never checked in)
+data/
+!data/.gitkeep
+models/
+!models/.gitkeep
+artifacts/
+!artifacts/.gitkeep
+*.duckdb
+*.duckdb.wal
+*.npz
+*.parquet
+*.pkl
+
+# Secrets (should never be committed regardless)
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Replay caches and input snapshots (use DVC / Git LFS per spec §3.2)
+snapshots/
+dvc.lock
+.dvc/cache/
+
+# MLflow / W&B local runs
+mlruns/
+wandb/

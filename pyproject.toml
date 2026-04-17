@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "multi-desk-trading"
+version = "0.1.0"
+description = "Multi-desk, agent-led coordination architecture for systematic trading research."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Henri Rapson" }]
+requires-python = ">=3.11"
+dependencies = [
+    # Contracts and validation
+    "pydantic>=2.7",
+    # Persistence
+    "duckdb>=1.0",
+    # Data
+    "numpy>=1.26",
+    "pandas>=2.2",
+    # Scheduling (Phase 1: cron + Python; Prefect added when needed)
+    # "prefect>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+research-loop = [
+    # LLM tooling for the two-tier routing (spec §6.4)
+    "anthropic",
+    "openai",
+    # Local quantised inference
+    # "mlx-lm",     # Apple Silicon
+    # "llama-cpp-python",
+]
+models = [
+    # Classical specialists
+    "catboost",
+    "pymc>=5",
+    # TSFMs (installed per-desk on demand; listed here for reference)
+    # "chronos-forecasting",
+    # "uni2ts",      # MOIRAI-2
+    # "tabpfn",
+]
+
+[project.urls]
+Homepage = "https://github.com/hrapson-spec/multi-desk-trading"
+Spec = "https://github.com/hrapson-spec/multi-desk-trading/blob/main/docs/architecture_spec_v1.md"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
