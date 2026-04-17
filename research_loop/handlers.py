@@ -9,16 +9,23 @@ v0.1 ships one handler:
   produced_artefact. Gate-failure, regime-transition, and data-
   ingestion-failure handlers follow in later commits.
 
+v0.2 upgrades:
+  gate_failure_handler — auto-retires (regime, desk) when
+    failure_mode starts with "harmful:" (§7.2).
+  regime_transition_handler — triggers a Shapley-proportional weight
+    refresh for the to_regime when ≥min_decisions of historical
+    evidence exist for it (§8.3).
+
 Design guardrail: handlers are pure w.r.t. their inputs except for
-explicit DB writes (new AttributionShapley rows). No filesystem
-writes, no network, no LLM calls in v0.1 — those live in later
+explicit DB writes (new AttributionShapley / SignalWeight rows). No
+filesystem writes, no network, no LLM calls — those live in later
 layers per §6.4 routing discipline.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import duckdb
 
@@ -26,7 +33,12 @@ from attribution import compute_shapley_signal_space
 from contracts.v1 import Decision, Forecast, Provenance, ResearchLoopEvent
 
 from .dispatcher import HandlerResult
+from .promotion import propose_and_promote_from_shapley
 from .remediation import is_harmful, retire_desk_for_regime
+
+REGIME_TRANSITION_ARTEFACT_V02 = "auto:regime_transition_shapley_v0.2"
+_DEFAULT_LOOKBACK_SECONDS = 30 * 24 * 3600
+_DEFAULT_MIN_DECISIONS = 5
 
 
 def _decisions_in_window(
@@ -34,17 +46,31 @@ def _decisions_in_window(
     *,
     start_ts: datetime,
     end_ts: datetime,
+    regime_id: str | None = None,
 ) -> list[Decision]:
-    rows = conn.execute(
-        """
-        SELECT decision_id, emission_ts_utc, regime_id, combined_signal,
-               position_size, input_forecast_ids, provenance
-        FROM decisions
-        WHERE emission_ts_utc >= ? AND emission_ts_utc <= ?
-        ORDER BY emission_ts_utc, decision_id
-        """,
-        [start_ts, end_ts],
-    ).fetchall()
+    if regime_id is None:
+        rows = conn.execute(
+            """
+            SELECT decision_id, emission_ts_utc, regime_id, combined_signal,
+                   position_size, input_forecast_ids, provenance
+            FROM decisions
+            WHERE emission_ts_utc >= ? AND emission_ts_utc <= ?
+            ORDER BY emission_ts_utc, decision_id
+            """,
+            [start_ts, end_ts],
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT decision_id, emission_ts_utc, regime_id, combined_signal,
+                   position_size, input_forecast_ids, provenance
+            FROM decisions
+            WHERE emission_ts_utc >= ? AND emission_ts_utc <= ?
+              AND regime_id = ?
+            ORDER BY emission_ts_utc, decision_id
+            """,
+            [start_ts, end_ts, regime_id],
+        ).fetchall()
     out: list[Decision] = []
     for r in rows:
         out.append(
@@ -205,34 +231,103 @@ def gate_failure_handler(
 def regime_transition_handler(
     conn: duckdb.DuckDBPyConnection, event: ResearchLoopEvent
 ) -> HandlerResult:
-    """Log a regime transition (§6.2) — proposing a weight-promotion
-    refresh is v0.2 work. Payload contract:
+    """Trigger a Shapley-proportional weight refresh on regime transition
+    (§6.2, §8.3).
 
+    v0.2 upgrade: when ≥`min_decisions` historical decisions exist for
+    the to_regime within the lookback window, the handler runs a
+    Shapley rollup over those decisions and invokes
+    `propose_and_promote_from_shapley` to write a fresh SignalWeight
+    bundle for the to_regime. Controller picks up the new weights on
+    the next decision via the (promotion_ts_utc DESC, weight_id DESC)
+    tie-break. If history is insufficient, the handler logs the
+    transition without mutating state (fail-safe).
+
+    Payload contract:
       - from_regime: str
       - to_regime: str
       - probability: float (>= 0.7 per §6.2 default threshold)
+      - lookback_window_s: float (optional, default 30 days) — seconds
+        back from event.triggered_at_utc over which to gather history.
+      - min_decisions: int (optional, default 5) — minimum historical
+        to_regime decisions required to trigger a refresh.
+
+    Refresh semantics match §8.3 Shapley-monotone path: candidate
+    weights are |Shapley|-proportional, normalised across desks, with
+    zero-|Shapley| desks falling to weight 0. Capability-claim debit:
+    v0.2 omits the held-out margin check — see promotion.py.
     """
     if event.event_type != "regime_transition":
         raise ValueError(f"regime_transition_handler on wrong event: {event.event_type!r}")
-    _ = conn
     required = {"from_regime", "to_regime", "probability"}
     missing = required - set(event.payload.keys())
     if missing:
         return HandlerResult(
             artefact=json.dumps({"error": f"missing payload keys: {sorted(missing)}"}),
         )
+
+    from_regime = event.payload["from_regime"]
+    to_regime = event.payload["to_regime"]
+    probability = event.payload["probability"]
+    lookback_s = float(event.payload.get("lookback_window_s", _DEFAULT_LOOKBACK_SECONDS))
+    min_decisions = int(event.payload.get("min_decisions", _DEFAULT_MIN_DECISIONS))
+
+    end_ts = event.triggered_at_utc
+    start_ts = end_ts - timedelta(seconds=lookback_s)
+    decisions = _decisions_in_window(
+        conn, start_ts=start_ts, end_ts=end_ts, regime_id=to_regime
+    )
+
+    action: str
+    refresh_detail: dict[str, object] | None = None
+
+    if len(decisions) < min_decisions:
+        action = "insufficient_history_for_refresh"
+        refresh_detail = {
+            "n_decisions": len(decisions),
+            "min_required": min_decisions,
+            "to_regime": to_regime,
+            "lookback_window_s": lookback_s,
+        }
+    else:
+        recent_by_decision = _forecasts_by_decision(conn, decisions)
+        shapley_rows = compute_shapley_signal_space(
+            conn=conn,
+            decisions=decisions,
+            recent_forecasts_by_decision=recent_by_decision,
+            review_ts_utc=end_ts,
+        )
+        promoted = propose_and_promote_from_shapley(
+            conn=conn,
+            regime_id=to_regime,
+            shapley_rows=shapley_rows,
+            new_promotion_ts_utc=end_ts,
+            validation_artefact=REGIME_TRANSITION_ARTEFACT_V02,
+        )
+        action = "refreshed_from_shapley"
+        refresh_detail = {
+            "n_decisions": len(decisions),
+            "n_desks_promoted": len(promoted),
+            "validation_artefact": REGIME_TRANSITION_ARTEFACT_V02,
+            "shapley": sorted(
+                [{"desk": r.desk_name, "value": r.shapley_value} for r in shapley_rows],
+                key=lambda x: str(x["desk"]),
+            ),
+        }
+
     artefact = json.dumps(
         {
-            "handler": "regime_transition_v0.1",
-            "from": event.payload["from_regime"],
-            "to": event.payload["to_regime"],
-            "probability": event.payload["probability"],
-            "action": "logged_no_weight_refresh",  # v0.2 will trigger refresh
+            "handler": "regime_transition_v0.2",
+            "from": from_regime,
+            "to": to_regime,
+            "probability": probability,
+            "action": action,
+            "refresh_detail": refresh_detail,
         }
     )
     return HandlerResult(
         artefact=artefact,
-        notes=(f"regime transition {event.payload['from_regime']} → {event.payload['to_regime']}"),
+        notes=f"regime transition {from_regime} → {to_regime} {action}",
     )
 
 

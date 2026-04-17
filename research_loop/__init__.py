@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from .dispatcher import Dispatcher, HandlerFn, HandlerResult
 from .handlers import (
+    REGIME_TRANSITION_ARTEFACT_V02,
     data_ingestion_failure_handler,
     gate_failure_handler,
     periodic_weekly_handler,
@@ -55,6 +56,7 @@ __all__ = [
     "PROMOTION_ARTEFACT_SHAPLEY_V02",
     "PROMOTION_ARTEFACT_VALIDATED_V03",
     "PerTypeLatency",
+    "REGIME_TRANSITION_ARTEFACT_V02",
     "RETIRE_ARTEFACT_PREFIX",
     "RoutingResult",
     "ValidationResult",
