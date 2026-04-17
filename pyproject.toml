@@ -59,7 +59,7 @@ Homepage = "https://github.com/hrapson-spec/multi-desk-trading"
 Spec = "https://github.com/hrapson-spec/multi-desk-trading/blob/main/docs/architecture_spec_v1.md"
 
 [tool.hatch.build.targets.wheel]
-packages = ["attribution", "bus", "contracts", "controller", "desks", "eval", "grading", "persistence", "provenance", "scheduler"]
+packages = ["attribution", "bus", "contracts", "controller", "desks", "eval", "grading", "persistence", "provenance", "research_loop", "scheduler"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "persistence/schema.sql" = "persistence/schema.sql"
@@ -89,7 +89,7 @@ python_files = ["test_*.py"]
 python_version = "3.11"
 
 [[tool.mypy.overrides]]
-module = ["attribution.*", "contracts.*", "bus.*", "controller.*"]
+module = ["attribution.*", "contracts.*", "bus.*", "controller.*", "research_loop.*"]
 strict = true
 
 [[tool.mypy.overrides]]
