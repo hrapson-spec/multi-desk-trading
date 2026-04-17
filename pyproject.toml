@@ -27,6 +27,7 @@ dependencies = [
     "croniter>=2.0",
     # Scheduling orchestrator (Phase 1: cron + Python; Prefect added when needed)
     # "prefect>=3.0",
+    "hmmlearn>=0.3.3",
 ]
 
 [project.optional-dependencies]

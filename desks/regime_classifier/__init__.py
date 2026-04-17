@@ -11,7 +11,11 @@ A real HMM/HDP-HMM is a v0.2 follow-up.
 
 from __future__ import annotations
 
-from .classical import GroundTruthRegimeClassifier
+from .classical import GroundTruthRegimeClassifier, HMMRegimeClassifier
 from .desk import RegimeClassifierStub
 
-__all__ = ["GroundTruthRegimeClassifier", "RegimeClassifierStub"]
+__all__ = [
+    "GroundTruthRegimeClassifier",
+    "HMMRegimeClassifier",
+    "RegimeClassifierStub",
+]
