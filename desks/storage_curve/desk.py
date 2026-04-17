@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -27,6 +28,9 @@ from contracts.v1 import (
 from desks.base import StubDesk
 
 from .classical import ClassicalStorageCurveModel
+
+if TYPE_CHECKING:
+    from sim.observations import ObservationChannels
 
 
 class StorageCurveDesk(StubDesk):
@@ -102,3 +106,22 @@ class StorageCurveDesk(StubDesk):
         if pred is None:
             return None
         return pred[1]
+
+    # ------------------------------------------------------------------
+    # Observation-driven emission (Phase A shared-latent simulator)
+    # ------------------------------------------------------------------
+    #
+    # Phase A tests use ObservationChannels as the unified input surface
+    # for every desk. Storage & Curve's natural channel is the noisy
+    # market_price + balance observation; the existing classical model is
+    # price-only, so we feed it the market_price stream directly.
+
+    def forecast_from_observation(
+        self, channels: ObservationChannels, i: int, now_utc: datetime
+    ) -> Forecast:
+        return self.forecast_from_prices(np.asarray(channels.market_price), i, now_utc)
+
+    def directional_score_from_observation(
+        self, channels: ObservationChannels, i: int
+    ) -> float | None:
+        return self.directional_score(np.asarray(channels.market_price), i)
