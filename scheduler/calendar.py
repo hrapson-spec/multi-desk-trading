@@ -20,6 +20,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -27,6 +28,9 @@ from croniter import croniter
 
 from bus import Bus
 from contracts.v1 import ResearchLoopEvent
+
+if TYPE_CHECKING:
+    import duckdb
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CALENDAR = REPO_ROOT / "config" / "release_calendar.yaml"
@@ -188,6 +192,86 @@ class Scheduler:
             ):
                 continue
             emitted.append(self.emit_ingestion_failure(ev.event_id, scheduled_ts, now_utc))
+        return emitted
+
+    def check_latency_drift(
+        self,
+        conn: duckdb.DuckDBPyConnection,
+        now_utc: datetime,
+        actual_prints_per_feed: dict[str, list[datetime]],
+    ) -> list[ResearchLoopEvent]:
+        """Page-Hinkley early-warning path (spec §14.5 v1.7, Layer 3).
+
+        For every scheduled firing in the lookback, compute observed
+        latency (Print-arrival − scheduled_ts if matched within tolerance,
+        else `now − scheduled_ts` — still pending). Feeds the stream
+        through a per-feed Page-Hinkley detector; when the detector
+        newly trips AND no feed_incidents row is currently open for
+        that feed, emits a preemptive `data_ingestion_failure` with
+        `detected_by='page_hinkley'`.
+
+        Complementary to `check_ingestion_misses` (tolerance-window path):
+          - scheduler: detects step-change misses (deadline passed, no
+            Print).
+          - page_hinkley: detects slow drift before the deadline.
+          - Both paths are belt-and-braces; handler idempotency ensures
+            at most one open feed_incident per feed at any time.
+
+        Accepts `conn` as an explicit parameter (not on Scheduler state)
+        so existing scheduler callers are unaffected.
+        """
+        from persistence import get_open_feed_incidents
+        from research_loop.feed_latency_monitor import observe_latency
+
+        emitted: list[ResearchLoopEvent] = []
+        firings = self.firings_between(now_utc - timedelta(days=14), now_utc)
+        for ev, scheduled_ts in firings:
+            feed = ev.event_id
+            ds = self.data_sources.get(feed)
+            tolerance = timedelta(minutes=ds.tolerance_minutes if ds is not None else 120)
+            prints_for_feed = actual_prints_per_feed.get(feed, [])
+            # Choose an arrival time to compare against scheduled_ts. If
+            # any Print landed within the tolerance window, use the
+            # nearest; otherwise treat the feed as still pending and
+            # use `now_utc` (clipped to non-negative).
+            matched = [
+                p
+                for p in prints_for_feed
+                if abs((p - scheduled_ts).total_seconds()) <= tolerance.total_seconds()
+            ]
+            if matched:
+                arrival = min(matched, key=lambda p: abs((p - scheduled_ts).total_seconds()))
+            else:
+                arrival = now_utc
+            latency_seconds = max(0.0, (arrival - scheduled_ts).total_seconds())
+            _, newly_tripped = observe_latency(
+                conn,
+                feed_name=feed,
+                latency_seconds=latency_seconds,
+                now_utc=now_utc,
+            )
+            if not newly_tripped:
+                continue
+            if get_open_feed_incidents(conn, feed_name=feed):
+                # An incident is already open — scheduler path beat us
+                # to it. Don't duplicate-emit; the PH trip is recorded
+                # in feed_latency_state for diagnostic purposes.
+                continue
+            # Emit a preemptive failure event tagged page_hinkley.
+            event = self.emit_ingestion_failure(feed, scheduled_ts, now_utc)
+            # Copy-override the detected_by key so the handler records
+            # the source correctly.
+            new_payload = dict(event.payload)
+            new_payload["detected_by"] = "page_hinkley"
+            emitted.append(
+                ResearchLoopEvent(
+                    event_id=event.event_id,
+                    event_type=event.event_type,
+                    triggered_at_utc=event.triggered_at_utc,
+                    priority=event.priority,
+                    payload=new_payload,
+                )
+            )
         return emitted
 
 

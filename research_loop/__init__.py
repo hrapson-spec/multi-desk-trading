@@ -20,6 +20,17 @@ weight-promotion margin validation.
 from __future__ import annotations
 
 from .dispatcher import Dispatcher, HandlerFn, HandlerResult
+from .feed_latency_monitor import (
+    PAGE_HINKLEY_DELTA,
+    PAGE_HINKLEY_THRESHOLD,
+    PageHinkleyState,
+    initial_state,
+    load_or_initial,
+    observe_latency,
+    persist,
+    reset_for_feed,
+    update_page_hinkley,
+)
 from .feed_reliability import (
     FeedReliabilityStats,
     active_target_variables_for_desk,
@@ -71,8 +82,11 @@ __all__ = [
     "HandlerFn",
     "HandlerResult",
     "LatencyReport",
+    "PAGE_HINKLEY_DELTA",
+    "PAGE_HINKLEY_THRESHOLD",
     "PROMOTION_ARTEFACT_SHAPLEY_V02",
     "PROMOTION_ARTEFACT_VALIDATED_V03",
+    "PageHinkleyState",
     "PerTypeLatency",
     "REGIME_TRANSITION_ARTEFACT_V02",
     "REINSTATE_PREFIX",
@@ -89,16 +103,22 @@ __all__ = [
     "feeds_eligible_for_reinstatement",
     "feeds_meeting_retirement_criteria",
     "gate_failure_handler",
+    "initial_state",
     "is_harmful",
+    "load_or_initial",
+    "observe_latency",
     "periodic_weekly_handler",
+    "persist",
     "promote_weights",
     "propose_and_promote_from_shapley",
     "propose_validate_and_promote",
     "propose_weights_from_shapley",
     "regime_transition_handler",
     "reinstate_desk_direct",
+    "reset_for_feed",
     "retire_desk_for_all_regimes",
     "retire_desk_for_regime",
     "retired_desks_for_feed",
+    "update_page_hinkley",
     "validate_candidate_vs_current",
 ]
