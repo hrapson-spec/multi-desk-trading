@@ -205,3 +205,37 @@ CREATE TABLE IF NOT EXISTS soak_incidents (
 );
 CREATE INDEX IF NOT EXISTS idx_soak_incidents_ts
     ON soak_incidents (detected_ts_utc);
+
+-- ---------------------------------------------------------------------------
+-- feed_incidents: open/closed incidents for upstream data-feed outages
+-- (spec §14.5 staleness-propagation invariant, §7.2 feed-unreliable retire).
+-- closed_ts_utc IS NULL ⇒ open. Index is the hot-path query for the
+-- desk-side _staleness_from_feeds check.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS feed_incidents (
+    feed_incident_id     VARCHAR PRIMARY KEY,
+    feed_name            VARCHAR NOT NULL,
+    opened_ts_utc        TIMESTAMPTZ NOT NULL,
+    closed_ts_utc        TIMESTAMPTZ,
+    affected_desks       JSON NOT NULL,
+    detected_by          VARCHAR NOT NULL
+        CHECK (detected_by IN ('scheduler', 'page_hinkley', 'manual')),
+    resolution_artefact  VARCHAR,
+    opening_event_id     VARCHAR
+);
+CREATE INDEX IF NOT EXISTS idx_feed_incidents_open
+    ON feed_incidents (feed_name, closed_ts_utc);
+
+-- ---------------------------------------------------------------------------
+-- feed_latency_state: per-feed Page-Hinkley detector state persisted across
+-- process restarts (§14.5 v1.7). Upsert on every scheduler firing; tripped
+-- carries forward until a feed_incidents close resets it to FALSE.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS feed_latency_state (
+    feed_name             VARCHAR PRIMARY KEY,
+    cumulative_sum        DOUBLE NOT NULL,
+    min_cumulative        DOUBLE NOT NULL,
+    n_observations        BIGINT NOT NULL,
+    last_update_ts_utc    TIMESTAMPTZ,
+    tripped               BOOLEAN NOT NULL
+);

@@ -323,6 +323,204 @@ def insert_research_loop_event(conn: duckdb.DuckDBPyConnection, e: ResearchLoopE
 
 
 # ---------------------------------------------------------------------------
+# Feed incidents (spec §14.5, §7.2)
+# ---------------------------------------------------------------------------
+
+
+def open_feed_incident(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    feed_name: str,
+    opened_ts_utc: datetime,
+    affected_desks: list[str],
+    detected_by: str,
+    opening_event_id: str | None = None,
+) -> str:
+    """Open an incident row for a broken feed. Idempotent: if an open
+    incident already exists for `feed_name` (closed_ts_utc IS NULL),
+    return its existing id without writing a duplicate."""
+    if opened_ts_utc.tzinfo is None:
+        raise ValueError("opened_ts_utc must be timezone-aware (spec §14.8)")
+    existing = conn.execute(
+        """
+        SELECT feed_incident_id FROM feed_incidents
+        WHERE feed_name = ? AND closed_ts_utc IS NULL
+        ORDER BY opened_ts_utc DESC
+        LIMIT 1
+        """,
+        [feed_name],
+    ).fetchone()
+    if existing is not None:
+        return str(existing[0])
+    feed_incident_id = str(uuid.uuid4())
+    conn.execute(
+        """
+        INSERT INTO feed_incidents (
+            feed_incident_id, feed_name, opened_ts_utc, closed_ts_utc,
+            affected_desks, detected_by, resolution_artefact, opening_event_id
+        ) VALUES (?, ?, ?, NULL, ?, ?, NULL, ?)
+        """,
+        [
+            feed_incident_id,
+            feed_name,
+            opened_ts_utc,
+            _dumps(affected_desks),
+            detected_by,
+            opening_event_id,
+        ],
+    )
+    return feed_incident_id
+
+
+def close_feed_incident(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    feed_incident_id: str,
+    closed_ts_utc: datetime,
+    resolution_artefact: str,
+) -> None:
+    """Mark an incident closed. No-op if already closed — callers may
+    call this repeatedly under retry without risk."""
+    if closed_ts_utc.tzinfo is None:
+        raise ValueError("closed_ts_utc must be timezone-aware (spec §14.8)")
+    conn.execute(
+        """
+        UPDATE feed_incidents
+        SET closed_ts_utc = ?, resolution_artefact = ?
+        WHERE feed_incident_id = ? AND closed_ts_utc IS NULL
+        """,
+        [closed_ts_utc, resolution_artefact, feed_incident_id],
+    )
+
+
+def get_open_feed_incidents(
+    conn: duckdb.DuckDBPyConnection,
+    feed_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """All currently-open incidents; optionally filtered to one feed."""
+    if feed_name is None:
+        rows = conn.execute(
+            """
+            SELECT feed_incident_id, feed_name, opened_ts_utc, affected_desks,
+                   detected_by, opening_event_id
+            FROM feed_incidents
+            WHERE closed_ts_utc IS NULL
+            ORDER BY opened_ts_utc
+            """
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT feed_incident_id, feed_name, opened_ts_utc, affected_desks,
+                   detected_by, opening_event_id
+            FROM feed_incidents
+            WHERE closed_ts_utc IS NULL AND feed_name = ?
+            ORDER BY opened_ts_utc
+            """,
+            [feed_name],
+        ).fetchall()
+    return [
+        {
+            "feed_incident_id": r[0],
+            "feed_name": r[1],
+            "opened_ts_utc": r[2],
+            "affected_desks": json.loads(r[3]) if isinstance(r[3], str) else r[3],
+            "detected_by": r[4],
+            "opening_event_id": r[5],
+        }
+        for r in rows
+    ]
+
+
+def count_feed_incidents_in_window(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    feed_name: str,
+    start_ts: datetime,
+    end_ts: datetime,
+) -> int:
+    """Count incidents (open or closed) whose opened_ts_utc falls in
+    [start_ts, end_ts]. Used by rolling-rate rules in Layer 2."""
+    if start_ts.tzinfo is None or end_ts.tzinfo is None:
+        raise ValueError("window bounds must be timezone-aware")
+    row = conn.execute(
+        """
+        SELECT count(*) FROM feed_incidents
+        WHERE feed_name = ?
+          AND opened_ts_utc >= ?
+          AND opened_ts_utc <= ?
+        """,
+        [feed_name, start_ts, end_ts],
+    ).fetchone()
+    return int(row[0]) if row is not None else 0
+
+
+# ---------------------------------------------------------------------------
+# Feed latency state (Page-Hinkley, spec §14.5 v1.7)
+# ---------------------------------------------------------------------------
+
+
+def upsert_feed_latency_state(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    feed_name: str,
+    cumulative_sum: float,
+    min_cumulative: float,
+    n_observations: int,
+    last_update_ts_utc: datetime | None,
+    tripped: bool,
+) -> None:
+    if last_update_ts_utc is not None and last_update_ts_utc.tzinfo is None:
+        raise ValueError("last_update_ts_utc must be timezone-aware")
+    conn.execute(
+        """
+        INSERT INTO feed_latency_state (
+            feed_name, cumulative_sum, min_cumulative, n_observations,
+            last_update_ts_utc, tripped
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (feed_name) DO UPDATE SET
+            cumulative_sum = EXCLUDED.cumulative_sum,
+            min_cumulative = EXCLUDED.min_cumulative,
+            n_observations = EXCLUDED.n_observations,
+            last_update_ts_utc = EXCLUDED.last_update_ts_utc,
+            tripped = EXCLUDED.tripped
+        """,
+        [
+            feed_name,
+            cumulative_sum,
+            min_cumulative,
+            n_observations,
+            last_update_ts_utc,
+            tripped,
+        ],
+    )
+
+
+def get_feed_latency_state(
+    conn: duckdb.DuckDBPyConnection, feed_name: str
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        SELECT feed_name, cumulative_sum, min_cumulative, n_observations,
+               last_update_ts_utc, tripped
+        FROM feed_latency_state
+        WHERE feed_name = ?
+        """,
+        [feed_name],
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "feed_name": row[0],
+        "cumulative_sum": row[1],
+        "min_cumulative": row[2],
+        "n_observations": row[3],
+        "last_update_ts_utc": row[4],
+        "tripped": row[5],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Reads
 # ---------------------------------------------------------------------------
 

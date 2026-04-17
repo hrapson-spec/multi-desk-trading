@@ -8,11 +8,15 @@ from __future__ import annotations
 
 from .db import (
     DEFAULT_DB_PATH,
+    close_feed_incident,
     connect,
+    count_feed_incidents_in_window,
     count_rows,
+    get_feed_latency_state,
     get_latest_controller_params,
     get_latest_regime_label,
     get_latest_signal_weights,
+    get_open_feed_incidents,
     init_db,
     insert_attribution_lodo,
     insert_attribution_shapley,
@@ -27,16 +31,22 @@ from .db import (
     insert_soak_incident,
     insert_soak_resource_sample,
     match_candidate_prints,
+    open_feed_incident,
     replay_forecasts,
+    upsert_feed_latency_state,
 )
 
 __all__ = [
     "DEFAULT_DB_PATH",
+    "close_feed_incident",
     "connect",
+    "count_feed_incidents_in_window",
     "count_rows",
+    "get_feed_latency_state",
     "get_latest_controller_params",
     "get_latest_regime_label",
     "get_latest_signal_weights",
+    "get_open_feed_incidents",
     "init_db",
     "insert_attribution_lodo",
     "insert_attribution_shapley",
@@ -51,5 +61,7 @@ __all__ = [
     "insert_soak_incident",
     "insert_soak_resource_sample",
     "match_candidate_prints",
+    "open_feed_incident",
     "replay_forecasts",
+    "upsert_feed_latency_state",
 ]
