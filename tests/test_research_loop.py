@@ -430,7 +430,9 @@ def test_regime_transition_handler_logs_structured_artefact(conn):
     assert artefact["refresh_detail"]["n_decisions"] == 0
 
 
-def test_data_ingestion_failure_handler_logs_structured_artefact(conn):
+def test_data_ingestion_failure_handler_opens_incident(conn):
+    """v0.2: handler opens a feed_incidents row and returns the id in
+    the artefact JSON."""
     ts = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
     event = ResearchLoopEvent(
         event_id="di-1",
@@ -438,16 +440,59 @@ def test_data_ingestion_failure_handler_logs_structured_artefact(conn):
         triggered_at_utc=ts,
         priority=1,
         payload={
-            "feed": "eia_wpsr",
+            "feed_name": "eia_wpsr",
             "scheduled_release_ts_utc": "2026-04-16T14:30:00+00:00",
             "affected_desks": ["storage_curve", "supply"],
         },
     )
     result = data_ingestion_failure_handler(conn, event)
     artefact = json.loads(result.artefact)
-    assert artefact["feed"] == "eia_wpsr"
+    assert artefact["handler"] == "data_ingestion_failure_v0.2"
+    assert artefact["feed_name"] == "eia_wpsr"
     assert artefact["affected_desks"] == ["storage_curve", "supply"]
-    assert artefact["action"] == "logged_pending_fallback_check"
+    assert artefact["action"] == "feed_incident_opened"
+    assert artefact["feed_incident_id"]
+    assert artefact["detected_by"] == "scheduler"
+
+    # The DB row is visible via get_open_feed_incidents.
+    from persistence import get_open_feed_incidents
+
+    rows = get_open_feed_incidents(conn, "eia_wpsr")
+    assert len(rows) == 1
+    assert rows[0]["feed_incident_id"] == artefact["feed_incident_id"]
+    assert rows[0]["opening_event_id"] == "di-1"
+
+
+def test_data_ingestion_failure_handler_idempotent_on_duplicate(conn):
+    """Duplicate fire for the same open feed returns the same
+    feed_incident_id and does NOT write a duplicate row."""
+    ts = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+    base_payload = {
+        "feed_name": "eia_wpsr",
+        "scheduled_release_ts_utc": "2026-04-16T14:30:00+00:00",
+        "affected_desks": ["supply"],
+    }
+    event1 = ResearchLoopEvent(
+        event_id="di-1",
+        event_type="data_ingestion_failure",
+        triggered_at_utc=ts,
+        priority=1,
+        payload=base_payload,
+    )
+    event2 = ResearchLoopEvent(
+        event_id="di-2",
+        event_type="data_ingestion_failure",
+        triggered_at_utc=ts,
+        priority=1,
+        payload=base_payload,
+    )
+    r1 = json.loads(data_ingestion_failure_handler(conn, event1).artefact)
+    r2 = json.loads(data_ingestion_failure_handler(conn, event2).artefact)
+    assert r1["feed_incident_id"] == r2["feed_incident_id"]
+    rows = conn.execute(
+        "SELECT count(*) FROM feed_incidents WHERE feed_name = ?", ["eia_wpsr"]
+    ).fetchone()
+    assert rows[0] == 1
 
 
 def test_dispatcher_handles_all_three_event_types_in_priority_order(conn):
@@ -469,7 +514,7 @@ def test_dispatcher_handles_all_three_event_types_in_priority_order(conn):
             triggered_at_utc=ts,
             priority=1,
             payload={
-                "feed": "cftc_cot",
+                "feed_name": "cftc_cot",
                 "scheduled_release_ts_utc": ts.isoformat(),
                 "affected_desks": ["storage_curve"],
             },

@@ -23,6 +23,8 @@ from desks.base import StubDesk
 from .classical import ClassicalGeopoliticsModel
 
 if TYPE_CHECKING:
+    import duckdb
+
     from sim.observations import ObservationChannels
 
 
@@ -31,6 +33,7 @@ class GeopoliticsDesk(StubDesk):
     spec_path: str = "desks/geopolitics/spec.md"
     event_id: str = "eia_wpsr"
     horizon_days: int = 7
+    feed_names: list[str] = ["opec_announcement"]
 
     def __init__(self, model: ClassicalGeopoliticsModel | None = None):
         self.model = model
@@ -48,7 +51,12 @@ class GeopoliticsDesk(StubDesk):
         )
 
     def forecast_from_observation(
-        self, channels: ObservationChannels, i: int, now_utc: datetime
+        self,
+        channels: ObservationChannels,
+        i: int,
+        now_utc: datetime,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
     ) -> Forecast:
         if self.model is None:
             return self._build_stub_forecast(now_utc)
@@ -62,6 +70,7 @@ class GeopoliticsDesk(StubDesk):
         if pred is None:
             return self._build_stub_forecast(now_utc)
         point, _score = pred
+        stale = conn is not None and self._staleness_from_feeds(conn)
         return Forecast(
             forecast_id=str(uuid.uuid4()),
             emission_ts_utc=now_utc,
@@ -73,7 +82,7 @@ class GeopoliticsDesk(StubDesk):
             point_estimate=point,
             uncertainty=UncertaintyInterval(level=0.8, lower=point - 5.0, upper=point + 5.0),
             directional_claim=DirectionalClaim(variable=self.target_variable, sign="positive"),
-            staleness=False,
+            staleness=stale,
             confidence=0.7,
             provenance=self._provenance_classical(),
         )

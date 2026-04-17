@@ -30,6 +30,8 @@ from desks.base import StubDesk
 from .classical import ClassicalStorageCurveModel
 
 if TYPE_CHECKING:
+    import duckdb
+
     from sim.observations import ObservationChannels
 
 
@@ -38,6 +40,7 @@ class StorageCurveDesk(StubDesk):
     spec_path: str = "desks/storage_curve/spec.md"
     event_id: str = "cftc_cot"
     horizon_days: int = 7
+    feed_names: list[str] = ["eia_wpsr", "cftc_cot"]
 
     def __init__(self, model: ClassicalStorageCurveModel | None = None):
         # StubDesk has no __init__; we introduce one to accept an optional
@@ -67,7 +70,14 @@ class StorageCurveDesk(StubDesk):
     # Price-driven emission (deepen-phase interface)
     # ------------------------------------------------------------------
 
-    def forecast_from_prices(self, prices: np.ndarray, i: int, now_utc: datetime) -> Forecast:
+    def forecast_from_prices(
+        self,
+        prices: np.ndarray,
+        i: int,
+        now_utc: datetime,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
+    ) -> Forecast:
         """Emit a Forecast using prices[:i] and the fitted classical model.
 
         Falls back to the stub Forecast when the model is absent or when the
@@ -79,6 +89,7 @@ class StorageCurveDesk(StubDesk):
         if pred is None:
             return self._build_stub_forecast(now_utc)
         point, _score = pred
+        stale = conn is not None and self._staleness_from_feeds(conn)
         return Forecast(
             forecast_id=str(uuid.uuid4()),
             emission_ts_utc=now_utc,
@@ -90,7 +101,7 @@ class StorageCurveDesk(StubDesk):
             point_estimate=point,
             uncertainty=UncertaintyInterval(level=0.8, lower=point - 5.0, upper=point + 5.0),
             directional_claim=DirectionalClaim(variable=self.target_variable, sign="positive"),
-            staleness=False,
+            staleness=stale,
             confidence=0.7,
             provenance=self._provenance_classical(),
         )
@@ -117,9 +128,14 @@ class StorageCurveDesk(StubDesk):
     # price-only, so we feed it the market_price stream directly.
 
     def forecast_from_observation(
-        self, channels: ObservationChannels, i: int, now_utc: datetime
+        self,
+        channels: ObservationChannels,
+        i: int,
+        now_utc: datetime,
+        *,
+        conn: duckdb.DuckDBPyConnection | None = None,
     ) -> Forecast:
-        return self.forecast_from_prices(np.asarray(channels.market_price), i, now_utc)
+        return self.forecast_from_prices(np.asarray(channels.market_price), i, now_utc, conn=conn)
 
     def directional_score_from_observation(
         self, channels: ObservationChannels, i: int

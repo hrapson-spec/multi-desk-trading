@@ -7,6 +7,13 @@ calibrated uncertainty wide enough to be non-skillful, directional claim
 Concrete stubs subclass StubDesk and set:
   name, spec_path, target_variable, event_id (for EventHorizon)
 
+Feed-staleness hook (spec §14.5 v1.7). Concrete desks override
+`feed_names` with the list of data_sources.yaml feeds they depend on;
+`_staleness_from_feeds(conn)` consults the `feed_incidents` registry
+and returns True if any of those feeds is currently in an open
+incident. Desks call this from `forecast_from_observation` and OR the
+result into `Forecast.staleness`.
+
 The DeskProtocol captures the interface convention from spec §5.1 as a
 runtime-checkable Protocol. Desks are not required to inherit from it,
 but may use it for static typing.
@@ -17,7 +24,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from contracts.target_variables import WTI_FRONT_MONTH_CLOSE
 from contracts.v1 import (
@@ -31,6 +38,9 @@ from contracts.v1 import (
     ResearchLoopEvent,
     UncertaintyInterval,
 )
+
+if TYPE_CHECKING:
+    import duckdb
 
 
 @runtime_checkable
@@ -80,6 +90,20 @@ class StubDesk:
     target_variable: str = WTI_FRONT_MONTH_CLOSE
     event_id: str = "eia_wpsr"
     horizon_days: int = 7
+    # Subclasses override with the feeds (data_sources.yaml feed_name
+    # values) this desk depends on; empty means "no feed-staleness
+    # checks apply" (base stub).
+    feed_names: list[str] = []
+
+    def _staleness_from_feeds(self, conn: duckdb.DuckDBPyConnection) -> bool:
+        """Return True if any feed in self.feed_names has an open
+        incident in the feed_incidents registry (§14.5). Desks OR this
+        into their Forecast.staleness field."""
+        if not self.feed_names:
+            return False
+        from persistence import get_open_feed_incidents
+
+        return any(get_open_feed_incidents(conn, feed_name=feed) for feed in self.feed_names)
 
     @property
     def emit_target_variables(self) -> list[str]:
@@ -159,6 +183,12 @@ class StubClassifier:
         ]
 
 
-# Re-exports
-_ = Print  # kept available for downstream desk code
-_ = Path
+# Re-exports — kept available for downstream desk code via `from desks.base import *`.
+__all__ = [
+    "ClassifierProtocol",
+    "DeskProtocol",
+    "Path",
+    "Print",
+    "StubClassifier",
+    "StubDesk",
+]

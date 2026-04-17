@@ -1,24 +1,33 @@
 # Data-source → desks mapping (spec §14.7 flagged dependency; v1.3 review item D).
 # Owning artefact for the `data_ingestion_failure` research-loop trigger payload.
-# The scheduler emits the trigger with `consumed_by` drawn from this file.
+# The scheduler emits the trigger with `affected_desks` drawn from this file
+# (v1.7: payload key renamed from `consumed_by` for handler alignment).
 #
 # Schema:
 #   feed_name: stable identifier (matches event_id when the feed IS the event).
 #   description: human-readable.
 #   tolerance_minutes: window past scheduled release before the trigger fires.
-#   consumed_by: list of desk_name values. Empty until desks register; Week 0
-#                seeds the file with empty lists so the scheduler can load it.
-#
-# Phase 1 seed entries mirror release_calendar.yaml.
+#   consumed_by: list of desk_name values. Populated v1.7; the handler resolves
+#                this to `affected_desks` in the outgoing event payload.
 
 data_sources:
 
   - feed_name: eia_wpsr
     description: "EIA Weekly Petroleum Status Report"
     tolerance_minutes: 120
-    consumed_by: []            # will include [storage_curve, supply, demand]
+    consumed_by: [storage_curve, supply, demand]
 
   - feed_name: cftc_cot
     description: "CFTC Commitments of Traders (disaggregated)"
     tolerance_minutes: 120
-    consumed_by: []            # will include [storage_curve]
+    consumed_by: [storage_curve]
+
+  - feed_name: fomc_statement
+    description: "FOMC rate-decision statement"
+    tolerance_minutes: 60
+    consumed_by: [macro]
+
+  - feed_name: opec_announcement
+    description: "OPEC ministerial meeting / production-quota announcement"
+    tolerance_minutes: 120
+    consumed_by: [geopolitics, supply]

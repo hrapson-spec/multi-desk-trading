@@ -140,13 +140,20 @@ class Scheduler:
         scheduled_release_ts: datetime,
         actual_wall_clock_ts: datetime,
     ) -> ResearchLoopEvent:
-        """Build (and, if a bus is attached, publish) a data_ingestion_failure event."""
+        """Build (and, if a bus is attached, publish) a data_ingestion_failure event.
+
+        Payload key alignment (v1.7): outbound key is `affected_desks`,
+        matching the handler contract. The underlying config key in
+        data_sources.yaml remains `consumed_by` — renaming in the
+        outbound payload keeps the wire contract stable under config
+        evolution.
+        """
         ds = self.data_sources.get(feed_name)
         payload: dict[str, object] = {
             "feed_name": feed_name,
             "scheduled_release_ts_utc": scheduled_release_ts.isoformat(),
             "actual_wall_clock_ts_utc": actual_wall_clock_ts.isoformat(),
-            "consumed_by": list(ds.consumed_by) if ds is not None else [],
+            "affected_desks": list(ds.consumed_by) if ds is not None else [],
         }
         event = ResearchLoopEvent(
             event_id=str(uuid.uuid4()),

@@ -274,9 +274,7 @@ def regime_transition_handler(
 
     end_ts = event.triggered_at_utc
     start_ts = end_ts - timedelta(seconds=lookback_s)
-    decisions = _decisions_in_window(
-        conn, start_ts=start_ts, end_ts=end_ts, regime_id=to_regime
-    )
+    decisions = _decisions_in_window(conn, start_ts=start_ts, end_ts=end_ts, regime_id=to_regime)
 
     action: str
     refresh_detail: dict[str, object] | None = None
@@ -334,37 +332,65 @@ def regime_transition_handler(
 def data_ingestion_failure_handler(
     conn: duckdb.DuckDBPyConnection, event: ResearchLoopEvent
 ) -> HandlerResult:
-    """Log a data-ingestion failure (§6.2, §14.5 data-quality invariant).
-    Remediation (mark affected desks stale, switch to fallback feed) is
-    v0.2 work. Payload contract:
+    """Open a feed incident on data-ingestion failure (§6.2, §14.5 v1.7).
 
-      - feed: str (name of the feed)
+    v0.2 upgrade: calls `open_feed_incident` on the registry. Desks'
+    `_staleness_from_feeds` checks (desks/base.py) read the registry
+    on Forecast emission and propagate `staleness=True`; the
+    Controller then drops those forecasts from combined_signal via
+    the existing `if f.staleness: continue` path. Idempotent —
+    duplicate fires (scheduler re-tick, restart) return the same
+    feed_incident_id.
+
+    Payload contract:
+      - feed_name: str — matches feed_name in config/data_sources.yaml
       - scheduled_release_ts_utc: ISO-8601 string
-      - affected_desks: list[str]
+      - affected_desks: list[str] — desks that consume this feed
+      - detected_by: str (optional, default 'scheduler') — one of
+        'scheduler' | 'page_hinkley' | 'manual'. Passed through to
+        the feed_incidents row for later provenance / RCA.
     """
     if event.event_type != "data_ingestion_failure":
         raise ValueError(f"data_ingestion_failure_handler on wrong event: {event.event_type!r}")
-    _ = conn
-    required = {"feed", "scheduled_release_ts_utc", "affected_desks"}
+    required = {"feed_name", "scheduled_release_ts_utc", "affected_desks"}
     missing = required - set(event.payload.keys())
     if missing:
         return HandlerResult(
             artefact=json.dumps({"error": f"missing payload keys: {sorted(missing)}"}),
         )
+
+    feed_name = str(event.payload["feed_name"])
+    affected_desks_raw = event.payload["affected_desks"]
+    affected_desks = [str(d) for d in affected_desks_raw] if affected_desks_raw else []
+    detected_by = str(event.payload.get("detected_by", "scheduler"))
+
+    from persistence import open_feed_incident
+
+    feed_incident_id = open_feed_incident(
+        conn,
+        feed_name=feed_name,
+        opened_ts_utc=event.triggered_at_utc,
+        affected_desks=affected_desks,
+        detected_by=detected_by,
+        opening_event_id=event.event_id,
+    )
+
     artefact = json.dumps(
         {
-            "handler": "data_ingestion_failure_v0.1",
-            "feed": event.payload["feed"],
+            "handler": "data_ingestion_failure_v0.2",
+            "feed_name": feed_name,
             "scheduled_release_ts_utc": event.payload["scheduled_release_ts_utc"],
-            "affected_desks": event.payload["affected_desks"],
-            "action": "logged_pending_fallback_check",
+            "affected_desks": affected_desks,
+            "detected_by": detected_by,
+            "feed_incident_id": feed_incident_id,
+            "action": "feed_incident_opened",
         }
     )
     return HandlerResult(
         artefact=artefact,
         notes=(
-            f"data ingestion failure for {event.payload['feed']}; "
-            f"{len(event.payload['affected_desks'])} desks affected"
+            f"data ingestion failure for {feed_name}; "
+            f"{len(affected_desks)} desks affected; incident {feed_incident_id}"
         ),
     )
 
