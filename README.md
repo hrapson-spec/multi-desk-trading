@@ -74,11 +74,23 @@ redeployment.
       `event-handlers-v0.1`.
 - [x] Weight promotion (§8.3) — Shapley-proportional proposer + held-out
       margin validation. Tags `promotion-v0.2`, `promotion-v0.3`.
-- [ ] Desks 2–5 deepened — blocked on real data / domain-specific models
-      (Geopolitics needs LLM event extraction; Supply/Demand/Macro need
-      real EIA/JODI feeds).
-- [ ] Sampled Shapley for n > 6.
+- [x] Synthetic market simulator + 5 desk classical specialists +
+      staged observability. 5-factor latent state (Schwartz-Smith + OU
+      + Hawkes), 4 regimes with sticky transitions, per-desk AR(1)
+      return drivers. 3 observation modes (clean / controlled leakage
+      / realistic contamination) each with its own integration test.
+      `sim/` package + `desks/{supply,demand,geopolitics,macro}/`
+      classical specialists + ground-truth regime classifier. Tags
+      `phase-a-v0.1`, `phase-b-v0.1`, `phase-c-v0.1`, `phases-abc-v0.1`.
+- [x] Spec v1.4 revision — §12.2 Logic-gate / Reliability-gate split
+      + §14.9 operator-side Reliability-gate commitment.
+- [ ] Real HDP-HMM regime classifier (v0.2; debit logged in Phase A
+      classifier docstring).
+- [ ] Real data ingest pipelines (EIA WPSR / CFTC COT / JODI / FRED /
+      news scraping for geopolitics LLM extraction).
 - [ ] LLM two-tier routing postcondition gate (§6.4).
+- [ ] Reliability gate: 28-day wall-clock soak test (§14.9 — operator
+      commitment required).
 - [ ] Phase 2: equity-VRP portability test (3 months after Phase 1 exit).
 
 ## License

@@ -19,6 +19,7 @@ Any change to §4, §6, §7, §8, §9, §10, or §11 requires a v2 bump and inva
 | v1.1 | 2026-04-17 | Review response. Addresses 16 items (see `docs/reviews/2026-04-17-v1.0-review.md`). Blockers: weight-promotion contradiction fixed (§8.3 vs §11), `target_variable` frozen registry (§4.6, `contracts/target_variables.py`), horizon semantics + event-slip policy (§4.7). Structural: CVaR cut from Phase 1, linear sizing committed (§8.2, §8.2a). Significant: weight-matrix dimensionality discipline (§8.5), provenance dirty-tree policy (§4.3), `data_ingestion_failure` trigger (§6.2), strengthened done-criterion (§12.2). Smaller: N/M pinned (§7.2), `regime_probabilities` on RegimeLabel (§4.3), routing rules as postconditions (§6.4), Macro vs classifier clarified (§10.1), `attribution_lodo` grain fixed + `decisions` table added (§3.2). New flagged risks: §14.6 budget realism, §14.7 Phase 2 readiness, §14.8 cold-start policy. |
 | v1.2 | 2026-04-17 | §3.2 correction: single DuckDB file (`data/duckdb/main.duckdb`) containing all tables, not per-table files. DuckDB is OLAP-oriented and handles many tables in one file efficiently; per-table splits complicate cross-table queries without Phase 1 benefit. Narrow correction; no other sections affected. |
 | v1.3 | 2026-04-17 | Six-item v1.2 review response (see `docs/reviews/2026-04-17-v1.2-review.md`). (A) §14.8 cold-start boot_ts pinned to microsecond precision; §8.3 adds explicit tie-break rule (weight_id lexicographic) for same-ts reads. (B) §8.2a rewritten: `k_regime` and `pos_limit_regime` move to a new `controller_params` table (§3.2, new §4.3 `ControllerParams` type), removing magic-string target_variables from signal_weights. (C) §8.5 capacity feasibility footnote: regularisation assumed, not optional (HDP-HMM regime occupancy is typically skewed, not uniform). (D) `config/data_sources.yaml` added to Week 0 scaffold plan as the owning artefact of the data-source → desks mapping consumed by `data_ingestion_failure` payload (§6.2 unchanged). (E) §8.3/§11 rollback is an explicit distinct human operation with its own audit-log class, not via the auto-promotion margin gate. (F) §15 derivation-trace header adds round-numbering convention note (R# = AskUserQuestion batch; sub-question order within a round preserved in git history but not in the trace). |
+| v1.4 | 2026-04-17 | §12.2 point 2 split into Logic gate (simulated-time, multi-scenario replay) + Reliability gate (28-day wall-clock soak test). Addresses Q3 of the user's research review: the original "≥ 4 continuous weeks with zero infrastructure incidents" phrasing was ambiguous between simulated and wall-clock interpretation; AWS / Microsoft / Google SRE conventions frame endurance tests as wall-clock. Both interpretations are valuable for different failure modes, so the v1.4 spec requires both. §14.9 added logging the operator-side cost of the wall-clock gate and the "drop it → capability debit" policy. |
 
 ---
 
@@ -749,10 +750,11 @@ Four approval points, all active:
 Phase 1 is complete when ALL of the following hold:
 
 1. All six desks pass their three hard gates on test-set replay (§7.1).
-2. The live event-scoring loop has run for **≥ 4 continuous weeks with zero infrastructure incidents**. Infrastructure = scheduler, bus, attribution DB, grading harness. Gate failures are NOT infrastructure incidents (they are evidence the gates are working). Scheduler crashes, attribution-DB corruption, bus-validation inconsistencies ARE incidents and reset the 4-week clock.
-3. Each desk has **≥ 10 closed round-trips** (for weekly-cadence desks) or **≥ 20 closed round-trips** (for daily-cadence desks). A closed round-trip = Forecast emitted → Print arrived → Grade computed → Attribution updated.
-4. The research-loop latency KPI is **measured and reported**, not "pending data." Event-driven path reports latency for every fired trigger; periodic path reports completion rate and ≥ 1 actionable-item-per-review.
-5. No outstanding capability-claim debits above per-desk budget.
+2. **Logic gate** — simulated-time replay. The architecture is exercised end-to-end across `N_scenarios ≥ 10` independent seeds × regime sequences; each scenario replays ≥ 4 weeks of simulated events through the full loop (desks → Controller → grading → attribution → research-loop weight promotion). All 5 signal-emitting desks pass their three hard gates on each scenario's held-out split. Simulated-time testing isolates **logic correctness** and completes in minutes per run.
+3. **Reliability gate** — wall-clock endurance. The system runs for **≥ 28 days of wall-clock time** in a production-like environment with synthetic inputs (AWS/Microsoft soak-test convention). Tests the failure modes simulated time cannot catch — memory leaks, scheduler drift, resource exhaustion, stuck workers, clock issues. **Zero infrastructure incidents** (scheduler crashes, attribution-DB corruption, bus-validation inconsistencies) reset the 28-day clock. Gate failures are NOT infrastructure incidents. See §14.9 for the operator-side cost.
+4. Each desk has **≥ 10 closed round-trips** (for weekly-cadence desks) or **≥ 20 closed round-trips** (for daily-cadence desks). A closed round-trip = Forecast emitted → Print arrived → Grade computed → Attribution updated.
+5. The research-loop latency KPI is **measured and reported**, not "pending data." Event-driven path reports latency for every fired trigger; periodic path reports completion rate and ≥ 1 actionable-item-per-review.
+6. No outstanding capability-claim debits above per-desk budget.
 
 Explicit non-requirement at Phase 1: portability redeployment to equity VRP. That is Phase 2. Phase 1 exits with the capability claim **asserted**, not **verified**.
 
@@ -832,6 +834,12 @@ Under uniform weights, `combined_signal` is the unweighted average of desk forec
 
 Rationale: this preserves the "Controller step is a pure function of inputs" principle — the Controller always has a valid weight matrix; there is no null-decision code path. The uniform-weight era is a first-class operational mode with its own audit provenance, not a placeholder.
 
+### 14.9 Reliability-gate commitment (§12.2 point 3)
+
+Interpreting §12.2 point 3 strictly requires the operator to commit to 28 days of wall-clock process uptime in a production-like environment. This is non-trivial cost: the laptop needs to stay on, power cycles reset the clock, any dependency upgrade restarts the scheduler. The Microsoft / AWS / Google SRE soak-testing convention does not permit shortcuts (running 28 simulated-time days in minutes tests different failure modes — see §12.2 point 2 for that path).
+
+**Policy.** The Reliability gate is **required for complete Phase 1**, but can be scheduled independently of the Logic gate. The operator may execute Logic gate first (earlier calendar date, tests architecture correctness) and schedule Reliability gate second (tests operational robustness). Dropping the Reliability gate entirely is a **capability-claim debit** logged in §15. The structured two-gate interpretation was added in v1.4 after the user's Q3 research review (AWS Well-Architected, Microsoft endurance-testing guidance, Google SRE failure-evidence framing).
+
 ---
 
 ## 15. Derivation trace — which decision answered which question
@@ -868,6 +876,7 @@ For future readers: the five rounds of clarifying discussion that produced v1.0,
 | DuckDB single-file layout (§3.2) | v1.2 (review response) |
 | `controller_params` separate table; rollback as distinct human operation; `boot_ts` microsecond precision + tie-break rule; regularisation assumed for weight fits; `config/data_sources.yaml` as the owning artefact for ingestion-failure payload | v1.3 (review response) |
 | Architecture completion (implementations + tests for every §-section): three-hard-gate harness, StorageCurveDesk classical-specialist deepen, regime-conditional linear Controller with §14.8 cold-start, LODO signal- and grading-space, Shapley exact and sampled, replay-determinism (Controller + attribution), Phase-1 end-to-end smoke, research-loop dispatcher + periodic + event-driven handlers (gate_failure/regime_transition/data_ingestion_failure), §8.3 weight-promotion v0.2/v0.3 with held-out margin validation | Tags `gates-v1.0`, `storage-curve-classical-v0.1`, `controller-v1.0`, `lodo-v0.1`, `phase1-smoke-v0.1`, `shapley-v0.1`, `replay-determinism-v0.2`, `research-loop-v0.1`, `promotion-v0.2`, `lodo-grading-v0.2`, `promotion-v0.3`, `event-handlers-v0.1`, `shapley-sampled-v0.2` (all shipped in one session, 2026-04-17) |
+| Phase A+B+C synthetic market simulator + 5 classical specialists + staged observability (plan §A, user's Q1/Q2/Q3 research). 5-factor latent state (Schwartz-Smith + OU + Hawkes) with per-desk AR(1) return drivers, regime-tagged episodes, 3 observation modes (clean / controlled leakage / realistic contamination). Four new desk classicals (supply/demand/geopolitics/macro) + regime-classifier ground-truth pass-through. Per-phase integration tests: Phase A passes gates on clean 1:1 observations; Phase B degrades gracefully under 10% leakage; Phase C survives realistic contamination (chatter + NaN-missingness + publication lag). §12.2 point 2 split into Logic gate (simulated) + Reliability gate (28-day wall-clock). §14.9 Reliability-gate commitment added. | Tags `phase-a-v0.1`, `phase-b-v0.1`, `phase-c-v0.1`, `phases-abc-v0.1` (v1.4 revision) |
 
 Full v1.0 review captured verbatim at `docs/reviews/2026-04-17-v1.0-review.md`.
 
@@ -877,7 +886,7 @@ Full v1.0 review captured verbatim at `docs/reviews/2026-04-17-v1.0-review.md`.
 
 | Field | Value |
 |---|---|
-| Spec version | v1.3 |
+| Spec version | v1.4 |
 | Date frozen | 2026-04-17 |
 | Domain instance | crude oil (WTI/Brent) |
 | Portability target | equity VRP (Speckle and Spot) |
