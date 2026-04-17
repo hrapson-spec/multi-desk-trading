@@ -1,11 +1,12 @@
 """Supply desk (Phase 1 desk 1 per spec §5.3).
 
-Stub at Week 1-2. Model ladder in spec.md commits to zero-shot MOIRAI-2
-as default, Bayesian SVAR (Kilian-Murphy) as identification layer.
+Classical-specialist ridge model (plan §A Phase A) lives in classical.py;
+Bayesian SVAR + MOIRAI-2 real-data escalation is a v0.2+ follow-up.
 """
 
 from __future__ import annotations
 
+from .classical import ClassicalSupplyModel
 from .desk import SupplyDesk
 
-__all__ = ["SupplyDesk"]
+__all__ = ["ClassicalSupplyModel", "SupplyDesk"]
