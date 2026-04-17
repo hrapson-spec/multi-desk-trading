@@ -58,7 +58,8 @@ class ClockHorizon(BaseModel):
 
 
 class EventHorizon(BaseModel):
-    """Release-pinned horizon (EIA WPSR, CFTC COT, FOMC, NFP, etc.).
+    """Release-pinned horizon — a forecast whose settlement is tied to
+    a named scheduled data release (macro data, inventories, events).
 
     expected_ts_utc never mutates post-emission (Forecast is immutable,
     spec §3.1). On event slip the Grade fires on actual Print arrival;

@@ -26,6 +26,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Protocol, runtime_checkable
 
 from contracts.target_variables import WTI_FRONT_MONTH_CLOSE
 from contracts.v1 import (
@@ -33,14 +34,28 @@ from contracts.v1 import (
     EventHorizon,
     Forecast,
     Provenance,
+    RegimeLabel,
     UncertaintyInterval,
 )
 from controller import Controller
-from desks.regime_classifier import GroundTruthRegimeClassifier
 from persistence import insert_decision, insert_forecast
 from sim.observations import ObservationChannels
 
 from .checkpoint import SoakState
+
+
+@runtime_checkable
+class _RegimeClassifierProtocol(Protocol):
+    """Structural interface the soak feed needs from any classifier.
+
+    Keeps soak/ free of any `desks.*` import (§8.4 portability — Phase 2
+    redeployment uses equity-VRP desks). Any class with a matching
+    `regime_label_at` signature satisfies this.
+    """
+
+    def regime_label_at(
+        self, channels: ObservationChannels, i: int, now_utc: datetime
+    ) -> RegimeLabel: ...
 
 
 @dataclass
@@ -49,7 +64,7 @@ class SyntheticDataFeed:
 
     channels: ObservationChannels
     controller: Controller
-    classifier: GroundTruthRegimeClassifier
+    classifier: _RegimeClassifierProtocol
     desks: tuple[str, ...] = (
         "storage_curve",
         "supply",

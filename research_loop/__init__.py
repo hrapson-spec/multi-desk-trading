@@ -26,6 +26,7 @@ from .handlers import (
     periodic_weekly_handler,
     regime_transition_handler,
 )
+from .kpi import LatencyReport, PerTypeLatency, compute_latency_report
 from .llm_routing import API_ONLY_CLASSES, RoutingResult, commit_gate
 from .promotion import (
     PROMOTION_ARTEFACT_SHAPLEY_V02,
@@ -43,11 +44,14 @@ __all__ = [
     "Dispatcher",
     "HandlerFn",
     "HandlerResult",
+    "LatencyReport",
     "PROMOTION_ARTEFACT_SHAPLEY_V02",
     "PROMOTION_ARTEFACT_VALIDATED_V03",
+    "PerTypeLatency",
     "RoutingResult",
     "ValidationResult",
     "commit_gate",
+    "compute_latency_report",
     "data_ingestion_failure_handler",
     "gate_failure_handler",
     "periodic_weekly_handler",
