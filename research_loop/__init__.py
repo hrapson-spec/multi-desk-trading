@@ -21,10 +21,20 @@ from __future__ import annotations
 
 from .dispatcher import Dispatcher, HandlerFn, HandlerResult
 from .handlers import periodic_weekly_handler
+from .promotion import (
+    PROMOTION_ARTEFACT_SHAPLEY_V02,
+    promote_weights,
+    propose_and_promote_from_shapley,
+    propose_weights_from_shapley,
+)
 
 __all__ = [
     "Dispatcher",
     "HandlerFn",
     "HandlerResult",
+    "PROMOTION_ARTEFACT_SHAPLEY_V02",
     "periodic_weekly_handler",
+    "promote_weights",
+    "propose_and_promote_from_shapley",
+    "propose_weights_from_shapley",
 ]
