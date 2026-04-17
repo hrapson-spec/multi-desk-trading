@@ -33,18 +33,38 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 import duckdb
 
-from contracts.v1 import AttributionShapley, SignalWeight
+from contracts.v1 import AttributionShapley, Decision, Forecast, SignalWeight
 from persistence.db import (
     get_latest_signal_weights,
     insert_signal_weight,
 )
 
 PROMOTION_ARTEFACT_SHAPLEY_V02 = "auto:shapley_proportional_v0.2"
+PROMOTION_ARTEFACT_VALIDATED_V03 = "auto:margin_validated_v0.3"
+
+
+@dataclass
+class ValidationResult:
+    """Outcome of the §8.3 step-4 held-out margin check."""
+
+    passed: bool
+    current_mse: float
+    candidate_mse: float
+    margin: float
+    n_held_out: int
+
+    @property
+    def improvement_ratio(self) -> float:
+        """1 - candidate_mse/current_mse. Positive = candidate reduces error."""
+        if self.current_mse == 0.0:
+            return 0.0
+        return 1.0 - (self.candidate_mse / self.current_mse)
 
 
 def propose_weights_from_shapley(
@@ -141,3 +161,131 @@ def propose_and_promote_from_shapley(
     )
     promote_weights(conn, proposal)
     return proposal
+
+
+# ---------------------------------------------------------------------------
+# v0.3: held-out margin validation before promotion (§8.3 step 4)
+# ---------------------------------------------------------------------------
+
+
+def _windowed_mse(
+    *,
+    weights: list[dict[str, Any]] | list[SignalWeight],
+    held_out_decisions: list[Decision],
+    recent_forecasts_by_decision: dict[str, dict[tuple[str, str], Forecast]],
+    prints_by_decision: dict[str, float],
+) -> float:
+    """Mean squared error of the weighted combined_signal against prints
+    over the held-out window. Weights can be either the DB-row dicts or
+    SignalWeight Pydantic models (duck-typed access)."""
+
+    # Index weights by (desk, target) for fast lookup.
+    def _row(row: Any) -> tuple[str, str, float]:
+        if isinstance(row, SignalWeight):
+            return row.desk_name, row.target_variable, row.weight
+        return str(row["desk_name"]), str(row["target_variable"]), float(row["weight"])
+
+    weight_by_key = {(_row(w)[0], _row(w)[1]): _row(w)[2] for w in weights}
+
+    sse = 0.0
+    n = 0
+    for d in held_out_decisions:
+        recent = recent_forecasts_by_decision.get(d.decision_id, {})
+        print_value = prints_by_decision.get(d.decision_id)
+        if print_value is None:
+            continue
+        combined = 0.0
+        for (desk, target), f in recent.items():
+            if f.staleness:
+                continue
+            w = weight_by_key.get((desk, target), 0.0)
+            combined += w * float(f.point_estimate)
+        err = combined - print_value
+        sse += err * err
+        n += 1
+    if n == 0:
+        return 0.0
+    return sse / n
+
+
+def validate_candidate_vs_current(
+    *,
+    conn: duckdb.DuckDBPyConnection,
+    regime_id: str,
+    candidate: list[SignalWeight],
+    held_out_decisions: list[Decision],
+    recent_forecasts_by_decision: dict[str, dict[tuple[str, str], Forecast]],
+    prints_by_decision: dict[str, float],
+    margin: float = 0.05,
+) -> ValidationResult:
+    """Return a ValidationResult describing whether candidate beats
+    current by at least `margin` on windowed MSE over the held-out
+    set. margin = 0.05 ⇒ candidate MSE must be ≤ 95% of current MSE.
+
+    The "current" weight set is the DB state as of call time — callers
+    must invoke this BEFORE promote_weights writes the candidate.
+    """
+    current = get_latest_signal_weights(conn, regime_id)
+    current_mse = _windowed_mse(
+        weights=current,
+        held_out_decisions=held_out_decisions,
+        recent_forecasts_by_decision=recent_forecasts_by_decision,
+        prints_by_decision=prints_by_decision,
+    )
+    candidate_mse = _windowed_mse(
+        weights=candidate,
+        held_out_decisions=held_out_decisions,
+        recent_forecasts_by_decision=recent_forecasts_by_decision,
+        prints_by_decision=prints_by_decision,
+    )
+    n = sum(1 for d in held_out_decisions if d.decision_id in prints_by_decision)
+    passed = current_mse > 0.0 and candidate_mse < current_mse * (1.0 - margin) and n >= 1
+    return ValidationResult(
+        passed=passed,
+        current_mse=current_mse,
+        candidate_mse=candidate_mse,
+        margin=margin,
+        n_held_out=n,
+    )
+
+
+def propose_validate_and_promote(
+    *,
+    conn: duckdb.DuckDBPyConnection,
+    regime_id: str,
+    shapley_rows: Iterable[AttributionShapley],
+    new_promotion_ts_utc: datetime,
+    held_out_decisions: list[Decision],
+    recent_forecasts_by_decision: dict[str, dict[tuple[str, str], Forecast]],
+    prints_by_decision: dict[str, float],
+    margin: float = 0.05,
+) -> tuple[list[SignalWeight], ValidationResult]:
+    """Full §8.3 path: propose → validate → promote only on margin-beat.
+
+    Returns (candidate_rows_if_promoted, ValidationResult). If the
+    candidate fails validation, candidate_rows_if_promoted is empty
+    (the DB is unchanged) but the ValidationResult carries the metrics
+    so the caller can log a capability debit / audit entry.
+    """
+    current = get_latest_signal_weights(conn, regime_id)
+    for r in current:
+        r.setdefault("regime_id", regime_id)
+    candidate = propose_weights_from_shapley(
+        shapley_rows=shapley_rows,
+        current_weights=current,
+        new_promotion_ts_utc=new_promotion_ts_utc,
+        validation_artefact=PROMOTION_ARTEFACT_VALIDATED_V03,
+    )
+    validation = validate_candidate_vs_current(
+        conn=conn,
+        regime_id=regime_id,
+        candidate=candidate,
+        held_out_decisions=held_out_decisions,
+        recent_forecasts_by_decision=recent_forecasts_by_decision,
+        prints_by_decision=prints_by_decision,
+        margin=margin,
+    )
+    if not validation.passed:
+        return [], validation
+    promote_weights(conn, candidate)
+    return candidate, validation

@@ -33,8 +33,11 @@ from controller import Controller, seed_cold_start
 from persistence.db import connect, get_latest_signal_weights, init_db
 from research_loop import (
     PROMOTION_ARTEFACT_SHAPLEY_V02,
+    PROMOTION_ARTEFACT_VALIDATED_V03,
     propose_and_promote_from_shapley,
+    propose_validate_and_promote,
     propose_weights_from_shapley,
+    validate_candidate_vs_current,
 )
 
 
@@ -268,3 +271,194 @@ def test_promotion_takes_effect_on_next_controller_decide(conn):
     # combined = 0.9 * 100 + 0.1 * 50 = 95
     # Under cold-start weights 0.5 / 0.5 this would have been 75.
     assert d2.combined_signal == pytest.approx(95.0)
+
+
+# ---------------------------------------------------------------------------
+# v0.3: held-out margin validation
+# ---------------------------------------------------------------------------
+
+
+def test_validate_passes_when_candidate_reduces_mse_beyond_margin(conn):
+    """Current: 50/50 uniform. Candidate: 90/10 Shapley-proportional.
+    Held-out window: storage_curve was the right forecast; candidate MSE
+    < current MSE by more than the 5% margin."""
+    boot = datetime(2026, 4, 16, 9, 0, 0, tzinfo=UTC)
+    t_review = datetime(2026, 4, 20, 16, 30, 0, tzinfo=UTC)
+    t_decide = datetime(2026, 4, 20, 17, 0, 0, tzinfo=UTC)
+
+    seed_cold_start(
+        conn,
+        desks=[
+            ("storage_curve", WTI_FRONT_MONTH_CLOSE),
+            ("macro", WTI_FRONT_MONTH_CLOSE),
+        ],
+        regime_ids=["regime_boot"],
+        boot_ts=boot,
+        default_cold_start_limit=1000.0,
+    )
+    ctrl = Controller(conn=conn)
+
+    # Held-out: 3 decisions where storage_curve is close to Print, macro is far.
+    _ = t_decide  # held constant to keep timestamps stable across the window
+    held_out: list = []
+    recent_by: dict = {}
+    prints_by: dict = {}
+    for price in [80.0, 81.0, 82.0]:
+        recent = {
+            ("storage_curve", WTI_FRONT_MONTH_CLOSE): _fcast("storage_curve", price, t_review),
+            ("macro", WTI_FRONT_MONTH_CLOSE): _fcast("macro", price + 50.0, t_review),
+        }
+        d = ctrl.decide(now_utc=t_review, regime_label=_regime(t_review), recent_forecasts=recent)
+        held_out.append(d)
+        recent_by[d.decision_id] = recent
+        prints_by[d.decision_id] = price
+
+    # Candidate: all-Shapley-weight on storage_curve (weight 1.0)
+    shapley = [
+        _shapley("storage_curve", 100.0, t_review),
+        _shapley("macro", 0.0, t_review),
+    ]
+    candidate, result = propose_validate_and_promote(
+        conn=conn,
+        regime_id="regime_boot",
+        shapley_rows=shapley,
+        new_promotion_ts_utc=t_review,
+        held_out_decisions=held_out,
+        recent_forecasts_by_decision=recent_by,
+        prints_by_decision=prints_by,
+        margin=0.05,
+    )
+    assert result.passed
+    assert len(candidate) == 2
+    # Candidate MSE should be ~0 (storage_curve predicts exactly print);
+    # current MSE = mean((combined 0.5*p + 0.5*(p+50) - p)²) = mean(25²) = 625.
+    assert result.current_mse == pytest.approx(625.0)
+    assert result.candidate_mse == pytest.approx(0.0)
+    assert result.improvement_ratio == pytest.approx(1.0)
+    assert result.n_held_out == 3
+
+    # Promoted rows use the v0.3 artefact tag.
+    artefacts = {p.validation_artefact for p in candidate}
+    assert PROMOTION_ARTEFACT_VALIDATED_V03 in artefacts
+    assert PROMOTION_ARTEFACT_SHAPLEY_V02 not in artefacts
+
+
+def test_validate_blocks_promotion_when_candidate_is_worse(conn):
+    """Candidate is WORSE than current (flips the weight to a bad desk).
+    Validation fails; no DB write."""
+    boot = datetime(2026, 4, 16, 9, 0, 0, tzinfo=UTC)
+    t_review = datetime(2026, 4, 20, 16, 30, 0, tzinfo=UTC)
+
+    seed_cold_start(
+        conn,
+        desks=[
+            ("storage_curve", WTI_FRONT_MONTH_CLOSE),
+            ("macro", WTI_FRONT_MONTH_CLOSE),
+        ],
+        regime_ids=["regime_boot"],
+        boot_ts=boot,
+        default_cold_start_limit=1000.0,
+    )
+    ctrl = Controller(conn=conn)
+    recent = {
+        ("storage_curve", WTI_FRONT_MONTH_CLOSE): _fcast("storage_curve", 80.0, t_review),
+        ("macro", WTI_FRONT_MONTH_CLOSE): _fcast("macro", 130.0, t_review),
+    }
+    d = ctrl.decide(now_utc=t_review, regime_label=_regime(t_review), recent_forecasts=recent)
+    prints_by = {d.decision_id: 80.0}
+    recent_by = {d.decision_id: recent}
+
+    # Pathological Shapley: loads all weight onto macro (the bad desk).
+    shapley = [
+        _shapley("storage_curve", 0.0, t_review),
+        _shapley("macro", 100.0, t_review),
+    ]
+    candidate, result = propose_validate_and_promote(
+        conn=conn,
+        regime_id="regime_boot",
+        shapley_rows=shapley,
+        new_promotion_ts_utc=t_review,
+        held_out_decisions=[d],
+        recent_forecasts_by_decision=recent_by,
+        prints_by_decision=prints_by,
+        margin=0.05,
+    )
+    assert not result.passed
+    assert candidate == []  # nothing written
+
+    # DB state unchanged: still the cold-start weights.
+    from persistence.db import count_rows
+
+    assert count_rows(conn, "signal_weights") == 2  # 2 desks * 1 regime
+
+    # Sanity: candidate (all-macro) MSE > current (uniform 50/50) MSE.
+    assert result.candidate_mse > result.current_mse
+
+
+def test_validate_insufficient_held_out_returns_not_passed(conn):
+    boot = datetime(2026, 4, 16, 9, 0, 0, tzinfo=UTC)
+
+    seed_cold_start(
+        conn,
+        desks=[("a", WTI_FRONT_MONTH_CLOSE)],
+        regime_ids=["regime_boot"],
+        boot_ts=boot,
+        default_cold_start_limit=1000.0,
+    )
+    # Empty held-out window → validation fails by construction.
+    result = validate_candidate_vs_current(
+        conn=conn,
+        regime_id="regime_boot",
+        candidate=[],
+        held_out_decisions=[],
+        recent_forecasts_by_decision={},
+        prints_by_decision={},
+        margin=0.05,
+    )
+    assert not result.passed
+    assert result.n_held_out == 0
+
+
+def test_validation_respects_margin_threshold(conn):
+    """A tiny 1% improvement is NOT enough to promote when margin=5%."""
+    boot = datetime(2026, 4, 16, 9, 0, 0, tzinfo=UTC)
+    t_review = datetime(2026, 4, 20, 16, 30, 0, tzinfo=UTC)
+
+    seed_cold_start(
+        conn,
+        desks=[
+            ("a", WTI_FRONT_MONTH_CLOSE),
+            ("b", WTI_FRONT_MONTH_CLOSE),
+        ],
+        regime_ids=["regime_boot"],
+        boot_ts=boot,
+        default_cold_start_limit=1000.0,
+    )
+    ctrl = Controller(conn=conn)
+    # a predicts 80, b predicts 81 (both close to print 80). Under 50/50
+    # current, combined = 80.5, err² = 0.25. Under 60/40 candidate,
+    # combined = 80.4, err² = 0.16. Improvement ~36% → would pass 5%.
+    # For a sub-5% improvement, use near-identical forecasts.
+    recent = {
+        ("a", WTI_FRONT_MONTH_CLOSE): _fcast("a", 79.999, t_review),
+        ("b", WTI_FRONT_MONTH_CLOSE): _fcast("b", 80.001, t_review),
+    }
+    d = ctrl.decide(now_utc=t_review, regime_label=_regime(t_review), recent_forecasts=recent)
+    held_out = [d]
+    prints_by = {d.decision_id: 80.0}
+    recent_by = {d.decision_id: recent}
+
+    # Candidate tilts slightly. Both cases have tiny MSE; the *ratio*
+    # improvement falls under the 5% margin.
+    shapley = [_shapley("a", 1.0, t_review), _shapley("b", 1.0, t_review)]
+    _, result = propose_validate_and_promote(
+        conn=conn,
+        regime_id="regime_boot",
+        shapley_rows=shapley,
+        new_promotion_ts_utc=t_review,
+        held_out_decisions=held_out,
+        recent_forecasts_by_decision=recent_by,
+        prints_by_decision=prints_by,
+        margin=0.5,  # absurd 50% margin to force rejection
+    )
+    assert not result.passed

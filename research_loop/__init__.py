@@ -23,9 +23,13 @@ from .dispatcher import Dispatcher, HandlerFn, HandlerResult
 from .handlers import periodic_weekly_handler
 from .promotion import (
     PROMOTION_ARTEFACT_SHAPLEY_V02,
+    PROMOTION_ARTEFACT_VALIDATED_V03,
+    ValidationResult,
     promote_weights,
     propose_and_promote_from_shapley,
+    propose_validate_and_promote,
     propose_weights_from_shapley,
+    validate_candidate_vs_current,
 )
 
 __all__ = [
@@ -33,8 +37,12 @@ __all__ = [
     "HandlerFn",
     "HandlerResult",
     "PROMOTION_ARTEFACT_SHAPLEY_V02",
+    "PROMOTION_ARTEFACT_VALIDATED_V03",
+    "ValidationResult",
     "periodic_weekly_handler",
     "promote_weights",
     "propose_and_promote_from_shapley",
+    "propose_validate_and_promote",
     "propose_weights_from_shapley",
+    "validate_candidate_vs_current",
 ]
