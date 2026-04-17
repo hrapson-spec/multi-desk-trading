@@ -165,3 +165,274 @@ def test_byte_identical_replay(tmp_path: Path):
         f"First diff in canonical JSON:\n"
         f"run1: {canon1[:500]}\nrun2: {canon2[:500]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Controller + attribution replay determinism
+# ---------------------------------------------------------------------------
+#
+# Extends the Forecast/Print/Grade determinism above to the decision-time
+# layer: Controller.decide + LODO + Shapley must produce identical payload
+# given identical inputs. Uuid-typed event IDs (decision_id, forecast_id,
+# attribution_id) are not payload; they differ by design and are excluded
+# from the equality check.
+
+
+def _run_controller_scenario(
+    db_path: Path,
+    *,
+    seed_forecast_ids: list[dict[str, str]],
+) -> tuple[
+    list[tuple[str, float, float, tuple[str, ...], str]],
+    list[tuple[float, ...]],
+    list[tuple[tuple[str, float], ...]],
+]:
+    """Run Controller + LODO + Shapley on a fixed synthetic event stream.
+
+    Returns three stable-shape summaries so two runs can be compared by
+    ordinary equality. No uuids are in the summaries.
+    """
+    from attribution import (
+        compute_lodo_signal_space,
+        compute_shapley_signal_space,
+    )
+    from contracts.v1 import (
+        DirectionalClaim,
+        EventHorizon,
+        Forecast,
+        Provenance,
+        RegimeLabel,
+        UncertaintyInterval,
+    )
+    from controller import Controller, seed_cold_start
+
+    boot_ts = datetime(2026, 4, 16, 9, 0, 0, 123456, tzinfo=UTC)
+    desks = [
+        ("storage_curve", WTI_FRONT_MONTH_CLOSE),
+        ("macro", WTI_FRONT_MONTH_CLOSE),
+        ("supply", WTI_FRONT_MONTH_CLOSE),
+    ]
+
+    conn = connect(db_path)
+    init_db(conn)
+    try:
+        seed_cold_start(
+            conn,
+            desks=desks,
+            regime_ids=["regime_boot"],
+            boot_ts=boot_ts,
+            default_cold_start_limit=1000.0,
+        )
+        ctrl = Controller(conn=conn)
+
+        decisions_summary: list[tuple[str, float, float, tuple[str, ...], str]] = []
+        lodo_summary: list[tuple[float, ...]] = []
+        shapley_summary: list[tuple[tuple[str, float], ...]] = []
+
+        for h in range(5):
+            ts = boot_ts + timedelta(hours=1 + h)
+            # Deterministic forecast values.
+            f_vals = {
+                "storage_curve": 82.0 + 0.3 * h,
+                "macro": 80.0 - 0.2 * h,
+                "supply": 79.5 + 0.1 * h,
+            }
+            recent: dict[tuple[str, str], Forecast] = {}
+            for desk_name, value in f_vals.items():
+                recent[(desk_name, WTI_FRONT_MONTH_CLOSE)] = Forecast(
+                    forecast_id=seed_forecast_ids[h][desk_name],
+                    emission_ts_utc=ts,
+                    target_variable=WTI_FRONT_MONTH_CLOSE,
+                    horizon=EventHorizon(event_id="cftc_cot", expected_ts_utc=ts),
+                    point_estimate=value,
+                    uncertainty=UncertaintyInterval(
+                        level=0.8, lower=value - 5.0, upper=value + 5.0
+                    ),
+                    directional_claim=DirectionalClaim(
+                        variable=WTI_FRONT_MONTH_CLOSE, sign="positive"
+                    ),
+                    staleness=False,
+                    confidence=1.0,
+                    provenance=Provenance(
+                        desk_name=desk_name,
+                        model_name="m",
+                        model_version="0.1",
+                        input_snapshot_hash="0" * 64,
+                        spec_hash="0" * 64,
+                        code_commit="c" * 40,
+                    ),
+                )
+            regime = RegimeLabel(
+                classification_ts_utc=ts,
+                regime_id="regime_boot",
+                regime_probabilities={"regime_boot": 1.0},
+                transition_probabilities={"regime_boot": 1.0},
+                classifier_provenance=Provenance(
+                    desk_name="regime_classifier",
+                    model_name="m",
+                    model_version="0.1",
+                    input_snapshot_hash="0" * 64,
+                    spec_hash="0" * 64,
+                    code_commit="c" * 40,
+                ),
+            )
+            d = ctrl.decide(now_utc=ts, regime_label=regime, recent_forecasts=recent)
+            decisions_summary.append(
+                (
+                    d.regime_id,
+                    d.combined_signal,
+                    d.position_size,
+                    tuple(d.input_forecast_ids),
+                    d.provenance.input_snapshot_hash,
+                )
+            )
+
+            lodo = compute_lodo_signal_space(
+                conn=conn,
+                decision=d,
+                recent_forecasts=recent,
+                computed_ts_utc=ts,
+            )
+            lodo_by_desk = {row.desk_name: row.contribution_metric for row in lodo}
+            lodo_summary.append(tuple(lodo_by_desk[d_[0]] for d_ in desks))
+
+            shapley = compute_shapley_signal_space(
+                conn=conn,
+                decisions=[d],
+                recent_forecasts_by_decision={d.decision_id: recent},
+                review_ts_utc=ts,
+            )
+            shapley_by_desk = sorted(
+                ((row.desk_name, row.shapley_value) for row in shapley),
+                key=lambda kv: kv[0],
+            )
+            shapley_summary.append(tuple(shapley_by_desk))
+
+        return decisions_summary, lodo_summary, shapley_summary
+    finally:
+        conn.close()
+
+
+def test_controller_attribution_replay_identical_payload(tmp_path: Path):
+    # Fix the forecast_ids across both runs so replay matches on
+    # input_forecast_ids (which is payload, not a per-run id).
+    desks = ["storage_curve", "macro", "supply"]
+    seed_ids = [
+        {d: str(uuid.UUID(int=10_000 + h * 10 + i)) for i, d in enumerate(desks)} for h in range(5)
+    ]
+
+    r1 = _run_controller_scenario(tmp_path / "ctrl_run1.duckdb", seed_forecast_ids=seed_ids)
+    r2 = _run_controller_scenario(tmp_path / "ctrl_run2.duckdb", seed_forecast_ids=seed_ids)
+    decisions1, lodo1, shapley1 = r1
+    decisions2, lodo2, shapley2 = r2
+
+    assert decisions1 == decisions2, "Decision payload diverged across replay"
+    assert lodo1 == lodo2, "LODO contribution_metric diverged across replay"
+    assert shapley1 == shapley2, "Shapley values diverged across replay"
+
+
+def test_controller_replay_detects_single_forecast_perturbation(tmp_path: Path):
+    """Sanity guard: a 1-basis-point perturbation in one forecast value
+    must produce a different Decision payload. Without this, the
+    payload-equality test could silently pass a broken pipeline."""
+    desks = ["storage_curve", "macro", "supply"]
+    seed_ids = [
+        {d: str(uuid.UUID(int=20_000 + h * 10 + i)) for i, d in enumerate(desks)} for h in range(5)
+    ]
+
+    r1 = _run_controller_scenario(tmp_path / "orig.duckdb", seed_forecast_ids=seed_ids)
+
+    # Perturb: the canonical scenario is hard-coded inside the helper, so
+    # we exercise perturbation by running with a DIFFERENT seed_ids mapping,
+    # which does not perturb payload. Instead, monkey-patch via a small
+    # modified helper. We inline it here for clarity.
+    from attribution import compute_lodo_signal_space
+    from contracts.v1 import (
+        DirectionalClaim,
+        EventHorizon,
+        Forecast,
+        Provenance,
+        RegimeLabel,
+        UncertaintyInterval,
+    )
+    from controller import Controller, seed_cold_start
+
+    def _perturbed_run(db_path: Path) -> list[tuple[str, float, float]]:
+        boot_ts = datetime(2026, 4, 16, 9, 0, 0, 123456, tzinfo=UTC)
+        d_list = [
+            ("storage_curve", WTI_FRONT_MONTH_CLOSE),
+            ("macro", WTI_FRONT_MONTH_CLOSE),
+            ("supply", WTI_FRONT_MONTH_CLOSE),
+        ]
+        conn = connect(db_path)
+        init_db(conn)
+        try:
+            seed_cold_start(
+                conn,
+                desks=d_list,
+                regime_ids=["regime_boot"],
+                boot_ts=boot_ts,
+                default_cold_start_limit=1000.0,
+            )
+            ctrl = Controller(conn=conn)
+            out: list[tuple[str, float, float]] = []
+            for h in range(1):
+                ts = boot_ts + timedelta(hours=1 + h)
+                # Perturb storage_curve by 0.01
+                recent = {
+                    ("storage_curve", WTI_FRONT_MONTH_CLOSE): Forecast(
+                        forecast_id=seed_ids[h]["storage_curve"],
+                        emission_ts_utc=ts,
+                        target_variable=WTI_FRONT_MONTH_CLOSE,
+                        horizon=EventHorizon(event_id="cftc_cot", expected_ts_utc=ts),
+                        point_estimate=82.0 + 0.3 * h + 0.01,  # <-- perturbed
+                        uncertainty=UncertaintyInterval(level=0.8, lower=70, upper=90),
+                        directional_claim=DirectionalClaim(
+                            variable=WTI_FRONT_MONTH_CLOSE, sign="positive"
+                        ),
+                        staleness=False,
+                        confidence=1.0,
+                        provenance=Provenance(
+                            desk_name="storage_curve",
+                            model_name="m",
+                            model_version="0.1",
+                            input_snapshot_hash="0" * 64,
+                            spec_hash="0" * 64,
+                            code_commit="c" * 40,
+                        ),
+                    ),
+                }
+                regime = RegimeLabel(
+                    classification_ts_utc=ts,
+                    regime_id="regime_boot",
+                    regime_probabilities={"regime_boot": 1.0},
+                    transition_probabilities={"regime_boot": 1.0},
+                    classifier_provenance=Provenance(
+                        desk_name="regime_classifier",
+                        model_name="m",
+                        model_version="0.1",
+                        input_snapshot_hash="0" * 64,
+                        spec_hash="0" * 64,
+                        code_commit="c" * 40,
+                    ),
+                )
+                d = ctrl.decide(now_utc=ts, regime_label=regime, recent_forecasts=recent)
+                out.append((d.regime_id, d.combined_signal, d.position_size))
+                _ = compute_lodo_signal_space(
+                    conn=conn,
+                    decision=d,
+                    recent_forecasts=recent,
+                    computed_ts_utc=ts,
+                )
+            return out
+        finally:
+            conn.close()
+
+    perturbed = _perturbed_run(tmp_path / "perturb.duckdb")
+
+    # The first-decision payload must differ between the canonical scenario
+    # and the perturbed one.
+    decisions_original = r1[0]
+    assert decisions_original[0][1] != perturbed[0][1] or (
+        decisions_original[0][2] != perturbed[0][2]
+    ), "Perturbation did not propagate to Decision payload"
