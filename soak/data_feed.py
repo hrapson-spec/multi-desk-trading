@@ -37,6 +37,7 @@ from contracts.v1 import (
 )
 from controller import Controller
 from desks.regime_classifier import GroundTruthRegimeClassifier
+from persistence import insert_decision, insert_forecast
 from sim.observations import ObservationChannels
 
 from .checkpoint import SoakState
@@ -100,16 +101,24 @@ class SyntheticDataFeed:
             )
             recent[(desk_name, WTI_FRONT_MONTH_CLOSE)] = f
 
+        # Persist forecasts — exercises the write path that a real bus
+        # would handle. The soak test doesn't go through Bus because
+        # re-registering handlers on each restart is orthogonal to the
+        # endurance test; direct inserts exercise the same DB pressure.
+        for f in recent.values():
+            insert_forecast(self.controller.conn, f)
+
         # Classify regime using ground truth (cheap — the soak test
         # doesn't exercise the HMM; that's a separate benchmark).
         label = self.classifier.regime_label_at(self.channels, i, emission_ts)
 
         # Controller decides — this is the load-bearing write path.
-        self.controller.decide(
+        decision = self.controller.decide(
             now_utc=emission_ts,
             regime_label=label,
             recent_forecasts=recent,
         )
+        insert_decision(self.controller.conn, decision)
 
         state.sim_day_index = i + 1
         state.n_decisions_emitted += 1
