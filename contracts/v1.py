@@ -268,6 +268,7 @@ class ResearchLoopEvent(BaseModel):
         "controller_commission",
         "data_ingestion_failure",
         "periodic_weekly",
+        "feed_reliability_review",
     ]
     triggered_at_utc: datetime
     priority: int = Field(ge=0, le=9)

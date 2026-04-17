@@ -5,24 +5,35 @@ desk specs, and experiment backlogs mutate via research-loop artefacts
 that pass the human-gated promotion events (§11) or the staged-
 candidate auto-promotion path (§8.3).
 
-Phase 1 v0.1 ships:
+v0.2+ ships:
   - Dispatcher: priority-ordered processing of ResearchLoopEvents with
     a pluggable handler registry.
-  - periodic_weekly_handler: reads the week's Decisions, runs a
-    Shapley rollup, stores a compact summary in the event's
-    produced_artefact field.
+  - Handlers: gate_failure (v0.2 auto-retire), regime_transition
+    (v0.2 Shapley refresh), data_ingestion_failure (v0.2 incident
+    registry), feed_reliability_review (v0.2 rolling-rate rules),
+    periodic_weekly (Shapley rollup).
 
-LLM routing (§6.4) postcondition gate, data-ingestion-failure RCA,
-weight-promotion candidate proposals, and the §6.5 trading-path-
-forbidden invariant are staged for v0.2+.
+v0.3 staged: LLM routing postcondition, grading-space attribution,
+weight-promotion margin validation.
 """
 
 from __future__ import annotations
 
 from .dispatcher import Dispatcher, HandlerFn, HandlerResult
+from .feed_reliability import (
+    FeedReliabilityStats,
+    active_target_variables_for_desk,
+    compute_feed_failure_rate,
+    count_recent_auto_retirements,
+    feeds_eligible_for_reinstatement,
+    feeds_meeting_retirement_criteria,
+    retired_desks_for_feed,
+)
 from .handlers import (
+    FEED_RELIABILITY_HANDLER_V02,
     REGIME_TRANSITION_ARTEFACT_V02,
     data_ingestion_failure_handler,
+    feed_reliability_review_handler,
     gate_failure_handler,
     periodic_weekly_handler,
     regime_transition_handler,
@@ -40,15 +51,22 @@ from .promotion import (
     validate_candidate_vs_current,
 )
 from .remediation import (
+    FEED_UNRELIABLE_PREFIX,
     HARMFUL_FAILURE_PREFIX,
+    REINSTATE_PREFIX,
     RETIRE_ARTEFACT_PREFIX,
     is_harmful,
+    reinstate_desk_direct,
+    retire_desk_for_all_regimes,
     retire_desk_for_regime,
 )
 
 __all__ = [
     "API_ONLY_CLASSES",
     "Dispatcher",
+    "FEED_RELIABILITY_HANDLER_V02",
+    "FEED_UNRELIABLE_PREFIX",
+    "FeedReliabilityStats",
     "HARMFUL_FAILURE_PREFIX",
     "HandlerFn",
     "HandlerResult",
@@ -57,20 +75,30 @@ __all__ = [
     "PROMOTION_ARTEFACT_VALIDATED_V03",
     "PerTypeLatency",
     "REGIME_TRANSITION_ARTEFACT_V02",
+    "REINSTATE_PREFIX",
     "RETIRE_ARTEFACT_PREFIX",
     "RoutingResult",
     "ValidationResult",
+    "active_target_variables_for_desk",
     "commit_gate",
+    "compute_feed_failure_rate",
     "compute_latency_report",
-    "is_harmful",
-    "retire_desk_for_regime",
+    "count_recent_auto_retirements",
     "data_ingestion_failure_handler",
+    "feed_reliability_review_handler",
+    "feeds_eligible_for_reinstatement",
+    "feeds_meeting_retirement_criteria",
     "gate_failure_handler",
+    "is_harmful",
     "periodic_weekly_handler",
-    "regime_transition_handler",
     "promote_weights",
     "propose_and_promote_from_shapley",
     "propose_validate_and_promote",
     "propose_weights_from_shapley",
+    "regime_transition_handler",
+    "reinstate_desk_direct",
+    "retire_desk_for_all_regimes",
+    "retire_desk_for_regime",
+    "retired_desks_for_feed",
     "validate_candidate_vs_current",
 ]

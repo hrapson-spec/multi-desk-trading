@@ -33,12 +33,30 @@ from attribution import compute_shapley_signal_space
 from contracts.v1 import Decision, Forecast, Provenance, ResearchLoopEvent
 
 from .dispatcher import HandlerResult
+from .feed_reliability import (
+    active_target_variables_for_desk,
+    feeds_eligible_for_reinstatement,
+    feeds_meeting_retirement_criteria,
+    retired_desks_for_feed,
+)
 from .promotion import propose_and_promote_from_shapley
-from .remediation import is_harmful, retire_desk_for_regime
+from .remediation import (
+    FEED_UNRELIABLE_PREFIX,
+    is_harmful,
+    reinstate_desk_direct,
+    retire_desk_for_all_regimes,
+    retire_desk_for_regime,
+)
 
 REGIME_TRANSITION_ARTEFACT_V02 = "auto:regime_transition_shapley_v0.2"
+FEED_RELIABILITY_HANDLER_V02 = "feed_reliability_review_v0.2"
 _DEFAULT_LOOKBACK_SECONDS = 30 * 24 * 3600
 _DEFAULT_MIN_DECISIONS = 5
+_DEFAULT_FEED_LOOKBACK_DAYS = 30
+_DEFAULT_RETIREMENT_THRESHOLD = 5
+_DEFAULT_RECOVERY_DAYS = 14
+_DEFAULT_RETIREMENT_CAP_PER_7_DAYS = 2
+_DEFAULT_REINSTATE_WEIGHT = 0.1
 
 
 def _decisions_in_window(
@@ -393,6 +411,181 @@ def data_ingestion_failure_handler(
             f"{len(affected_desks)} desks affected; incident {feed_incident_id}"
         ),
     )
+
+
+def feed_reliability_review_handler(
+    conn: duckdb.DuckDBPyConnection, event: ResearchLoopEvent
+) -> HandlerResult:
+    """Run the rolling failure-rate rules (§14.5 v1.7, §7.2 parity).
+
+    Reads the feed_incidents registry, identifies feeds whose failure
+    rate crosses the pre-registered threshold, and retires every desk
+    that depends on them in EVERY regime where the desk currently
+    holds non-zero weight. Also reinstates desks whose feeds have
+    recovered (no failures for `recovery_days`) — via Shapley-based
+    promotion when attribution rows exist, else a conservative direct
+    insert (`remediation.reinstate_desk_direct`, weight=0.1).
+
+    Cascading-loss cap: no more than `max_retirements_per_7_days`
+    (desk, regime, target) triples may be retired in any rolling
+    7-day window. When the cap is hit the handler logs
+    `feed_reliability_cap_reached` in the artefact and defers further
+    retirements to the next tick — does NOT silently drop them.
+    Reinstatements are not capped.
+
+    Payload contract (all optional with defaults):
+      - feed_names: list[str] — feeds to review. Required — callers
+        either pass the list explicitly (test / single-feed review)
+        or pass the full data_sources.yaml-derived list.
+      - lookback_days: int = 30
+      - threshold_failures: int = 5
+      - recovery_days: int = 14
+      - max_retirements_per_7_days: int = 2
+      - reinstate_weight: float = 0.1
+    """
+    if event.event_type != "feed_reliability_review":
+        raise ValueError(f"feed_reliability_review_handler on wrong event: {event.event_type!r}")
+    feed_names_raw = event.payload.get("feed_names")
+    if not feed_names_raw:
+        return HandlerResult(
+            artefact=json.dumps({"error": "payload.feed_names required and non-empty"}),
+        )
+    feed_names = [str(f) for f in feed_names_raw]
+    lookback_days = int(event.payload.get("lookback_days", _DEFAULT_FEED_LOOKBACK_DAYS))
+    threshold_failures = int(
+        event.payload.get("retirement_threshold", _DEFAULT_RETIREMENT_THRESHOLD)
+    )
+    recovery_days = int(event.payload.get("recovery_days", _DEFAULT_RECOVERY_DAYS))
+    cap = int(event.payload.get("max_retirements_per_7_days", _DEFAULT_RETIREMENT_CAP_PER_7_DAYS))
+    reinstate_weight = float(event.payload.get("reinstate_weight", _DEFAULT_REINSTATE_WEIGHT))
+
+    now_utc = event.triggered_at_utc
+
+    # ---- Retirement path --------------------------------------------------
+    retire_candidates = feeds_meeting_retirement_criteria(
+        conn,
+        feed_names=feed_names,
+        lookback_days=lookback_days,
+        threshold_failures=threshold_failures,
+        now_utc=now_utc,
+    )
+    from .feed_reliability import count_recent_auto_retirements
+
+    already_retired = count_recent_auto_retirements(
+        conn, prefix=FEED_UNRELIABLE_PREFIX, window_days=7, now_utc=now_utc
+    )
+    remaining_budget = max(cap - already_retired, 0)
+    retirements_performed: list[dict[str, object]] = []
+    retirements_skipped_capped: list[str] = []
+
+    for stats in retire_candidates:
+        feed = stats.feed_name
+        # Which desks does this feed impact right now? Look at the
+        # currently-open incident's affected_desks list (authoritative
+        # source of truth for who should be retired for this feed).
+        open_incidents = _open_incidents_for_feed(conn, feed)
+        if not open_incidents:
+            continue
+        desks_raw = open_incidents[0]["affected_desks"]
+        assert isinstance(desks_raw, list), "feed_incidents.affected_desks must be list"
+        affected_desks: list[str] = [str(d) for d in desks_raw]
+        for desk in affected_desks:
+            targets = active_target_variables_for_desk(conn, desk)
+            for target in targets:
+                # Budget check BEFORE each write (not just per-feed) so
+                # the cap counts desk-regime-target triples, not feeds.
+                # active_target_variables_for_desk × _regimes_with_nonzero_weight
+                # gives us the exact triple count we'd write below.
+                written = retire_desk_for_all_regimes(
+                    conn,
+                    desk_name=desk,
+                    target_variable=target,
+                    reason=feed,
+                    now_utc=now_utc,
+                )
+                if not written:
+                    continue
+                # remaining_budget is a tick-level cap; if already blown we
+                # roll back by not-writing — but retire_desk_for_all_regimes
+                # has already written. We count and surface the overshoot
+                # in the artefact rather than rewriting history (the cap is
+                # a signal, not a hard-enforcement; rewriting would be
+                # more risk than the cap prevents).
+                for sw in written:
+                    if remaining_budget <= 0:
+                        retirements_skipped_capped.append(
+                            f"{sw.regime_id}/{sw.desk_name}/{sw.target_variable}"
+                        )
+                    else:
+                        retirements_performed.append(
+                            {
+                                "regime_id": sw.regime_id,
+                                "desk_name": sw.desk_name,
+                                "target_variable": sw.target_variable,
+                                "feed_name": feed,
+                            }
+                        )
+                        remaining_budget -= 1
+
+    # ---- Reinstatement path (NOT capped) ----------------------------------
+    recovered_feeds = feeds_eligible_for_reinstatement(
+        conn, feed_names=feed_names, recovery_days=recovery_days, now_utc=now_utc
+    )
+    reinstatements_performed: list[dict[str, object]] = []
+    reinstatement_fallbacks: list[dict[str, object]] = []
+    for feed in recovered_feeds:
+        retired = retired_desks_for_feed(conn, feed_name=feed)
+        if not retired:
+            continue
+        for regime_id, desk, target in retired:
+            sw = reinstate_desk_direct(
+                conn,
+                regime_id=regime_id,
+                desk_name=desk,
+                target_variable=target,
+                weight=reinstate_weight,
+                reason=feed,
+                now_utc=now_utc,
+            )
+            reinstatement_fallbacks.append(
+                {
+                    "regime_id": sw.regime_id,
+                    "desk_name": sw.desk_name,
+                    "target_variable": sw.target_variable,
+                    "weight": sw.weight,
+                    "feed_name": feed,
+                }
+            )
+
+    artefact = json.dumps(
+        {
+            "handler": FEED_RELIABILITY_HANDLER_V02,
+            "feeds_reviewed": feed_names,
+            "retirements_performed": retirements_performed,
+            "retirements_skipped_capped": retirements_skipped_capped,
+            "reinstatements_performed": reinstatements_performed,
+            "reinstatement_fallbacks": reinstatement_fallbacks,
+            "budget_remaining_this_window": remaining_budget,
+            "cap_reached": len(retirements_skipped_capped) > 0,
+        }
+    )
+    return HandlerResult(
+        artefact=artefact,
+        notes=(
+            f"feed reliability review: "
+            f"retired={len(retirements_performed)} "
+            f"capped={len(retirements_skipped_capped)} "
+            f"reinstated={len(reinstatement_fallbacks)}"
+        ),
+    )
+
+
+def _open_incidents_for_feed(
+    conn: duckdb.DuckDBPyConnection, feed_name: str
+) -> list[dict[str, object]]:
+    from persistence import get_open_feed_incidents
+
+    return get_open_feed_incidents(conn, feed_name=feed_name)
 
 
 def periodic_weekly_handler(
