@@ -59,7 +59,7 @@ class SoakRunner:
     db_path: Path
     checkpoint_path: Path
     tick_fn: TickFn
-    duration_seconds: float  # e.g. 2 * 86400 for production (§14.9 v1.8)
+    duration_seconds: float  # e.g. 4 * 3600 for production (§14.9 v1.10)
     cadence_seconds: float = 60.0  # 1 sim-day per wall-minute default
     sample_interval_seconds: float = 60.0
     checkpoint_interval_seconds: float = 600.0  # every 10 min default

@@ -1,9 +1,12 @@
-"""Reliability-gate CLI entry point (spec §12.2 point 3, §14.9 v1.8).
+"""Reliability-gate CLI entry point (spec §12.2 point 3, §14.9 v1.10).
 
 Drives the soak/ runner end-to-end. Typical invocations:
 
-    # Production soak (48 hours — v1.8 calibration):
-    uv run scripts/run_soak_test.py --duration-days 2 --cadence-s 60
+    # Production soak (4 hours — v1.10 calibration):
+    uv run scripts/run_soak_test.py --cadence-s 60
+
+    # Longer soak (force more exposure):
+    uv run scripts/run_soak_test.py --duration-days 1 --cadence-s 60
 
     # Short diagnostic (10 minutes, samples every 30 s):
     uv run scripts/run_soak_test.py --duration-days 0 \\
@@ -40,14 +43,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--duration-days",
         type=float,
-        default=2.0,
-        help="Wall-clock soak duration in days (default: 2 per spec v1.8).",
+        default=0.0,
+        help="Wall-clock soak duration in days (default: 0; see --duration-extra-s).",
     )
     parser.add_argument(
         "--duration-extra-s",
         type=float,
-        default=0.0,
-        help="Additional duration in seconds on top of --duration-days.",
+        default=14_400.0,
+        help="Additional duration in seconds on top of --duration-days "
+        "(default: 14400 = 4 hours per spec v1.10).",
     )
     parser.add_argument(
         "--cadence-s",
@@ -93,9 +97,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--n-sim-days",
         type=int,
-        default=3_000,
-        help="Length of the underlying LatentPath in sim-days (default: 3_000 — "
-        "enough for ~48 hours at 1 sim-day/min with headroom).",
+        default=500,
+        help="Length of the underlying LatentPath in sim-days (default: 500 — "
+        "enough for ~4 hours at 1 sim-day/min with headroom).",
     )
     return parser.parse_args(argv)
 
