@@ -121,6 +121,116 @@ def _forecasts_by_decision(
     return result
 
 
+def gate_failure_handler(
+    conn: duckdb.DuckDBPyConnection, event: ResearchLoopEvent
+) -> HandlerResult:
+    """Record a structured gate-failure artefact (§6.2, §7.2 harmful-case
+    feeder). v0.1 logs; remediation proposals (desk retire, re-train,
+    escalate) are §7.3 escalation-ladder handlers in later commits.
+
+    Payload contract (pre-registered):
+      - desk: str (desk_name)
+      - gate: str — "skill" | "sign_preservation" | "hot_swap"
+      - metric: float — gate's pass/fail margin
+      - failure_mode: str — short human-readable tag
+    """
+    if event.event_type != "gate_failure":
+        raise ValueError(f"gate_failure_handler on wrong event: {event.event_type!r}")
+    _ = conn
+    required = {"desk", "gate", "metric", "failure_mode"}
+    missing = required - set(event.payload.keys())
+    if missing:
+        return HandlerResult(
+            artefact=json.dumps({"error": f"missing payload keys: {sorted(missing)}"}),
+        )
+    artefact = json.dumps(
+        {
+            "handler": "gate_failure_v0.1",
+            "desk": event.payload["desk"],
+            "gate": event.payload["gate"],
+            "metric": event.payload["metric"],
+            "failure_mode": event.payload["failure_mode"],
+            "action": "logged_pending_rca",
+        }
+    )
+    return HandlerResult(
+        artefact=artefact,
+        notes=f"gate_failure logged for {event.payload['desk']}/{event.payload['gate']}",
+    )
+
+
+def regime_transition_handler(
+    conn: duckdb.DuckDBPyConnection, event: ResearchLoopEvent
+) -> HandlerResult:
+    """Log a regime transition (§6.2) — proposing a weight-promotion
+    refresh is v0.2 work. Payload contract:
+
+      - from_regime: str
+      - to_regime: str
+      - probability: float (>= 0.7 per §6.2 default threshold)
+    """
+    if event.event_type != "regime_transition":
+        raise ValueError(f"regime_transition_handler on wrong event: {event.event_type!r}")
+    _ = conn
+    required = {"from_regime", "to_regime", "probability"}
+    missing = required - set(event.payload.keys())
+    if missing:
+        return HandlerResult(
+            artefact=json.dumps({"error": f"missing payload keys: {sorted(missing)}"}),
+        )
+    artefact = json.dumps(
+        {
+            "handler": "regime_transition_v0.1",
+            "from": event.payload["from_regime"],
+            "to": event.payload["to_regime"],
+            "probability": event.payload["probability"],
+            "action": "logged_no_weight_refresh",  # v0.2 will trigger refresh
+        }
+    )
+    return HandlerResult(
+        artefact=artefact,
+        notes=(f"regime transition {event.payload['from_regime']} → {event.payload['to_regime']}"),
+    )
+
+
+def data_ingestion_failure_handler(
+    conn: duckdb.DuckDBPyConnection, event: ResearchLoopEvent
+) -> HandlerResult:
+    """Log a data-ingestion failure (§6.2, §14.5 data-quality invariant).
+    Remediation (mark affected desks stale, switch to fallback feed) is
+    v0.2 work. Payload contract:
+
+      - feed: str (name of the feed)
+      - scheduled_release_ts_utc: ISO-8601 string
+      - affected_desks: list[str]
+    """
+    if event.event_type != "data_ingestion_failure":
+        raise ValueError(f"data_ingestion_failure_handler on wrong event: {event.event_type!r}")
+    _ = conn
+    required = {"feed", "scheduled_release_ts_utc", "affected_desks"}
+    missing = required - set(event.payload.keys())
+    if missing:
+        return HandlerResult(
+            artefact=json.dumps({"error": f"missing payload keys: {sorted(missing)}"}),
+        )
+    artefact = json.dumps(
+        {
+            "handler": "data_ingestion_failure_v0.1",
+            "feed": event.payload["feed"],
+            "scheduled_release_ts_utc": event.payload["scheduled_release_ts_utc"],
+            "affected_desks": event.payload["affected_desks"],
+            "action": "logged_pending_fallback_check",
+        }
+    )
+    return HandlerResult(
+        artefact=artefact,
+        notes=(
+            f"data ingestion failure for {event.payload['feed']}; "
+            f"{len(event.payload['affected_desks'])} desks affected"
+        ),
+    )
+
+
 def periodic_weekly_handler(
     conn: duckdb.DuckDBPyConnection, event: ResearchLoopEvent
 ) -> HandlerResult:

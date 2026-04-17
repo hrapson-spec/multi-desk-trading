@@ -20,7 +20,12 @@ forbidden invariant are staged for v0.2+.
 from __future__ import annotations
 
 from .dispatcher import Dispatcher, HandlerFn, HandlerResult
-from .handlers import periodic_weekly_handler
+from .handlers import (
+    data_ingestion_failure_handler,
+    gate_failure_handler,
+    periodic_weekly_handler,
+    regime_transition_handler,
+)
 from .promotion import (
     PROMOTION_ARTEFACT_SHAPLEY_V02,
     PROMOTION_ARTEFACT_VALIDATED_V03,
@@ -39,7 +44,10 @@ __all__ = [
     "PROMOTION_ARTEFACT_SHAPLEY_V02",
     "PROMOTION_ARTEFACT_VALIDATED_V03",
     "ValidationResult",
+    "data_ingestion_failure_handler",
+    "gate_failure_handler",
     "periodic_weekly_handler",
+    "regime_transition_handler",
     "promote_weights",
     "propose_and_promote_from_shapley",
     "propose_validate_and_promote",

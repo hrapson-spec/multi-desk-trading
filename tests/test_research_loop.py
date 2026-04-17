@@ -30,7 +30,14 @@ from contracts.v1 import (
 )
 from controller import Controller, seed_cold_start
 from persistence.db import connect, init_db, insert_forecast
-from research_loop import Dispatcher, HandlerResult, periodic_weekly_handler
+from research_loop import (
+    Dispatcher,
+    HandlerResult,
+    data_ingestion_failure_handler,
+    gate_failure_handler,
+    periodic_weekly_handler,
+    regime_transition_handler,
+)
 
 
 @pytest.fixture
@@ -339,3 +346,163 @@ def test_dispatcher_wires_periodic_weekly_end_to_end(conn):
     ).fetchone()
     assert row[0] == window_end
     assert json.loads(row[1])["n_decisions"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Event-driven handlers (§6.2)
+# ---------------------------------------------------------------------------
+
+
+def test_gate_failure_handler_logs_structured_artefact(conn):
+    ts = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+    event = ResearchLoopEvent(
+        event_id="gate-1",
+        event_type="gate_failure",
+        triggered_at_utc=ts,
+        priority=0,
+        payload={
+            "desk": "storage_curve",
+            "gate": "sign_preservation",
+            "metric": -0.23,
+            "failure_mode": "dev_test_sign_flip",
+        },
+    )
+    result = gate_failure_handler(conn, event)
+    artefact = json.loads(result.artefact)
+    assert artefact["handler"] == "gate_failure_v0.1"
+    assert artefact["desk"] == "storage_curve"
+    assert artefact["gate"] == "sign_preservation"
+    assert artefact["metric"] == pytest.approx(-0.23)
+    assert artefact["failure_mode"] == "dev_test_sign_flip"
+    assert artefact["action"] == "logged_pending_rca"
+
+
+def test_gate_failure_handler_missing_payload_keys(conn):
+    ts = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+    event = ResearchLoopEvent(
+        event_id="gate-bad",
+        event_type="gate_failure",
+        triggered_at_utc=ts,
+        priority=0,
+        payload={"desk": "s", "gate": "skill"},  # missing metric, failure_mode
+    )
+    result = gate_failure_handler(conn, event)
+    artefact = json.loads(result.artefact)
+    assert "error" in artefact
+    assert "missing payload keys" in artefact["error"]
+
+
+def test_gate_failure_handler_rejects_wrong_event_type(conn):
+    ts = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+    event = ResearchLoopEvent(
+        event_id="wrong",
+        event_type="periodic_weekly",
+        triggered_at_utc=ts,
+        priority=0,
+        payload={},
+    )
+    with pytest.raises(ValueError, match="wrong event"):
+        gate_failure_handler(conn, event)
+
+
+def test_regime_transition_handler_logs_structured_artefact(conn):
+    ts = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+    event = ResearchLoopEvent(
+        event_id="rt-1",
+        event_type="regime_transition",
+        triggered_at_utc=ts,
+        priority=1,
+        payload={
+            "from_regime": "regime_boot",
+            "to_regime": "regime_contango",
+            "probability": 0.82,
+        },
+    )
+    result = regime_transition_handler(conn, event)
+    artefact = json.loads(result.artefact)
+    assert artefact["from"] == "regime_boot"
+    assert artefact["to"] == "regime_contango"
+    assert artefact["probability"] == pytest.approx(0.82)
+    assert artefact["action"] == "logged_no_weight_refresh"
+
+
+def test_data_ingestion_failure_handler_logs_structured_artefact(conn):
+    ts = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+    event = ResearchLoopEvent(
+        event_id="di-1",
+        event_type="data_ingestion_failure",
+        triggered_at_utc=ts,
+        priority=1,
+        payload={
+            "feed": "eia_wpsr",
+            "scheduled_release_ts_utc": "2026-04-16T14:30:00+00:00",
+            "affected_desks": ["storage_curve", "supply"],
+        },
+    )
+    result = data_ingestion_failure_handler(conn, event)
+    artefact = json.loads(result.artefact)
+    assert artefact["feed"] == "eia_wpsr"
+    assert artefact["affected_desks"] == ["storage_curve", "supply"]
+    assert artefact["action"] == "logged_pending_fallback_check"
+
+
+def test_dispatcher_handles_all_three_event_types_in_priority_order(conn):
+    """Priority 0 (gate_failure) fires before priorities 1 and 5. Each
+    event dispatches to its registered handler; the DB row is marked
+    completed and produced_artefact is populated."""
+    ts = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+
+    d = Dispatcher(conn=conn)
+    d.register("gate_failure", gate_failure_handler)
+    d.register("regime_transition", regime_transition_handler)
+    d.register("data_ingestion_failure", data_ingestion_failure_handler)
+
+    # Submit out-of-priority-order.
+    d.submit(
+        ResearchLoopEvent(
+            event_id="di",
+            event_type="data_ingestion_failure",
+            triggered_at_utc=ts,
+            priority=1,
+            payload={
+                "feed": "cftc_cot",
+                "scheduled_release_ts_utc": ts.isoformat(),
+                "affected_desks": ["storage_curve"],
+            },
+        )
+    )
+    d.submit(
+        ResearchLoopEvent(
+            event_id="rt",
+            event_type="regime_transition",
+            triggered_at_utc=ts,
+            priority=1,
+            payload={
+                "from_regime": "regime_a",
+                "to_regime": "regime_b",
+                "probability": 0.9,
+            },
+        )
+    )
+    d.submit(
+        ResearchLoopEvent(
+            event_id="gf",
+            event_type="gate_failure",
+            triggered_at_utc=ts,
+            priority=0,
+            payload={
+                "desk": "storage_curve",
+                "gate": "skill",
+                "metric": 0.05,
+                "failure_mode": "rmse_worse_than_baseline",
+            },
+        )
+    )
+
+    processed = d.run(now_utc=ts)
+    # gate_failure first (priority 0), then di and rt (priority 1, tied
+    # on triggered_at → event_id ordering: "di" < "rt" lex).
+    assert [p[0].event_id for p in processed] == ["gf", "di", "rt"]
+    # All three completed in the DB.
+    pending = d.pending_events()
+    assert pending == []
