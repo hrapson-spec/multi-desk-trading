@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .classical import ClassicalStorageCurveModel
 from .desk import StorageCurveDesk
 
-__all__ = ["StorageCurveDesk"]
+__all__ = ["ClassicalStorageCurveModel", "StorageCurveDesk"]

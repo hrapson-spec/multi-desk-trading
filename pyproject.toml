@@ -73,6 +73,11 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
 
+[tool.ruff.lint.per-file-ignores]
+# Statistical / ML code uses capital X for design matrix by convention;
+# lowercase is unreadable in linear-algebra-heavy files.
+"desks/**/classical.py" = ["N806"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

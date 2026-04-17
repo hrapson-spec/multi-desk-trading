@@ -41,11 +41,24 @@ def synthetic_price_path(
     start_price: float = 80.0,
     drift: float = 0.0,
     vol: float = 0.02,
+    ar1_coef: float = 0.0,
 ) -> np.ndarray:
-    """Deterministic geometric Brownian motion price path (integer steps)."""
+    """Deterministic GBM (ar1_coef=0) or AR(1) log-return process.
+
+    With ar1_coef != 0, log-returns follow r_t = ar1_coef * r_{t-1} + eps_t
+    where eps_t ~ N(drift, vol). Used to inject predictability into
+    deepen-phase gate tests; pure random-walk tests keep ar1_coef=0.
+    """
     rng = np.random.default_rng(seed)
     shocks = rng.normal(loc=drift, scale=vol, size=n)
-    log_returns = np.cumsum(shocks)
+    if ar1_coef == 0.0:
+        log_returns_series = shocks
+    else:
+        log_returns_series = np.empty(n)
+        log_returns_series[0] = shocks[0]
+        for t in range(1, n):
+            log_returns_series[t] = ar1_coef * log_returns_series[t - 1] + shocks[t]
+    log_returns = np.cumsum(log_returns_series)
     return start_price * np.exp(log_returns)
 
 
@@ -109,10 +122,37 @@ def make_forecasts_and_prints(
 
 
 def persistence_baseline(i: int, prior_prints: Sequence[Print]) -> float:
-    """Standard persistence baseline: last observed value, or 0 at t=0."""
+    """Standard persistence baseline: last observed value, or 0 at t=0.
+
+    NB: use this only when forecast horizon ≈ inter-print interval. For
+    multi-day horizons where successive Prints are spaced by the horizon,
+    this baseline has an information advantage over any desk that can only
+    see price at emission time — use `random_walk_price_baseline` instead.
+    """
     if not prior_prints:
         return 0.0
     return float(prior_prints[-1].value)
+
+
+def random_walk_price_baseline(
+    prices: np.ndarray, emission_indices: Sequence[int]
+) -> Callable[[int, Sequence[Print]], float]:
+    """Factory: baseline_fn that predicts `prices[emission_indices[i] - 1]`.
+
+    This is the spec-level "random walk on wti_front_month_close (one-week
+    horizon)" baseline: at each forecast row i, the naive prediction is the
+    price observed at emission time (no-change-over-horizon). Both the desk
+    and this baseline see the same information set at emission, which is the
+    apples-to-apples comparison for Gate 1.
+    """
+
+    def _baseline(i: int, _prior_prints: Sequence[Print]) -> float:
+        emission_i = emission_indices[i]
+        if emission_i < 1:
+            return float(prices[0])
+        return float(prices[emission_i - 1])
+
+    return _baseline
 
 
 # placate static analysers for the Callable type hint used in the signature above

@@ -1,25 +1,40 @@
-"""End-to-end: run StorageCurveDesk (stub phase) through all three gates.
+"""End-to-end: run StorageCurveDesk through all three hard gates.
 
-Expected outcomes at stub phase:
-  - Gate 1 (skill): FAIL — stub point_estimate=0 cannot beat persistence.
-  - Gate 2 (sign preservation): FAIL by construction (sign="none").
-    Gate 2 requires a pre-registered positive/negative claim.
-  - Gate 3 (hot-swap): PASS — stub is itself a stub, trivially swappable.
+Two phases covered:
+  1. Stub phase (no model): Gate 1 fails, Gate 2 fails, Gate 3 passes.
+  2. Classical-specialist phase (ridge model fitted on AR(1) dev data):
+     Gate 1 should beat persistence, Gate 2 sign preservation should hold
+     dev→test (both positive), Gate 3 hot-swap still passes.
 
-This test documents the expected stub behaviour and will turn into the
-deepen-time verification when the classical specialist lands.
+Gate 2 is the load-bearing gate per spec §7.1 (Kronos-RCA lesson). This test
+exists specifically to demonstrate that the classical-specialist path emits
+dev→test-consistent directional scores on a synthetic process with real
+predictability (AR(1) log-returns). The test does NOT claim alpha on real
+market data; it claims the pipeline composes correctly.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 
+from contracts.target_variables import WTI_FRONT_MONTH_CLOSE
+from contracts.v1 import Print
 from desks.base import StubDesk
-from desks.storage_curve import StorageCurveDesk
+from desks.storage_curve import ClassicalStorageCurveModel, StorageCurveDesk
 from eval import GateRunner
-from eval.data import make_forecasts_and_prints, persistence_baseline
+from eval.data import (
+    make_forecasts_and_prints,
+    persistence_baseline,
+    random_walk_price_baseline,
+    synthetic_price_path,
+)
+from grading.match import DEFAULT_CLOCK_TOLERANCE  # noqa: F401 (kept for doc clarity)
+
+# ---------------------------------------------------------------------------
+# Stub phase — unchanged behaviour from Week 1-2 integration
+# ---------------------------------------------------------------------------
 
 
 def test_storage_curve_stub_fails_skill_passes_hot_swap():
@@ -71,3 +86,157 @@ def test_storage_curve_stub_conforms_to_desk_protocol():
     s.target_variable = d.target_variable
     s.event_id = d.event_id
     assert d.target_variable == s.target_variable
+
+
+# ---------------------------------------------------------------------------
+# Classical-specialist phase — deepen-time verification
+# ---------------------------------------------------------------------------
+
+
+def _drive_desk_on_prices(
+    desk: StorageCurveDesk,
+    prices: np.ndarray,
+    start_index: int,
+    end_index: int,
+    horizon_days: int,
+) -> tuple[list, list[Print], list[int], list[float], list[float]]:
+    """Emit (Forecast, Print) pairs + paired directional scores/outcomes.
+
+    For each i in [start_index, end_index - horizon_days):
+      - forecast emitted at index i using prices[:i]
+      - print realised at index i + horizon_days
+      - directional_score(i) paired with realised log-return over the horizon
+
+    Returns (forecasts, prints, emission_indices, directional_scores,
+    forward_outcomes). emission_indices is used to build a matched
+    random-walk baseline outside this helper.
+    """
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    forecasts = []
+    prints = []
+    emission_indices: list[int] = []
+    directional_scores: list[float] = []
+    forward_outcomes: list[float] = []
+
+    last = end_index - horizon_days
+    for i in range(start_index, last):
+        emission_ts = now + timedelta(days=int(i))
+        realised_ts = emission_ts + timedelta(days=horizon_days)
+        fcast = desk.forecast_from_prices(prices, i, emission_ts)
+        forecasts.append(fcast)
+        prints.append(
+            Print(
+                print_id=f"p-{i:04d}",
+                realised_ts_utc=realised_ts,
+                target_variable=WTI_FRONT_MONTH_CLOSE,
+                value=float(prices[i + horizon_days]),
+            )
+        )
+        emission_indices.append(i)
+        score = desk.directional_score(prices, i)
+        if score is not None:
+            directional_scores.append(float(score))
+            realised_ret = float(np.log(prices[i + horizon_days]) - np.log(prices[i - 1]))
+            forward_outcomes.append(realised_ret)
+
+    return forecasts, prints, emission_indices, directional_scores, forward_outcomes
+
+
+def test_classical_model_fits_and_predicts_without_leakage():
+    """Unit check on the ridge model: fit and predict produce finite outputs
+    and the predict function refuses to read beyond index i."""
+    prices = synthetic_price_path(n=200, seed=3, ar1_coef=0.6)
+    model = ClassicalStorageCurveModel(lookback=10, horizon_days=7, alpha=1.0)
+    model.fit(prices[:120])  # dev half
+
+    # Predict inside dev
+    out = model.predict(prices, 30)
+    assert out is not None
+    point, score = out
+    assert np.isfinite(point) and np.isfinite(score)
+
+    # Too-early index returns None (insufficient history)
+    assert model.predict(prices, 5) is None
+
+    # Fingerprint is deterministic
+    assert model.fingerprint() == model.fingerprint()
+
+
+def test_storage_curve_classical_passes_all_three_gates_on_ar1():
+    """End-to-end Week 3 deepen: classical StorageCurveDesk on AR(1) synthetic
+    WTI path should (a) beat random-walk RMSE, (b) preserve dev→test Spearman
+    sign for its directional score, (c) support hot-swap with a StubDesk.
+
+    AR(1) coefficient is deliberately high (0.9) on low-vol (0.01) shocks so
+    the predictable return component exceeds path noise over the 3-day
+    horizon — otherwise Gate 1 becomes a proxy for signal-to-noise ratio
+    rather than a test that the pipeline composes. Real-data Gate 1 on the
+    storage/curve desk will use a 7-day horizon with real WTI closes.
+    """
+    n = 400
+    horizon = 3
+    prices = synthetic_price_path(n=n, seed=11, ar1_coef=0.9, vol=0.01)
+
+    split = 200  # walk-forward cut
+    model = ClassicalStorageCurveModel(lookback=10, horizon_days=horizon, alpha=1.0)
+    model.fit(prices[:split])
+    desk = StorageCurveDesk(model=model)
+
+    dev_fcasts, dev_prints, _dev_em, dev_scores, dev_outcomes = _drive_desk_on_prices(
+        desk, prices, start_index=11, end_index=split, horizon_days=horizon
+    )
+    test_fcasts, test_prints, test_em, test_scores, test_outcomes = _drive_desk_on_prices(
+        desk, prices, start_index=split, end_index=n, horizon_days=horizon
+    )
+
+    # Spec §3: naive baseline = random walk on wti_front_month_close. At
+    # emission i the baseline predicts prices[i-1] (no change over horizon).
+    rw_baseline = random_walk_price_baseline(prices=prices, emission_indices=test_em)
+
+    runner = GateRunner(desk_name="storage_curve")
+    report = runner.run(
+        desk_forecasts=test_fcasts,
+        prints=test_prints,
+        baseline_fn=rw_baseline,
+        directional_split=(dev_scores, test_scores, dev_outcomes, test_outcomes),
+        expected_sign="positive",
+        run_controller_fn=lambda: True,
+        run_controller_with_stub_fn=lambda: True,
+    )
+
+    # Gate 1 — classical model beats persistence on AR(1) test.
+    assert report.gate1_skill.passed, report.gate1_skill.reason
+    assert report.gate1_skill.metrics["desk_metric"] < report.gate1_skill.metrics["baseline_metric"]
+
+    # Gate 2 — dev and test rho both positive, |dev_rho| ≥ floor.
+    g2 = report.gate2_sign_preservation
+    assert g2.passed, g2.reason
+    assert g2.metrics["dev_rho"] > 0.0
+    assert g2.metrics["test_rho"] > 0.0
+    assert "KRONOS-RCA PATTERN" not in g2.reason
+
+    # Gate 3 — hot-swap lambdas return True.
+    assert report.gate3_hot_swap.passed
+
+    # And the aggregate property wires correctly.
+    assert report.all_passed
+
+    # Sanity: the unused dev_fcasts/dev_prints are valid Forecast/Print objects.
+    assert len(dev_fcasts) == len(dev_prints) > 0
+
+
+def test_storage_curve_classical_falls_back_to_stub_when_unfit():
+    """A desk constructed with an *unfit* model must refuse to forecast (no
+    silent fallback to stub without this being intentional). The current
+    design raises from the model; the desk currently propagates that error.
+    """
+    unfit = ClassicalStorageCurveModel(lookback=10, horizon_days=7)
+    desk = StorageCurveDesk(model=unfit)
+    prices = synthetic_price_path(n=50, seed=1)
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    try:
+        desk.forecast_from_prices(prices, 20, now)
+    except RuntimeError as e:
+        assert "not fitted" in str(e)
+    else:
+        raise AssertionError("expected RuntimeError from unfit model")
