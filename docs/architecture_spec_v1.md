@@ -1,4 +1,4 @@
-# Multi-Desk Trading Architecture — Specification v1.1
+# Multi-Desk Trading Architecture — Specification v1.2
 
 **Status**: Pre-registered / frozen on sign-off.
 **Date frozen**: 2026-04-17.
@@ -17,6 +17,7 @@ Any change to §4, §6, §7, §8, §9, §10, or §11 requires a v2 bump and inva
 |---|---|---|
 | v1.0 | 2026-04-17 | Initial freeze. |
 | v1.1 | 2026-04-17 | Review response. Addresses 16 items (see `docs/reviews/2026-04-17-v1.0-review.md`). Blockers: weight-promotion contradiction fixed (§8.3 vs §11), `target_variable` frozen registry (§4.6, `contracts/target_variables.py`), horizon semantics + event-slip policy (§4.7). Structural: CVaR cut from Phase 1, linear sizing committed (§8.2, §8.2a). Significant: weight-matrix dimensionality discipline (§8.5), provenance dirty-tree policy (§4.3), `data_ingestion_failure` trigger (§6.2), strengthened done-criterion (§12.2). Smaller: N/M pinned (§7.2), `regime_probabilities` on RegimeLabel (§4.3), routing rules as postconditions (§6.4), Macro vs classifier clarified (§10.1), `attribution_lodo` grain fixed + `decisions` table added (§3.2). New flagged risks: §14.6 budget realism, §14.7 Phase 2 readiness, §14.8 cold-start policy. |
+| v1.2 | 2026-04-17 | §3.2 correction: single DuckDB file (`data/duckdb/main.duckdb`) containing all tables, not per-table files. DuckDB is OLAP-oriented and handles many tables in one file efficiently; per-table splits complicate cross-table queries without Phase 1 benefit. Narrow correction; no other sections affected. |
 
 ---
 
@@ -108,7 +109,7 @@ All inter-component messages go through the bus. All bus messages are `contracts
 
 ### 3.2 Persistence
 
-Primary store: DuckDB. File per table under `data/duckdb/`:
+Primary store: DuckDB. **Single database file** at `data/duckdb/main.duckdb` containing all tables below. (DuckDB is OLAP-oriented and holds many tables in one file efficiently; per-table files would complicate cross-table attribution queries without Phase 1 benefit.) Tables:
 
 | Table | Rows | Indexed on |
 |---|---|---|
@@ -843,7 +844,7 @@ Full v1.0 review captured verbatim at `docs/reviews/2026-04-17-v1.0-review.md`.
 
 | Field | Value |
 |---|---|
-| Spec version | v1.1 |
+| Spec version | v1.2 |
 | Date frozen | 2026-04-17 |
 | Domain instance | crude oil (WTI/Brent) |
 | Portability target | equity VRP (Speckle and Spot) |
