@@ -57,7 +57,7 @@ Homepage = "https://github.com/hrapson-spec/multi-desk-trading"
 Spec = "https://github.com/hrapson-spec/multi-desk-trading/blob/main/docs/architecture_spec_v1.md"
 
 [tool.hatch.build.targets.wheel]
-packages = ["bus", "contracts", "grading", "persistence", "provenance", "scheduler"]
+packages = ["bus", "contracts", "desks", "grading", "persistence", "provenance", "scheduler"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "persistence/schema.sql" = "persistence/schema.sql"
