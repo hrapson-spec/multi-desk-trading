@@ -37,6 +37,7 @@ from persistence.db import (
 
 SHAPLEY_METRIC_POSITION_SIZE_DELTA = "position_size_delta"
 SHAPLEY_EXACT_MAX_N = 6  # §9.2 cap; beyond this switch to sampled
+SHAPLEY_DEFAULT_SAMPLES = 500  # §9.2 "100-1000 samples per decision"
 
 
 def _coalition_position_size(
@@ -115,14 +116,68 @@ def _shapley_values_for_decision(
     return values
 
 
+def _shapley_values_for_decision_sampled(
+    *,
+    weights: list[dict[str, Any]],
+    recent_forecasts: dict[tuple[str, str], Forecast],
+    k_regime: float,
+    pos_limit_regime: float,
+    n_samples: int,
+    seed: int,
+) -> dict[str, float]:
+    """Monte-Carlo Shapley via random permutation sampling.
+
+    For each sampled permutation π of desks, walk left-to-right and
+    attribute the marginal v(π[:i+1]) − v(π[:i]) to desk π[i]. Average
+    across samples gives an unbiased estimator of the Shapley value.
+
+    n_samples governs variance; §9.2 recommends 100–1000. Seed is
+    forwarded so tests can assert determinism (spec §3.1 replay).
+    """
+    all_desks = [str(row["desk_name"]) for row in weights]
+    n = len(all_desks)
+    if n == 0:
+        return {}
+    if n_samples <= 0:
+        raise ValueError(f"n_samples must be positive; got {n_samples}")
+
+    import random
+
+    rng = random.Random(seed)
+
+    totals: dict[str, float] = dict.fromkeys(all_desks, 0.0)
+    for _ in range(n_samples):
+        perm = all_desks[:]
+        rng.shuffle(perm)
+        # v(empty) = 0 (no contributors)
+        prev = 0.0
+        current_coalition: set[str] = set()
+        for d_name in perm:
+            current_coalition.add(d_name)
+            cur = _coalition_position_size(
+                weights=weights,
+                recent_forecasts=recent_forecasts,
+                k_regime=k_regime,
+                pos_limit_regime=pos_limit_regime,
+                included_desks=frozenset(current_coalition),
+            )
+            totals[d_name] += cur - prev
+            prev = cur
+
+    return {d: totals[d] / n_samples for d in all_desks}
+
+
 def compute_shapley_signal_space(
     *,
     conn: duckdb.DuckDBPyConnection,
     decisions: Sequence[Decision],
     recent_forecasts_by_decision: dict[str, dict[tuple[str, str], Forecast]],
     review_ts_utc: datetime,
+    mode: str = "auto",
+    n_samples: int = SHAPLEY_DEFAULT_SAMPLES,
+    seed: int = 0,
 ) -> list[AttributionShapley]:
-    """Aggregate exact Shapley values over the decision window.
+    """Aggregate Shapley values over the decision window.
 
     Args:
         conn: DuckDB connection. Used to pull SignalWeights/ControllerParams
@@ -137,29 +192,58 @@ def compute_shapley_signal_space(
             dict that fed that decision.
         review_ts_utc: The review period's anchor timestamp (end of week
             for weekly cadence).
+        mode: "exact" (requires n ≤ SHAPLEY_EXACT_MAX_N), "sampled", or
+            "auto" (exact if n ≤ cap else sampled).
+        n_samples: Monte-Carlo sample count per decision when mode="sampled".
+        seed: Base seed for sampled mode; the per-decision seed is this
+            plus the decision's emission index to decorrelate across
+            decisions while preserving replay determinism.
 
     Returns one AttributionShapley per desk, aggregated across the window
-    via average (arithmetic mean) of per-decision Shapley values. Sum is
-    also meaningful but average gives a bounded per-decision scale.
+    via average of per-decision Shapley values. coalitions_mode reflects
+    whichever path was taken (exact vs sampled) for the first decision's
+    n; mixed-mode windows across regime boundaries are not supported in
+    v0.1 (all decisions in the window should carry the same n).
     """
+    if mode not in ("exact", "sampled", "auto"):
+        raise ValueError(f"mode must be exact/sampled/auto; got {mode!r}")
     if not decisions:
         return []
 
     per_desk_totals: dict[str, float] = {}
     per_desk_n: dict[str, int] = {}
+    coalitions_mode: str = "exact"
 
-    for d in decisions:
+    for idx, d in enumerate(decisions):
         weights = get_latest_signal_weights(conn, d.regime_id)
         params = get_latest_controller_params(conn, d.regime_id)
         if params is None:
             raise RuntimeError(f"Shapley failed: no ControllerParams for regime {d.regime_id!r}")
         recent = recent_forecasts_by_decision.get(d.decision_id, {})
-        values = _shapley_values_for_decision(
-            weights=weights,
-            recent_forecasts=recent,
-            k_regime=float(params["k_regime"]),
-            pos_limit_regime=float(params["pos_limit_regime"]),
-        )
+        n_desks = len(weights)
+
+        use_sampled = mode == "sampled" or (mode == "auto" and n_desks > SHAPLEY_EXACT_MAX_N)
+        if use_sampled:
+            values = _shapley_values_for_decision_sampled(
+                weights=weights,
+                recent_forecasts=recent,
+                k_regime=float(params["k_regime"]),
+                pos_limit_regime=float(params["pos_limit_regime"]),
+                n_samples=n_samples,
+                seed=seed + idx,
+            )
+            coalitions_mode = "sampled"
+        else:
+            values = _shapley_values_for_decision(
+                weights=weights,
+                recent_forecasts=recent,
+                k_regime=float(params["k_regime"]),
+                pos_limit_regime=float(params["pos_limit_regime"]),
+            )
+            # Only mark "exact" if we haven't already seen a sampled row.
+            if coalitions_mode == "exact":
+                coalitions_mode = "exact"
+
         for name, val in values.items():
             per_desk_totals[name] = per_desk_totals.get(name, 0.0) + val
             per_desk_n[name] = per_desk_n.get(name, 0) + 1
@@ -176,7 +260,7 @@ def compute_shapley_signal_space(
                 shapley_value=float(avg),
                 metric_name=SHAPLEY_METRIC_POSITION_SIZE_DELTA,
                 n_decisions=n,
-                coalitions_mode="exact",
+                coalitions_mode=coalitions_mode,  # type: ignore[arg-type]
             )
         )
     return rows

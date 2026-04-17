@@ -27,7 +27,10 @@ from attribution import (
     compute_shapley_signal_space,
     persist_shapley_rows,
 )
-from attribution.shapley import _shapley_values_for_decision
+from attribution.shapley import (
+    _shapley_values_for_decision,
+    _shapley_values_for_decision_sampled,
+)
 from contracts.target_variables import WTI_FRONT_MONTH_CLOSE
 from contracts.v1 import (
     DirectionalClaim,
@@ -271,3 +274,145 @@ def test_shapley_empty_window_is_empty_output(conn):
         review_ts_utc=review,
     )
     assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# Sampled Shapley (§9.2 sampled path for n > 6)
+# ---------------------------------------------------------------------------
+
+
+def test_sampled_shapley_converges_to_exact_for_small_n():
+    """For n ≤ 6, sampled Shapley with ≥ 500 samples should land close
+    to the exact value. Uses a fixed seed for determinism."""
+    now = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+    weights = _make_weights(["a", "b", "c"], 1.0 / 3.0)
+    recent = {
+        ("a", WTI_FRONT_MONTH_CLOSE): _fcast("a", 100.0, now),
+        ("b", WTI_FRONT_MONTH_CLOSE): _fcast("b", 50.0, now),
+        ("c", WTI_FRONT_MONTH_CLOSE): _fcast("c", 30.0, now),
+    }
+    exact = _shapley_values_for_decision(
+        weights=weights,
+        recent_forecasts=recent,
+        k_regime=1.0,
+        pos_limit_regime=1000.0,
+    )
+    sampled = _shapley_values_for_decision_sampled(
+        weights=weights,
+        recent_forecasts=recent,
+        k_regime=1.0,
+        pos_limit_regime=1000.0,
+        n_samples=2000,
+        seed=1234,
+    )
+    # Expected Shapley values for uniform weights + asymmetric forecasts:
+    # v(S) = sum of 1/3 * point_estimate over S. For each desk, marginal
+    # is always exactly 1/3 * point_estimate → Shapley = point_estimate/3.
+    assert exact["a"] == pytest.approx(100.0 / 3.0)
+    assert exact["b"] == pytest.approx(50.0 / 3.0)
+    assert exact["c"] == pytest.approx(30.0 / 3.0)
+    # Sampled with 2000 samples should converge very tightly (deterministic
+    # path here — marginal contributions don't depend on order).
+    assert sampled["a"] == pytest.approx(exact["a"], abs=1e-9)
+    assert sampled["b"] == pytest.approx(exact["b"], abs=1e-9)
+    assert sampled["c"] == pytest.approx(exact["c"], abs=1e-9)
+
+
+def test_sampled_shapley_replay_deterministic_under_seed():
+    """Same seed ⇒ byte-identical sampled values (spec §3.1)."""
+    now = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+    weights = _make_weights(["a", "b", "c", "d"], 0.25)
+    recent = {
+        (d, WTI_FRONT_MONTH_CLOSE): _fcast(d, 80.0 + i * 10, now)
+        for i, d in enumerate(["a", "b", "c", "d"])
+    }
+    s1 = _shapley_values_for_decision_sampled(
+        weights=weights,
+        recent_forecasts=recent,
+        k_regime=1.0,
+        pos_limit_regime=1000.0,
+        n_samples=100,
+        seed=42,
+    )
+    s2 = _shapley_values_for_decision_sampled(
+        weights=weights,
+        recent_forecasts=recent,
+        k_regime=1.0,
+        pos_limit_regime=1000.0,
+        n_samples=100,
+        seed=42,
+    )
+    assert s1 == s2
+
+
+def test_sampled_shapley_unbiased_over_clipped_decision():
+    """With clip binding, exact Shapley values can be small / discrete.
+    Sampled estimator should converge to exact in expectation."""
+    now = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+    weights = _make_weights(["a", "b", "c"], 1.0 / 3.0)
+    recent = {(d, WTI_FRONT_MONTH_CLOSE): _fcast(d, 300.0, now) for d in ["a", "b", "c"]}
+    exact = _shapley_values_for_decision(
+        weights=weights,
+        recent_forecasts=recent,
+        k_regime=1.0,
+        pos_limit_regime=50.0,  # binding
+    )
+    sampled = _shapley_values_for_decision_sampled(
+        weights=weights,
+        recent_forecasts=recent,
+        k_regime=1.0,
+        pos_limit_regime=50.0,
+        n_samples=3000,
+        seed=7,
+    )
+    for d in ["a", "b", "c"]:
+        # Tolerance of 2% of the clip; 3000 samples is tight but variance
+        # in clip-binding coalitions is real.
+        assert sampled[d] == pytest.approx(exact[d], abs=1.0)
+
+
+def test_auto_mode_uses_sampled_for_large_n(conn):
+    """compute_shapley_signal_space(mode="auto") switches to sampled
+    when n > SHAPLEY_EXACT_MAX_N. coalitions_mode reflects the switch."""
+    boot = datetime(2026, 4, 16, 9, 0, 0, tzinfo=UTC)
+    t = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
+    review = datetime(2026, 4, 23, 0, 0, 0, tzinfo=UTC)
+    n = SHAPLEY_EXACT_MAX_N + 1
+    desk_names = [f"d{i}" for i in range(n)]
+    seed_cold_start(
+        conn,
+        desks=[(name, WTI_FRONT_MONTH_CLOSE) for name in desk_names],
+        regime_ids=["regime_boot"],
+        boot_ts=boot,
+        default_cold_start_limit=10_000.0,
+    )
+    ctrl = Controller(conn=conn)
+    recent = {
+        (name, WTI_FRONT_MONTH_CLOSE): _fcast(name, 80.0 + i, t)
+        for i, name in enumerate(desk_names)
+    }
+    d = ctrl.decide(now_utc=t, regime_label=_regime(t), recent_forecasts=recent)
+    rows = compute_shapley_signal_space(
+        conn=conn,
+        decisions=[d],
+        recent_forecasts_by_decision={d.decision_id: recent},
+        review_ts_utc=review,
+        mode="auto",
+        n_samples=200,
+        seed=1,
+    )
+    assert all(r.coalitions_mode == "sampled" for r in rows)
+    # Sum should still approximately equal v(N) − v(∅) = combined_signal.
+    assert sum(r.shapley_value for r in rows) == pytest.approx(d.combined_signal, rel=0.05)
+
+
+def test_compute_shapley_rejects_invalid_mode(conn):
+    review = datetime(2026, 4, 23, 0, 0, 0, tzinfo=UTC)
+    with pytest.raises(ValueError, match="exact/sampled/auto"):
+        compute_shapley_signal_space(
+            conn=conn,
+            decisions=[],
+            recent_forecasts_by_decision={},
+            review_ts_utc=review,
+            mode="bogus",
+        )
