@@ -14,11 +14,22 @@ The deliverable is the orchestration machinery — contracts, message bus, attri
 
 ```
 .
-├── contracts/          # Pydantic v2 schemas (contracts/v1.py once built)
-├── desks/              # Per-desk implementations (skeleton; see spec §5)
-├── tests/              # Boundary-purity, replay-determinism, gate tests
-├── scripts/            # Operational entry points (scheduler, grading harness)
-└── docs/               # Architecture spec and derived documents
+├── contracts/          # Pydantic v2 schemas — v1 frozen boundary (§4)
+├── persistence/        # DuckDB schema + insert/read helpers (§3.2)
+├── bus/                # Synchronous in-memory dispatcher + validator (§3.1)
+├── grading/            # Forecast → Print matching + Grade emission (§4.7)
+├── scheduler/          # Release-calendar cron + synthetic clock (§3.3)
+├── provenance/         # Input-snapshot hashing + dirty-tree policy (§4.3)
+├── desks/              # Per-desk implementations (§5). Storage & Curve
+│                       # deepened; 5 others stubbed.
+├── controller/         # Regime-conditional linear sizing + cold-start (§8)
+├── attribution/        # LODO (signal + grading) + Shapley exact (§9)
+├── research_loop/      # Dispatcher + periodic/event-driven handlers +
+│                       # Shapley-proportional weight promoter with
+│                       # held-out margin validation (§6, §8.3)
+├── eval/               # Three-hard-gate harness + synthetic data (§7.1)
+├── tests/              # 106 tests; ruff + mypy strict across major pkgs
+└── docs/               # Architecture spec + review responses
 ```
 
 ## Domain instance
@@ -31,14 +42,44 @@ Synthetic / research-only. Free public data sources only (EIA, OPEC MOMR text, J
 
 ## Status
 
+**Architecture complete end-to-end** (capability claim **asserted**, not verified;
+§12.2 Phase 1 non-requirement). Every §-section of the spec has a working
+implementation with tests. Verified capability requires the Phase 2 equity-VRP
+redeployment.
+
 - [x] v1.0 architecture spec frozen (2026-04-17)
 - [x] v1.1–v1.3 review responses shipped (see `docs/reviews/`)
-- [x] Week 0 scaffold: `contracts/v1.py` + `contracts/target_variables.py` + `bus/`, DuckDB schema (11 tables), grading harness (§4.7 matching), scheduler + `config/{release_calendar,data_sources}.yaml`, `provenance/`. Load-bearing tests `test_boundary_purity.py` + `test_replay_determinism.py` green. Tag `scaffold-v1.0`.
-- [ ] Stubs for all six desks
-- [ ] Desk 1 (Storage & Curve) deepened
-- [ ] Desks 2–5 deepened (Geopolitics → Supply/Demand parallel → Macro)
-- [ ] Controller weight matrix fitted
-- [ ] Phase 2: equity-VRP portability test
+- [x] Week 0 scaffold — `contracts/v1.py`, DuckDB schema (11 tables), bus with
+      registry + dirty-tree validation, grading harness, scheduler, provenance.
+      Tag `scaffold-v1.0`. Load-bearing `test_boundary_purity.py` +
+      `test_replay_determinism.py` green.
+- [x] Weeks 1–2 — stubs for all six desks. Tag `stubs-v1.0`.
+- [x] Desk 1 (Storage & Curve) classical-specialist deepen. Ridge over price
+      features; Gate 1 +8.99% RMSE vs random walk, Gate 2 ρ_dev=+0.70,
+      ρ_test=+0.64, Gate 3 hot-swap pass on AR(1) synthetic. Tag
+      `storage-curve-classical-v0.1`.
+- [x] Three-hard-gate evaluation harness — skill, sign-preservation
+      (Kronos-RCA), hot-swap. Tag `gates-v1.0`.
+- [x] Controller — regime-conditional linear sizing + cold-start
+      (§14.8 uniform weights, microsecond-precision boot_ts, lex tie-break).
+      Tag `controller-v1.0`.
+- [x] Attribution — LODO signal-space + grading-space + exact Shapley for
+      n ≤ 6. Tags `lodo-v0.1`, `shapley-v0.1`, `lodo-grading-v0.2`.
+- [x] Replay determinism — Forecast/Print/Grade + Controller/LODO/Shapley
+      payload-identical across runs. Tag `replay-determinism-v0.2`.
+- [x] Phase 1 smoke test — full pipeline through every subsystem in one pass.
+      Tag `phase1-smoke-v0.1`.
+- [x] Research loop dispatcher — priority-ordered event processor + periodic
+      and event-driven handlers. Tags `research-loop-v0.1`,
+      `event-handlers-v0.1`.
+- [x] Weight promotion (§8.3) — Shapley-proportional proposer + held-out
+      margin validation. Tags `promotion-v0.2`, `promotion-v0.3`.
+- [ ] Desks 2–5 deepened — blocked on real data / domain-specific models
+      (Geopolitics needs LLM event extraction; Supply/Demand/Macro need
+      real EIA/JODI feeds).
+- [ ] Sampled Shapley for n > 6.
+- [ ] LLM two-tier routing postcondition gate (§6.4).
+- [ ] Phase 2: equity-VRP portability test (3 months after Phase 1 exit).
 
 ## License
 
