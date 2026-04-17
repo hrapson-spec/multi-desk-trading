@@ -323,6 +323,50 @@ class AttributionShapley(BaseModel):
     coalitions_mode: Literal["exact", "sampled"]
 
 
+class LLMArtefact(BaseModel):
+    """LLM-produced artefact (spec §6.4).
+
+    Every LLM output flowing through the research loop is represented as
+    an LLMArtefact. The research-loop commit gate
+    (research_loop.llm_routing.commit_gate) validates the
+    tier-of-origin against the artefact_class postcondition: certain
+    artefact classes MUST be produced by API-tier models (Claude Opus /
+    Sonnet, GPT-4o), and local-tier outputs of those classes are
+    rejected at the gate.
+
+    artefact_class values:
+      - spec_edit: a draft or edit of any `desks/*/spec.md`. API-only.
+      - hypothesis_proposal: a new experiment proposal to be scheduled
+        onto the research-loop backlog. API-only.
+      - cross_desk_synthesis: any output citing ≥ 2 desks' Forecasts.
+        API-only. (The gate auto-detects this via the citations field
+        regardless of the caller's stated artefact_class.)
+      - daily_log_summary / attribution_query: local-tier allowed.
+      - other: local-tier allowed.
+
+    citations: desk names whose Forecasts the artefact cites. A
+    non-empty citations list with len ≥ 2 triggers the cross_desk_
+    synthesis override in the gate.
+    """
+
+    model_config = _FROZEN
+
+    artefact_id: str
+    produced_at_utc: datetime
+    tier_of_origin: Literal["local", "api"]
+    artefact_class: Literal[
+        "spec_edit",
+        "hypothesis_proposal",
+        "cross_desk_synthesis",
+        "daily_log_summary",
+        "attribution_query",
+        "other",
+    ]
+    content: str
+    model_name: str  # e.g. "mistral-7b-q4" or "claude-opus-4-7"
+    citations: list[str] = Field(default_factory=list)
+
+
 __all__ = [
     "AttributionLodo",
     "AttributionShapley",
@@ -340,4 +384,5 @@ __all__ = [
     "RegimeLabel",
     "ResearchLoopEvent",
     "Decision",
+    "LLMArtefact",
 ]
