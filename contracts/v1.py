@@ -289,7 +289,43 @@ class Decision(BaseModel):
     provenance: Provenance
 
 
+class AttributionLodo(BaseModel):
+    """Per-(decision, desk) LODO contribution (spec §9.1).
+
+    Populated by attribution.lodo.compute_lodo; one row per desk that was
+    part of the decision's regime weight row. contribution_metric units
+    are defined by metric_name (e.g. "position_size_delta",
+    "squared_error_delta"). The (decision_id, desk_name) pair is the
+    indexed-but-non-unique lookup key (spec §3.2 grain fix).
+    """
+
+    model_config = _FROZEN
+
+    attribution_id: str
+    decision_id: str
+    desk_name: str
+    contribution_metric: float
+    metric_name: str
+    computed_ts_utc: datetime
+
+
+class AttributionShapley(BaseModel):
+    """Per-(review window, desk) Shapley credit score (spec §9.2)."""
+
+    model_config = _FROZEN
+
+    attribution_id: str
+    review_ts_utc: datetime
+    desk_name: str
+    shapley_value: float
+    metric_name: str
+    n_decisions: int
+    coalitions_mode: Literal["exact", "sampled"]
+
+
 __all__ = [
+    "AttributionLodo",
+    "AttributionShapley",
     "Provenance",
     "ClockHorizon",
     "EventHorizon",

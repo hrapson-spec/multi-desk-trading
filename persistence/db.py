@@ -20,6 +20,8 @@ from typing import Any
 import duckdb
 
 from contracts.v1 import (
+    AttributionLodo,
+    AttributionShapley,
     ControllerParams,
     Decision,
     Forecast,
@@ -219,6 +221,45 @@ def insert_regime_label(conn: duckdb.DuckDBPyConnection, r: RegimeLabel) -> None
             _dumps(r.regime_probabilities),
             _dumps(r.transition_probabilities),
             _dumps(r.classifier_provenance.model_dump()),
+        ],
+    )
+
+
+def insert_attribution_lodo(conn: duckdb.DuckDBPyConnection, a: AttributionLodo) -> None:
+    conn.execute(
+        """
+        INSERT INTO attribution_lodo (
+            attribution_id, decision_id, desk_name,
+            contribution_metric, metric_name, computed_ts_utc
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [
+            a.attribution_id,
+            a.decision_id,
+            a.desk_name,
+            a.contribution_metric,
+            a.metric_name,
+            a.computed_ts_utc,
+        ],
+    )
+
+
+def insert_attribution_shapley(conn: duckdb.DuckDBPyConnection, a: AttributionShapley) -> None:
+    conn.execute(
+        """
+        INSERT INTO attribution_shapley (
+            attribution_id, review_ts_utc, desk_name,
+            shapley_value, metric_name, n_decisions, coalitions_mode
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            a.attribution_id,
+            a.review_ts_utc,
+            a.desk_name,
+            a.shapley_value,
+            a.metric_name,
+            a.n_decisions,
+            a.coalitions_mode,
         ],
     )
 
