@@ -23,6 +23,8 @@ import duckdb
 
 from contracts.target_variables import is_known
 from contracts.v1 import (
+    AttributionLodo,
+    AttributionShapley,
     ControllerParams,
     Decision,
     Forecast,
@@ -33,6 +35,8 @@ from contracts.v1 import (
     SignalWeight,
 )
 from persistence import (
+    insert_attribution_lodo,
+    insert_attribution_shapley,
     insert_controller_params,
     insert_decision,
     insert_forecast,
@@ -143,3 +147,11 @@ class Bus:
     def publish_research_event(self, e: ResearchLoopEvent) -> None:
         insert_research_loop_event(self._conn, e)
         self._dispatch(e)
+
+    def publish_attribution_lodo(self, a: AttributionLodo) -> None:
+        insert_attribution_lodo(self._conn, a)
+        self._dispatch(a)
+
+    def publish_attribution_shapley(self, a: AttributionShapley) -> None:
+        insert_attribution_shapley(self._conn, a)
+        self._dispatch(a)
