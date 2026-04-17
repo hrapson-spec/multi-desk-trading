@@ -38,20 +38,30 @@ from .promotion import (
     propose_weights_from_shapley,
     validate_candidate_vs_current,
 )
+from .remediation import (
+    HARMFUL_FAILURE_PREFIX,
+    RETIRE_ARTEFACT_PREFIX,
+    is_harmful,
+    retire_desk_for_regime,
+)
 
 __all__ = [
     "API_ONLY_CLASSES",
     "Dispatcher",
+    "HARMFUL_FAILURE_PREFIX",
     "HandlerFn",
     "HandlerResult",
     "LatencyReport",
     "PROMOTION_ARTEFACT_SHAPLEY_V02",
     "PROMOTION_ARTEFACT_VALIDATED_V03",
     "PerTypeLatency",
+    "RETIRE_ARTEFACT_PREFIX",
     "RoutingResult",
     "ValidationResult",
     "commit_gate",
     "compute_latency_report",
+    "is_harmful",
+    "retire_desk_for_regime",
     "data_ingestion_failure_handler",
     "gate_failure_handler",
     "periodic_weekly_handler",

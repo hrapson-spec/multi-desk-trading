@@ -18,7 +18,7 @@ layers per §6.4 routing discipline.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 
 import duckdb
 
@@ -26,6 +26,7 @@ from attribution import compute_shapley_signal_space
 from contracts.v1 import Decision, Forecast, Provenance, ResearchLoopEvent
 
 from .dispatcher import HandlerResult
+from .remediation import is_harmful, retire_desk_for_regime
 
 
 def _decisions_in_window(
@@ -124,38 +125,80 @@ def _forecasts_by_decision(
 def gate_failure_handler(
     conn: duckdb.DuckDBPyConnection, event: ResearchLoopEvent
 ) -> HandlerResult:
-    """Record a structured gate-failure artefact (§6.2, §7.2 harmful-case
-    feeder). v0.1 logs; remediation proposals (desk retire, re-train,
-    escalate) are §7.3 escalation-ladder handlers in later commits.
+    """Record a gate-failure artefact + auto-retire on harmful cases (§6.2, §7.2).
 
-    Payload contract (pre-registered):
+    v0.2 upgrade: when `failure_mode` starts with `"harmful:"`, the
+    handler invokes `remediation.retire_desk_for_regime` which writes a
+    zero-weight SignalWeight row for (regime, desk, target). The
+    Controller's next decision reads the new weight and drops the desk
+    from the combined_signal sum. §7.2 "hard-gate retire" action.
+
+    Payload contract:
       - desk: str (desk_name)
       - gate: str — "skill" | "sign_preservation" | "hot_swap"
       - metric: float — gate's pass/fail margin
-      - failure_mode: str — short human-readable tag
+      - failure_mode: str — short tag; "harmful:*" triggers auto-retire
+      - regime_id: str — required for harmful: auto-retire (the regime
+        under which the desk is being retired). Optional for non-harmful.
+      - target_variable: str — required for harmful: auto-retire.
     """
     if event.event_type != "gate_failure":
         raise ValueError(f"gate_failure_handler on wrong event: {event.event_type!r}")
-    _ = conn
     required = {"desk", "gate", "metric", "failure_mode"}
     missing = required - set(event.payload.keys())
     if missing:
         return HandlerResult(
             artefact=json.dumps({"error": f"missing payload keys: {sorted(missing)}"}),
         )
+
+    desk = event.payload["desk"]
+    gate = event.payload["gate"]
+    failure_mode = event.payload["failure_mode"]
+
+    # Default: log-only (v0.1 behaviour for non-harmful cases).
+    action = "logged_pending_rca"
+    retire_detail: dict[str, object] | None = None
+
+    if is_harmful(failure_mode):
+        # Harmful case: attempt auto-retire. Requires regime_id and
+        # target_variable in the payload; without them, log the missing
+        # context and keep the desk active (fail-safe).
+        retire_required = {"regime_id", "target_variable"}
+        retire_missing = retire_required - set(event.payload.keys())
+        if retire_missing:
+            action = "harmful_but_missing_retire_payload"
+            retire_detail = {"missing": sorted(retire_missing)}
+        else:
+            sw = retire_desk_for_regime(
+                conn,
+                regime_id=event.payload["regime_id"],
+                desk_name=desk,
+                target_variable=event.payload["target_variable"],
+                reason=failure_mode,
+                now_utc=datetime.now(tz=UTC),
+            )
+            action = "retired"
+            retire_detail = {
+                "weight_id": sw.weight_id,
+                "regime_id": sw.regime_id,
+                "target_variable": sw.target_variable,
+                "validation_artefact": sw.validation_artefact,
+            }
+
     artefact = json.dumps(
         {
-            "handler": "gate_failure_v0.1",
-            "desk": event.payload["desk"],
-            "gate": event.payload["gate"],
+            "handler": "gate_failure_v0.2",
+            "desk": desk,
+            "gate": gate,
             "metric": event.payload["metric"],
-            "failure_mode": event.payload["failure_mode"],
-            "action": "logged_pending_rca",
+            "failure_mode": failure_mode,
+            "action": action,
+            "retire_detail": retire_detail,
         }
     )
     return HandlerResult(
         artefact=artefact,
-        notes=f"gate_failure logged for {event.payload['desk']}/{event.payload['gate']}",
+        notes=f"gate_failure {action} for {desk}/{gate}",
     )
 
 

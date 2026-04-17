@@ -369,7 +369,7 @@ def test_gate_failure_handler_logs_structured_artefact(conn):
     )
     result = gate_failure_handler(conn, event)
     artefact = json.loads(result.artefact)
-    assert artefact["handler"] == "gate_failure_v0.1"
+    assert artefact["handler"] == "gate_failure_v0.2"
     assert artefact["desk"] == "storage_curve"
     assert artefact["gate"] == "sign_preservation"
     assert artefact["metric"] == pytest.approx(-0.23)
