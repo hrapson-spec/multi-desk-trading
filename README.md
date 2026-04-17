@@ -93,10 +93,15 @@ redeployment.
       auto-reclassifies cross-desk synthesis. Tag `llm-routing-v0.1`.
 - [x] Spec v1.5 revision — §0 change log + §15 derivation-trace row
       for the HMM + LLM routing follow-ups.
+- [x] Reliability-gate runner (§12.2 point 3, v1.6) — `soak/` package
+      + `scripts/run_soak_test.py` CLI. Duration recalibrated 28 d → 7 d;
+      checkpoint-and-resume across OS reboots; real-time drip-feed;
+      ResourceMonitor with numeric thresholds on RSS / FDs / DB size.
+      Tag `soak-runner-v0.1`. The 7-day production soak remains an
+      operator-side commitment.
 - [ ] Real data ingest pipelines (EIA WPSR / CFTC COT / JODI / FRED /
       news scraping for geopolitics LLM extraction).
-- [ ] Reliability gate: 28-day wall-clock soak test (§14.9 — operator
-      commitment required).
+- [ ] Actually run the 7-day Reliability-gate soak (operator task).
 - [ ] HDP-HMM regime classifier (v0.3+).
 - [ ] Phase 2: equity-VRP portability test (3 months after Phase 1 exit).
 
