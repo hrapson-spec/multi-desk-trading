@@ -16,9 +16,19 @@ from .lodo import (
     compute_lodo_signal_space,
     persist_lodo_rows,
 )
+from .shapley import (
+    SHAPLEY_EXACT_MAX_N,
+    SHAPLEY_METRIC_POSITION_SIZE_DELTA,
+    compute_shapley_signal_space,
+    persist_shapley_rows,
+)
 
 __all__ = [
     "LODO_METRIC_POSITION_SIZE_DELTA",
+    "SHAPLEY_EXACT_MAX_N",
+    "SHAPLEY_METRIC_POSITION_SIZE_DELTA",
     "compute_lodo_signal_space",
+    "compute_shapley_signal_space",
     "persist_lodo_rows",
+    "persist_shapley_rows",
 ]
