@@ -323,6 +323,48 @@ def get_latest_signal_weights(
     ]
 
 
+def get_latest_regime_label(
+    conn: duckdb.DuckDBPyConnection, as_of_ts: datetime | None = None
+) -> dict[str, Any] | None:
+    """Most recent RegimeLabel at or before as_of_ts (None → no bound).
+
+    Returns a dict with the hydrated probability/transition maps, or None
+    if no RegimeLabel row exists in the bounded window.
+    """
+    if as_of_ts is None:
+        row = conn.execute(
+            """
+            SELECT label_id, classification_ts_utc, regime_id,
+                   regime_probabilities, transition_probabilities, classifier_provenance
+            FROM regime_labels
+            ORDER BY classification_ts_utc DESC, label_id DESC
+            LIMIT 1
+            """,
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT label_id, classification_ts_utc, regime_id,
+                   regime_probabilities, transition_probabilities, classifier_provenance
+            FROM regime_labels
+            WHERE classification_ts_utc <= ?
+            ORDER BY classification_ts_utc DESC, label_id DESC
+            LIMIT 1
+            """,
+            [as_of_ts],
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "label_id": row[0],
+        "classification_ts_utc": row[1],
+        "regime_id": row[2],
+        "regime_probabilities": json.loads(row[3]),
+        "transition_probabilities": json.loads(row[4]),
+        "classifier_provenance": json.loads(row[5]),
+    }
+
+
 def get_latest_controller_params(
     conn: duckdb.DuckDBPyConnection, regime_id: str
 ) -> dict[str, Any] | None:
