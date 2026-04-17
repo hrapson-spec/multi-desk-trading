@@ -867,6 +867,7 @@ For future readers: the five rounds of clarifying discussion that produced v1.0,
 | `regime_probabilities` on RegimeLabel; routing postconditions; `attribution_lodo` grain fix + `decisions` table | v1.1 (review response) |
 | DuckDB single-file layout (§3.2) | v1.2 (review response) |
 | `controller_params` separate table; rollback as distinct human operation; `boot_ts` microsecond precision + tie-break rule; regularisation assumed for weight fits; `config/data_sources.yaml` as the owning artefact for ingestion-failure payload | v1.3 (review response) |
+| Architecture completion (implementations + tests for every §-section): three-hard-gate harness, StorageCurveDesk classical-specialist deepen, regime-conditional linear Controller with §14.8 cold-start, LODO signal- and grading-space, Shapley exact and sampled, replay-determinism (Controller + attribution), Phase-1 end-to-end smoke, research-loop dispatcher + periodic + event-driven handlers (gate_failure/regime_transition/data_ingestion_failure), §8.3 weight-promotion v0.2/v0.3 with held-out margin validation | Tags `gates-v1.0`, `storage-curve-classical-v0.1`, `controller-v1.0`, `lodo-v0.1`, `phase1-smoke-v0.1`, `shapley-v0.1`, `replay-determinism-v0.2`, `research-loop-v0.1`, `promotion-v0.2`, `lodo-grading-v0.2`, `promotion-v0.3`, `event-handlers-v0.1`, `shapley-sampled-v0.2` (all shipped in one session, 2026-04-17) |
 
 Full v1.0 review captured verbatim at `docs/reviews/2026-04-17-v1.0-review.md`.
 
