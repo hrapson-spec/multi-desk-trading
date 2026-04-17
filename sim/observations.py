@@ -74,14 +74,17 @@ class DeskObservation:
 class ObservationConfig:
     """Noise / leakage / contamination knobs, all replay-deterministic."""
 
-    # Per-desk measurement noise std (clean mode; also baseline for other modes)
+    # Per-desk measurement noise std (clean mode; also baseline for other
+    # modes). Non-price channels carry AR(1) return streams whose daily
+    # stationary std is ~0.01; noise is an order of magnitude smaller so
+    # the signal remains identifiable.
     noise_std: dict[str, float] = field(
         default_factory=lambda: {
-            "storage_curve": 0.05,  # roughly $4 std on an $80 price
-            "supply": 0.05,
-            "demand": 0.05,
-            "geopolitics": 0.02,
-            "macro": 0.02,
+            "storage_curve": 0.01,  # 1% of price
+            "supply": 0.001,
+            "demand": 0.001,
+            "geopolitics": 0.002,
+            "macro": 0.001,
         }
     )
 
@@ -114,14 +117,24 @@ class ObservationConfig:
     chatter_amplitude: float = 0.10
 
 
+MARKET_PRICE_NOISE_STD = 0.005  # every desk sees market price with small noise
+
+
 @dataclass(frozen=True)
 class ObservationChannels:
     """Dispatcher returning `channels[desk_name] → DeskObservation`.
 
     Construct with a LatentPath + mode + config; call `.by_desk[name]`.
+
+    `market_price` is the price stream every desk has access to (WTI
+    ticker is a shared observable). Per-desk classical specialists use
+    it as the reference for their log-return conversion to a Forecast
+    `point_estimate`. Noise on market_price is small (realistic for
+    exchange-traded products) and shared across desks.
     """
 
     by_desk: dict[str, DeskObservation]
+    market_price: np.ndarray
     mode: Mode
     config: ObservationConfig
     seed: int
@@ -147,8 +160,14 @@ class ObservationChannels:
         else:
             by_desk = _build_realistic(latent, cfg, seed)
 
+        # Shared market-price observable across all desks.
+        n = latent.n_days
+        rng_mp = _rng_for(seed, 999)
+        market_price = latent.price * (1.0 + MARKET_PRICE_NOISE_STD * rng_mp.standard_normal(n))
+
         return cls(
             by_desk=by_desk,
+            market_price=market_price,
             mode=mode,
             config=cfg,
             seed=seed,
@@ -169,6 +188,11 @@ def _rng_for(seed: int, stream_id: int) -> np.random.Generator:
 def _build_clean(
     latent: LatentPath, cfg: ObservationConfig, seed: int
 ) -> dict[str, DeskObservation]:
+    """Clean 1:1 observations (Phase A). Each desk sees its own latent
+    factor + its own AR(1) return driver layered on top. The AR(1)
+    driver is what makes each desk's channel predictively informative
+    about the next horizon's log-return; the OU fundamental layer stays
+    as realism."""
     n = latent.n_days
     rng_sc, rng_s, rng_d, rng_g, rng_m = (_rng_for(seed, k) for k in range(5))
 
@@ -188,8 +212,17 @@ def _build_clean(
     g_noise_int = cfg.noise_std["geopolitics"] * rng_g.standard_normal(n)
     m_noise = cfg.noise_std["macro"] * rng_m.standard_normal(n)
 
+    # Per-desk AR(1) return stream exposed directly as a "signal" channel.
+    # This is what gives each desk predictively-useful information about
+    # future log-return; the OU fundamentals stay as architectural
+    # flavouring. Each desk's classical specialist treats its channel
+    # value as a signal in return space.
+    ar1 = latent.desk_ar1
+
     stale_false = np.zeros(n, dtype=bool)
     return {
+        # storage_curve sees price directly; its AR(1) driver is already
+        # baked into the log-price via the latent state's cumulative sum.
         "storage_curve": DeskObservation(
             components={
                 "price": price + sc_noise_price,
@@ -197,23 +230,36 @@ def _build_clean(
             },
             stale_mask=stale_false,
         ),
+        # Non-storage desks see a "signal" channel = AR(1) return stream.
+        # The OU fundamental (supply / demand / xi / event_intensity) is
+        # still exposed as an auxiliary component.
         "supply": DeskObservation(
-            components={"supply": supply + s_noise},
+            components={
+                "supply": ar1["supply"] + s_noise,
+                "supply_level": supply,  # aux: OU level, not used by the Phase A ridge
+            },
             stale_mask=stale_false,
         ),
         "demand": DeskObservation(
-            components={"demand": demand + d_noise},
+            components={
+                "demand": ar1["demand"] + d_noise,
+                "demand_level": demand,
+            },
             stale_mask=stale_false,
         ),
         "geopolitics": DeskObservation(
             components={
                 "event_indicator": events + g_noise_ind,
-                "event_intensity": intensity + g_noise_int,
+                "event_intensity": ar1["geopolitics"] + g_noise_int,
+                "event_intensity_raw": intensity,  # aux
             },
             stale_mask=stale_false,
         ),
         "macro": DeskObservation(
-            components={"xi": xi + m_noise},
+            components={
+                "xi": ar1["macro"] + m_noise,
+                "xi_level": xi,  # aux
+            },
             stale_mask=stale_false,
         ),
     }

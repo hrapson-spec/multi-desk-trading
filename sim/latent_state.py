@@ -41,7 +41,27 @@ DT = 1.0 / 252.0  # trading-day timestep
 
 @dataclass(frozen=True)
 class LatentMarketConfig:
-    """Per-run config for the 5-factor simulator. All values annualised."""
+    """Per-run config for the 5-factor simulator. All values annualised.
+
+    **Two structural layers** (plan §A):
+      1. Schwartz-Smith + OU fundamentals (chi, xi, supply, demand) +
+         Hawkes events. These provide the realistic regime-scaled
+         macroeconomic dynamics that make the simulator plausible as an
+         oil-market testbed.
+      2. **Per-desk AR(1) return drivers** — one AR(1) process per desk
+         that adds directly to log-return. Each desk observes its own
+         driver in its channel, so ridge models have a clean,
+         predictable signal to learn. Regime scaling amplifies the
+         dominant desk's driver in each regime (e.g. supply_dominated ⇒
+         supply_ar1 vol ×2.5), which is what makes regime-conditional
+         Shapley differentiation measurable.
+
+    Without layer 2, ridge-on-4-features against OU-only fundamentals
+    has empirically worse-than-random-walk RMSE (noise dominates
+    mean-reversion signal). Layer 2 is scoped to the Phase A
+    architectural test; real-data Phase 2+ uses realistic
+    signal-to-noise ratios and different fitting techniques.
+    """
 
     # Schwartz-Smith short factor (χ): OU around 0
     chi_kappa: float = 2.0  # mean-reversion rate (half-life ≈ 0.35 yr at κ=2)
@@ -75,6 +95,29 @@ class LatentMarketConfig:
     event_demand_impact: float = 0.0
     event_chi_impact: float = 0.15  # short-term vol / disruption
 
+    # Per-desk AR(1) return drivers (layer 2). Each rho ∈ [0, 1); vol is
+    # annualised. The stream is added to log-return each day and exposed
+    # to the corresponding desk's channel (see sim/observations.py).
+    # Default zero ⇒ disabled (pure Schwartz-Smith/OU).
+    desk_ar1_rho: dict[str, float] = field(
+        default_factory=lambda: {
+            "storage_curve": 0.0,
+            "supply": 0.0,
+            "demand": 0.0,
+            "geopolitics": 0.0,
+            "macro": 0.0,
+        }
+    )
+    desk_ar1_vol: dict[str, float] = field(
+        default_factory=lambda: {
+            "storage_curve": 0.0,
+            "supply": 0.0,
+            "demand": 0.0,
+            "geopolitics": 0.0,
+            "macro": 0.0,
+        }
+    )
+
     # Correlations (Brownian motions) — default independent
     # (kept minimal for interpretability; a single latent cov matrix would
     # make the factors non-identifiable from observations).
@@ -92,6 +135,9 @@ class LatentPath:
     event_intensity: np.ndarray  # λ_t per day (baseline + self-excitation)
     log_price: np.ndarray
     price: np.ndarray  # exp(log_price)
+    # Per-desk AR(1) return drivers — layer 2 of the sim (see config).
+    # dict[desk_name → ndarray[n_days]]. Always present; zero if disabled.
+    desk_ar1: dict[str, np.ndarray]
     regimes: RegimeSequence
     config: LatentMarketConfig
 
@@ -151,6 +197,18 @@ class LatentMarket:
         demand[0] = c.demand_initial
         event_intensity[0] = c.event_mu0
 
+        # Per-desk AR(1) return drivers (layer 2). One stream per desk,
+        # deterministic via SeedSequence. Each desk observes its own
+        # driver in its channel; log-return receives the sum. Local
+        # import avoids a module-level cycle with sim.observations.
+        from .observations import DESK_NAMES as _DESK_NAMES
+
+        desk_ar1: dict[str, np.ndarray] = {d: np.zeros(self.n_days) for d in _DESK_NAMES}
+        desk_ar1_rngs: dict[str, np.random.Generator] = {
+            d: np.random.default_rng(np.random.SeedSequence([self.seed, 1000 + k]))
+            for k, d in enumerate(_DESK_NAMES)
+        }
+
         # Accumulate past-event contribution to intensity via recursive
         # exponential-decay update. Hawkes intensity is
         #     λ_t = μ_0 + α · Σ_{events s < t} β·exp(−β(t−s))
@@ -170,6 +228,30 @@ class LatentMarket:
                 - c.chi_kappa * chi[t - 1] * DT
                 + c.chi_vol * chi_vol_scale * sqrt_dt * rng_chi.standard_normal()
             )
+
+            # Per-desk AR(1) return drivers. Each is scaled by the regime-
+            # dependent factor (e.g. "supply_vol" multiplier applies to the
+            # supply desk's AR(1) driver in supply_dominated regime).
+            for desk_name in _DESK_NAMES:
+                rho = c.desk_ar1_rho.get(desk_name, 0.0)
+                vol = c.desk_ar1_vol.get(desk_name, 0.0)
+                if rho == 0.0 and vol == 0.0:
+                    continue
+                # Regime scaling lookup: reuse the same keys as the factor
+                # names for convenience — e.g. supply desk's AR(1) vol is
+                # scaled by "supply_vol" in supply_dominated regime.
+                regime_scale_key = {
+                    "storage_curve": "chi_vol",
+                    "supply": "supply_vol",
+                    "demand": "demand_vol",
+                    "geopolitics": "event_mu0",
+                    "macro": "chi_vol",
+                }.get(desk_name, "chi_vol")
+                vol_scale = regime_scaling(self.regime_config, r, regime_scale_key)
+                desk_ar1[desk_name][t] = (
+                    rho * desk_ar1[desk_name][t - 1]
+                    + vol * vol_scale * sqrt_dt * desk_ar1_rngs[desk_name].standard_normal()
+                )
 
             # Xi: drifting Brownian motion on log-price equilibrium
             xi[t] = xi[t - 1] + c.xi_drift * DT + c.xi_vol * sqrt_dt * rng_xi.standard_normal()
@@ -209,7 +291,15 @@ class LatentMarket:
                 demand[t] += c.event_demand_impact * sqrt_dt
                 chi[t] += c.event_chi_impact * sqrt_dt
 
-        log_price = chi + xi + c.balance_loading_gamma * (supply - demand)
+        # Log-price = Schwartz-Smith + OU fundamentals + cumulative sum of
+        # all per-desk AR(1) return drivers. The desk AR(1) streams are
+        # *returns* not levels, so we accumulate them.
+        ar1_sum_returns = np.zeros(self.n_days)
+        for desk_name in _DESK_NAMES:
+            ar1_sum_returns += desk_ar1[desk_name]
+        ar1_log_price_component = np.cumsum(ar1_sum_returns)
+
+        log_price = chi + xi + c.balance_loading_gamma * (supply - demand) + ar1_log_price_component
         price = np.exp(log_price)
 
         return LatentPath(
@@ -221,6 +311,73 @@ class LatentMarket:
             event_intensity=event_intensity,
             log_price=log_price,
             price=price,
+            desk_ar1=desk_ar1,
             regimes=regimes,
             config=self.config,
         )
+
+
+def phase_a_config() -> LatentMarketConfig:
+    """High-signal config for the Phase A integration test (plan §A).
+
+    The default LatentMarketConfig is calibrated to plausible real-oil-market
+    annualised statistics, which produces a signal-to-noise ratio too low
+    for a 4-feature ridge to beat random-walk RMSE on ~200-day held-out
+    data. Phase A is an architectural test, not an alpha test; we boost
+    the predictable components:
+
+      - chi_kappa = 12 (short-term reversion, ~3-week half-life — stronger
+        reversion means "chi returns to 0" is a more useful prediction
+        over the 3-day horizon).
+      - chi_vol = 1.0 annualised (chi amplitude ±0.25 typical).
+      - supply/demand_kappa = 5.0 (faster OU reversion).
+      - balance_loading_gamma = 0.6 (supply/demand shocks move price
+        meaningfully).
+      - event impacts doubled so geopolitics differentiates from macro
+        in event regimes.
+
+    Production-calibrated values (real-data Phase 2+) will differ; this
+    config is scoped to the Phase A asserted-capability test.
+    """
+    # Phase A: dominant-signal AR(1) drivers per desk, with the OU
+    # fundamental layer effectively turned off so the test isolates the
+    # architecture (Controller + LODO + Shapley + weight promotion) from
+    # the question "does ridge-on-4-features have alpha on a multi-factor
+    # oil market?". The OU fundamentals are always there as architectural
+    # flavouring but the predictable variance comes from the AR(1) drivers.
+    #
+    # Vols are chosen so (a) each desk's ridge can learn its own AR(1)
+    # well enough to beat random-walk RMSE on a held-out split and (b) the
+    # cumulative sum of returns doesn't drift log-price catastrophically
+    # over 500 days.
+    rho = 0.95
+    vol = 0.04
+    return LatentMarketConfig(
+        # Baseline fundamentals: very low vol so AR(1) drivers dominate.
+        chi_kappa=2.0,
+        chi_vol=0.02,
+        xi_drift=0.0,
+        xi_vol=0.01,
+        supply_kappa=4.0,
+        supply_vol=0.05,
+        demand_kappa=4.0,
+        demand_vol=0.05,
+        balance_loading_gamma=0.05,
+        event_supply_impact=-0.05,
+        event_chi_impact=0.03,
+        # Per-desk AR(1) drivers — dominant signal source.
+        desk_ar1_rho={
+            "storage_curve": rho,
+            "supply": rho,
+            "demand": rho,
+            "geopolitics": rho,
+            "macro": rho,
+        },
+        desk_ar1_vol={
+            "storage_curve": vol,
+            "supply": vol,
+            "demand": vol,
+            "geopolitics": vol,
+            "macro": vol,
+        },
+    )

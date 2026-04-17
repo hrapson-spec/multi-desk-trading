@@ -22,7 +22,7 @@ Design choices locked from user research (Q1–Q3):
 
 from __future__ import annotations
 
-from .latent_state import LatentMarket, LatentMarketConfig, LatentPath
+from .latent_state import LatentMarket, LatentMarketConfig, LatentPath, phase_a_config
 from .observations import ObservationChannels, ObservationConfig
 from .regimes import Regime, RegimeConfig, RegimeSequence
 
@@ -35,4 +35,5 @@ __all__ = [
     "Regime",
     "RegimeConfig",
     "RegimeSequence",
+    "phase_a_config",
 ]
