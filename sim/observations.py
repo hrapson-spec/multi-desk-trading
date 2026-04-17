@@ -315,54 +315,61 @@ def _apply_lag(arr: np.ndarray, lag: int) -> np.ndarray:
 def _build_leakage(
     latent: LatentPath, cfg: ObservationConfig, seed: int
 ) -> dict[str, DeskObservation]:
-    """Mix on STANDARDIZED factors (z-scores), rescale back to each factor's
-    native scale. This keeps the leakage proportional to the receiving
-    factor's magnitude, not dominated by the largest-scale source."""
+    """Phase B (plan §A): diagonal-dominant mixing on the per-desk AR(1)
+    return streams. Each non-storage desk's primary channel is
+    (1 − leakage_strength) × own AR(1) + (leakage_strength / 4) × sum
+    of other desks' AR(1) + noise. Storage_curve still sees price
+    directly (price already embeds every desk's AR(1) via the log-price
+    cumulative sum).
+    """
     n = latent.n_days
-    n_factors = 5
-    latent_matrix = _latent_vector(latent)  # (n, 5)
-    z, mu, sigma = _standardize(latent_matrix)
+    rngs = [_rng_for(seed, 100 + k) for k in range(5)]
+
     m = _mixing_matrix(cfg.leakage_strength)
+    ar1 = latent.desk_ar1
+    ar1_matrix = np.column_stack([ar1[d] for d in DESK_NAMES])
+    mixed = ar1_matrix @ m.T  # (n, 5) — each column is the mixed signal for that desk
 
-    # Mix in standardized space
-    z_mixed = z @ m.T  # (n, 5)
-    # Rescale each column back to its own desk's native scale
-    desk_signals = z_mixed * sigma + mu
-
-    rngs = [_rng_for(seed, 100 + k) for k in range(n_factors)]
     stale_false = np.zeros(n, dtype=bool)
-
-    sc_log_price_mixed = desk_signals[:, 0]
-    sc_price = np.exp(sc_log_price_mixed)
-    sc_noise_p = cfg.noise_std["storage_curve"] * sc_price * rngs[0].standard_normal(n)
+    price = latent.price
+    balance = latent.balance
+    sc_noise_p = cfg.noise_std["storage_curve"] * price * rngs[0].standard_normal(n)
     sc_noise_b = cfg.noise_std["storage_curve"] * rngs[0].standard_normal(n)
-    # Balance channel: mix on standardized balance (derive from mixed supply/demand)
-    sc_balance = (desk_signals[:, 1] - desk_signals[:, 2]) + sc_noise_b
 
-    supply_obs = desk_signals[:, 1] + cfg.noise_std["supply"] * rngs[1].standard_normal(n)
-    demand_obs = desk_signals[:, 2] + cfg.noise_std["demand"] * rngs[2].standard_normal(n)
-    intensity_obs = desk_signals[:, 3] + cfg.noise_std["geopolitics"] * rngs[3].standard_normal(n)
-    # Event indicator is a {0,1} arrival channel; leakage in the magnitude
-    # channel (event_intensity) is enough to contaminate geopolitics without
-    # corrupting the arrival timestamps themselves.
+    supply_obs = mixed[:, 1] + cfg.noise_std["supply"] * rngs[1].standard_normal(n)
+    demand_obs = mixed[:, 2] + cfg.noise_std["demand"] * rngs[2].standard_normal(n)
+    intensity_obs = mixed[:, 3] + cfg.noise_std["geopolitics"] * rngs[3].standard_normal(n)
     indicator_obs = latent.event_indicator.astype(float)
-    macro_obs = desk_signals[:, 4] + cfg.noise_std["macro"] * rngs[4].standard_normal(n)
+    macro_obs = mixed[:, 4] + cfg.noise_std["macro"] * rngs[4].standard_normal(n)
 
     return {
         "storage_curve": DeskObservation(
-            components={"price": sc_price + sc_noise_p, "balance": sc_balance},
+            components={
+                "price": price + sc_noise_p,
+                "balance": balance + sc_noise_b,
+            },
             stale_mask=stale_false,
         ),
-        "supply": DeskObservation(components={"supply": supply_obs}, stale_mask=stale_false),
-        "demand": DeskObservation(components={"demand": demand_obs}, stale_mask=stale_false),
+        "supply": DeskObservation(
+            components={"supply": supply_obs, "supply_level": latent.supply},
+            stale_mask=stale_false,
+        ),
+        "demand": DeskObservation(
+            components={"demand": demand_obs, "demand_level": latent.demand},
+            stale_mask=stale_false,
+        ),
         "geopolitics": DeskObservation(
             components={
                 "event_indicator": indicator_obs,
                 "event_intensity": intensity_obs,
+                "event_intensity_raw": latent.event_intensity,
             },
             stale_mask=stale_false,
         ),
-        "macro": DeskObservation(components={"xi": macro_obs}, stale_mask=stale_false),
+        "macro": DeskObservation(
+            components={"xi": macro_obs, "xi_level": latent.xi},
+            stale_mask=stale_false,
+        ),
     }
 
 

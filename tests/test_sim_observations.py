@@ -112,17 +112,27 @@ def test_leakage_correlation_is_weaker_than_clean(path):
     still uses the supply OU level as the factor (not the AR(1) return),
     because the Phase-B mixing matrix is defined over latent LEVELS for
     clear structural interpretation."""
+    # Phase B mixes AR(1) return streams (not latent OU levels); the
+    # default path fixture has AR(1) disabled so the signals are zero.
+    # Build a path with AR(1) enabled to make this test meaningful.
+    from sim.latent_state import LatentMarket, phase_a_config
+
+    ar1_path = LatentMarket(n_days=400, seed=42, config=phase_a_config()).generate()
+    clean = ObservationChannels.build(ar1_path, mode="clean", seed=0)
     leak = ObservationChannels.build(
-        path, mode="leakage", seed=0, config=ObservationConfig(leakage_strength=0.4)
+        ar1_path, mode="leakage", seed=0, config=ObservationConfig(leakage_strength=0.4)
     )
-    # Leakage-mode channel is a diagonal-dominant mix of latent LEVELS
-    # so it remains meaningfully correlated with supply level (≥ 0.5
-    # at strength=0.4). Clean mode's channel is now the AR(1) return
-    # stream (see test_clean_supply_observation_is_close_to_ar1_return)
-    # so a direct clean-vs-leakage comparison would not be apples-to-
-    # apples after the Phase A observation redesign.
-    leak_corr = np.corrcoef(leak.by_desk["supply"].components["supply"], path.supply)[0, 1]
-    assert leak_corr > 0.5
+    # Supply desk's clean channel ≈ own AR(1) + noise; leak channel is a
+    # mix. Correlation of each with own AR(1) driver should be weaker
+    # under leakage than clean.
+    clean_corr = np.corrcoef(
+        clean.by_desk["supply"].components["supply"], ar1_path.desk_ar1["supply"]
+    )[0, 1]
+    leak_corr = np.corrcoef(
+        leak.by_desk["supply"].components["supply"], ar1_path.desk_ar1["supply"]
+    )[0, 1]
+    assert clean_corr > leak_corr
+    assert leak_corr > 0.3
 
 
 # ---------------------------------------------------------------------------
