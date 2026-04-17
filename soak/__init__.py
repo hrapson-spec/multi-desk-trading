@@ -26,12 +26,18 @@ Public API:
 from __future__ import annotations
 
 from .checkpoint import CheckpointStore, SoakState
+from .data_feed import SyntheticDataFeed
 from .incident import IncidentDetector
 from .monitor import ResourceMonitor
+from .runner import SoakResult, SoakRunner, TickFn
 
 __all__ = [
     "CheckpointStore",
     "IncidentDetector",
     "ResourceMonitor",
+    "SoakResult",
+    "SoakRunner",
     "SoakState",
+    "SyntheticDataFeed",
+    "TickFn",
 ]
