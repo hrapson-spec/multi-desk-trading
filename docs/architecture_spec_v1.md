@@ -1,4 +1,4 @@
-# Multi-Desk Trading Architecture — Specification v1
+# Multi-Desk Trading Architecture — Specification v1.1
 
 **Status**: Pre-registered / frozen on sign-off.
 **Date frozen**: 2026-04-17.
@@ -16,6 +16,7 @@ Any change to §4, §6, §7, §8, §9, §10, or §11 requires a v2 bump and inva
 | Version | Date | Change |
 |---|---|---|
 | v1.0 | 2026-04-17 | Initial freeze. |
+| v1.1 | 2026-04-17 | Review response. Addresses 16 items (see `docs/reviews/2026-04-17-v1.0-review.md`). Blockers: weight-promotion contradiction fixed (§8.3 vs §11), `target_variable` frozen registry (§4.6, `contracts/target_variables.py`), horizon semantics + event-slip policy (§4.7). Structural: CVaR cut from Phase 1, linear sizing committed (§8.2, §8.2a). Significant: weight-matrix dimensionality discipline (§8.5), provenance dirty-tree policy (§4.3), `data_ingestion_failure` trigger (§6.2), strengthened done-criterion (§12.2). Smaller: N/M pinned (§7.2), `regime_probabilities` on RegimeLabel (§4.3), routing rules as postconditions (§6.4), Macro vs classifier clarified (§10.1), `attribution_lodo` grain fixed + `decisions` table added (§3.2). New flagged risks: §14.6 budget realism, §14.7 Phase 2 readiness, §14.8 cold-start policy. |
 
 ---
 
@@ -30,7 +31,7 @@ P&L is diagnostic, not the objective. Per-desk skill is a quality signal about t
 ### 1.2 Scope
 
 - **Data/capital regime**: synthetic / research-only. Free public data sources only (EIA 914/STEO/WPSR, OPEC MOMR text, JODI, CFTC COT, Caldara-Iacoviello GPR via Fed, scraped news, OFAC/HMT/EU sanctions downloads, Google Trends). No Bloomberg, Argus, Platts, Kpler, Vortexa. No live capital. No small-live phase. Validation terminus is paper backtest + live event-scoring loop on post-pretraining-cutoff data.
-- **Model stack**: OSS-first. Closed models (Claude, GPT) only in the research loop, and only for reasoning-heavy tasks. Zero-shot foundation-model usage as default (see §9 for the per-desk escalation ladder).
+- **Model stack**: OSS-first. Closed models (Claude, GPT) only in the research loop, and only for reasoning-heavy tasks. Zero-shot foundation-model usage as default (see §7.3 for the per-desk escalation ladder).
 - **Compute**: 8GB M-series Mac. Fine-tuning requires borrowed compute (Colab / cloud). Inference is always local.
 - **Operator**: solo. Every architecture decision must be maintainable by one person.
 
@@ -75,12 +76,12 @@ The architecture is governed by four principles; all downstream decisions derive
                ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                  Persistence  (DuckDB: forecasts, prints, grades,           │
-│                                      attribution, model registry)            │
+│                                decisions, attribution, model registry)      │
 └──────────────┬──────────────────────────────────────────────────────────────┘
                │
                ├──────────────► Grading  (pure fn of Forecast × Print)
                │
-               ├──────────────► Attribution  (LODO online, Shapley weekly)
+               ├──────────────► Attribution  (LODO per decision, Shapley weekly)
                │
                ├──────────────► Controller (deterministic, regime-conditional)
                │
@@ -100,8 +101,10 @@ All inter-component messages go through the bus. All bus messages are `contracts
 
 - **Every forecast is an immutable event.** Once a desk has emitted a Forecast, it cannot modify or retract it. Corrections are new Forecasts with an explicit `supersedes` field.
 - **Every print is an immutable event.** Data prints (EIA WPSR number, CFTC COT snapshot, etc.) are stored point-in-time-correct, ALFRED-style. Revisions are new Prints linked to the original by `vintage_of`.
+- **Every Controller decision is an immutable event.** Written to the `decisions` table (§3.2); attribution runs at decision time, not print time.
 - **Grading is a pure function.** `Grade = grade(Forecast, Print)`. No hidden state; re-running grading on historical data reproduces the original grades byte-identically.
-- **Replay is a first-class operation.** Any historical window can be re-grading or re-attributed from persistence. Input snapshot hashes in the Forecast provenance block permit exact reconstruction of what the desk saw at emission time.
+- **Replay is a first-class operation.** Any historical window can be re-graded or re-attributed from persistence. Input snapshot hashes in the Forecast provenance block permit exact reconstruction of what the desk saw at emission time.
+- **Dirty working tree is a mode-dependent invariant.** Development-mode emissions with uncommitted changes are allowed with `code_commit="<base_sha>-dirty"` and prominent audit-log flagging. Production-mode and replay-mode bus validators reject any Forecast whose `code_commit` ends with `-dirty`. The bus mode flag is set at init and cannot change within a run.
 
 ### 3.2 Persistence
 
@@ -112,12 +115,15 @@ Primary store: DuckDB. File per table under `data/duckdb/`:
 | `forecasts` | one per emit() | `(desk_name, emission_ts_utc, target_variable, horizon_id)` |
 | `prints` | one per realised outcome | `(target_variable, realised_ts_utc, vintage_of)` |
 | `grades` | one per (Forecast × Print) match | `(forecast_id, grading_ts_utc)` |
-| `signal_weights` | one per promoted weight matrix | `(regime_id, promotion_ts_utc)` |
-| `attribution_lodo` | one per print, per desk | `(print_id, desk_name)` |
+| `decisions` | one per Controller invocation | `(decision_id, emission_ts_utc, regime_id)` |
+| `signal_weights` | one per promoted weight matrix row | `(regime_id, desk_name, target_variable, promotion_ts_utc)` |
+| `attribution_lodo` | one per decision, per desk | `(decision_id, desk_name)` |
 | `attribution_shapley` | one per weekly review | `(review_ts_utc, desk_name)` |
-| `research_loop_events` | one per trigger firing or periodic review | `(event_type, start_ts_utc)` |
+| `research_loop_events` | one per trigger firing or periodic review | `(event_type, triggered_at_utc)` |
 | `model_registry` | one per deployed model version | `(desk_name, model_name, version, registration_ts_utc)` |
 | `regime_labels` | one per classifier emit | `(classification_ts_utc)` |
+
+`decisions` columns: `decision_id` (UUID), `emission_ts_utc`, `regime_id`, `combined_signal: float`, `position_size: float`, `provenance: dict`, `input_forecast_ids: list[str]`.
 
 Secondary stores:
 - Input snapshots: DVC or Git LFS. Hashed, content-addressable.
@@ -142,7 +148,7 @@ Implementation: Prefect for richer DAGs; cron + Python for Phase 1 scale. Airflo
 
 ### 3.4 Graceful degradation
 
-Desks MUST emit with explicit staleness / confidence flags when upstream data is stale or missing. A broken feed is a Forecast with `staleness=True` and expanded uncertainty — never silent reuse of old data.
+Desks MUST emit with explicit staleness / confidence flags when upstream data is stale or missing. A broken feed is a Forecast with `staleness=True` and expanded uncertainty — never silent reuse of old data. If a scheduled ingestion fails entirely (no Print lands within tolerance), the `data_ingestion_failure` trigger fires (§6.2).
 
 ---
 
@@ -158,9 +164,10 @@ Validation is enforced at the bus on publish, not trusted at the desk. A desk em
 
 - Units are in field names (`price_usd_bbl`, not `price`). The Forecast schema itself is unit-agnostic — domain-specific units live inside `target_variable` metadata.
 - Timestamps are always timezone-aware UTC. Naive timestamps are forbidden at the boundary.
-- Horizons are typed as a tagged union, not a free-form string (see below).
+- Horizons are typed as a tagged union, not a free-form string (see §4.7).
 - Uncertainty is always expressed; a point forecast carries a degenerate (zero-width) interval, not a missing value.
 - Directional claim is pre-registered in the desk spec and echoed in every Forecast. Desks that cannot articulate a directional claim cannot emit Forecasts.
+- `target_variable` is a string constant drawn from the frozen registry at `contracts/target_variables.py` (§4.6). Free-form strings are rejected by the bus validator.
 
 ### 4.3 Core types
 
@@ -174,7 +181,14 @@ from pydantic import BaseModel, Field, ConfigDict
 
 
 class Provenance(BaseModel):
-    """Identifies who/what produced this object and how to reconstruct it."""
+    """Identifies who/what produced this object and how to reconstruct it.
+
+    code_commit MUST be the git SHA of the desk code at emission time.
+    Development-mode emissions with uncommitted working-tree changes MAY
+    use "<base_sha>-dirty" (flagged in audit log). Production-mode and
+    replay-mode bus validators reject any Forecast whose code_commit ends
+    with "-dirty". The mode flag is set at bus init.
+    """
     model_config = ConfigDict(frozen=True)
 
     desk_name: str
@@ -182,21 +196,25 @@ class Provenance(BaseModel):
     model_version: str       # SemVer: MAJOR.MINOR.PATCH
     input_snapshot_hash: str # hex digest of the ordered input-tuple
     spec_hash: str           # hex digest of the desk spec at emission time
-    code_commit: str         # git SHA of the desk code at emission time
+    code_commit: str         # git SHA; "<sha>-dirty" allowed only in dev mode
 
 
 class ClockHorizon(BaseModel):
+    """For arbitrary-window research/backtest work. See §4.7 for when
+    to prefer EventHorizon instead."""
     model_config = ConfigDict(frozen=True)
     kind: Literal["clock"] = "clock"
     duration: timedelta
 
 
 class EventHorizon(BaseModel):
-    """For event-driven targets (next-FOMC, next-OPEX, next-CFTC-COT, etc.)."""
+    """For event-driven targets pinned to a scheduled release
+    (EIA WPSR, CFTC COT, FOMC, NFP, etc.). Prefer this over ClockHorizon
+    for any release-pinned forecast (§4.7)."""
     model_config = ConfigDict(frozen=True)
     kind: Literal["event"] = "event"
     event_id: str            # stable identifier for the event
-    expected_ts_utc: datetime  # best-estimate firing time
+    expected_ts_utc: datetime  # best-estimate firing time — never mutates post-emission
 
 
 Horizon = Union[ClockHorizon, EventHorizon]
@@ -228,7 +246,7 @@ class Forecast(BaseModel):
 
     forecast_id: str         # UUID, unique per emission
     emission_ts_utc: datetime
-    target_variable: str     # e.g. "wti_front_month_close", "vrp_sp500"
+    target_variable: str     # MUST be a member of contracts.target_variables.KNOWN_TARGETS
     horizon: Horizon
     point_estimate: float
     uncertainty: UncertaintyInterval
@@ -244,9 +262,10 @@ class Print(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     print_id: str
-    realised_ts_utc: datetime
+    realised_ts_utc: datetime      # actual arrival time of the print
     target_variable: str
     value: float
+    event_id: str | None = None    # populated for event-pinned prints (§4.7)
     vintage_of: str | None = None  # for revisions, points to original Print
 
 
@@ -263,6 +282,7 @@ class Grade(BaseModel):
     log_score: float | None = None           # for probabilistic forecasts
     sign_agreement: bool | None = None       # did direction match the claim
     within_uncertainty: bool | None = None   # did realised value fall in band
+    schedule_slip_seconds: float | None = None  # realised_ts - expected_ts (EventHorizon only)
 
 
 class SignalWeight(BaseModel):
@@ -271,6 +291,7 @@ class SignalWeight(BaseModel):
     Controller state is a collection of these, indexed by (regime_id, desk_name,
     target_variable). Promotion events append new rows with a new promotion_ts;
     the Controller reads the most recent row per (regime, desk, target) tuple.
+    Horizons within a (desk, target) share a weight by default (§8.5).
     """
     model_config = ConfigDict(frozen=True)
 
@@ -281,6 +302,7 @@ class SignalWeight(BaseModel):
     weight: float
     promotion_ts_utc: datetime
     validation_artefact: str  # path to the held-out validation result
+                              # or "cold_start" for the uniform-weight bootstrap (§14.8)
 
 
 class RegimeLabel(BaseModel):
@@ -293,7 +315,8 @@ class RegimeLabel(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     classification_ts_utc: datetime
-    regime_id: str            # e.g. "regime_low_vol_bullish"
+    regime_id: str                          # argmax label, e.g. "regime_7f3a"
+    regime_probabilities: dict[str, float]  # P(regime = X) for all current regimes
     transition_probabilities: dict[str, float]  # P(next=regime_X)
     classifier_provenance: Provenance
 
@@ -311,6 +334,7 @@ class ResearchLoopEvent(BaseModel):
         "correlation_shift",
         "desk_staleness",
         "controller_commission",
+        "data_ingestion_failure",
         "periodic_weekly",
     ]
     triggered_at_utc: datetime
@@ -323,13 +347,46 @@ class ResearchLoopEvent(BaseModel):
 ### 4.4 Forbidden at the boundary
 
 - No desk-specific types. Geopolitics desk's `EventProbability` lives inside the desk; the Forecast emitted carries a scalar probability in `point_estimate`.
-- No commodity-specific fields. `wti_front_month_close` is a valid `target_variable` (a string); `wti_price: float` as a typed field is not.
+- No commodity-specific fields. `wti_front_month_close` is a valid `target_variable` (a registry constant); `wti_price: float` as a typed field is not.
 - No raw model outputs. A desk that produces a multi-modal posterior must summarise to a point estimate + uncertainty interval for emission.
 - No aliasing. Every Forecast has exactly one `target_variable` and exactly one `horizon`. A desk producing a 1-week and 1-month forecast emits two Forecast objects, not one with two fields.
+- No free-form `target_variable` strings. The bus validator rejects any Forecast whose `target_variable` is not a member of `contracts.target_variables.KNOWN_TARGETS` (§4.6).
+- No post-emission mutation. Forecast objects are frozen Pydantic v2 models; no retro-updating `expected_ts_utc` on event slip (§4.7).
 
 ### 4.5 Test: `tests/test_boundary_purity.py`
 
-Imports only `contracts/v1.py`, the bus, the Controller, and the grading harness. Mocks every desk as a simple `emit()`-producing function that returns valid Forecast objects. Asserts: Controller runs to completion across a synthetic release-calendar replay. If this test ever needs to import a desk's internals to pass, the boundary has drifted; the capability claim is broken.
+Imports only `contracts/v1.py`, `contracts/target_variables.py`, the bus, the Controller, and the grading harness. Mocks every desk as a simple `emit()`-producing function that returns valid Forecast objects drawing `target_variable` from `KNOWN_TARGETS`. Asserts: Controller runs to completion across a synthetic release-calendar replay. If this test ever needs to import a desk's internals to pass, the boundary has drifted; the capability claim is broken.
+
+### 4.6 Target-variable registry
+
+The `target_variable` field on Forecast and Print is constrained to a frozen registry at `contracts/target_variables.py`. The registry is part of the `contracts/v1` API.
+
+- Every `target_variable` string used in the system MUST be defined as a module-level constant in the registry and MUST be a member of the `KNOWN_TARGETS: frozenset[str]` set.
+- The bus validator rejects Forecasts and Prints whose `target_variable` is not in `KNOWN_TARGETS`.
+- Adding a new target variable is a v1.x revision (logged in §0). Removing one is a breaking change requiring v2.
+- The registry is domain-inclusive: oil target names and equity-VRP target names coexist. The portability test exercises this.
+- Rationale: eliminates the silent-failure mode where a typo in a desk's `target_variable` produces a new unique string that no Print will ever match, causing the Forecast to persist but never be graded.
+
+### 4.7 Horizon semantics and Forecast → Print matching
+
+**When to use which horizon:**
+- `EventHorizon` for any forecast pinned to a scheduled release: EIA WPSR, CFTC COT, OPEC MOMR, FOMC, NFP, Baker Hughes rig count, and any other calendar event. This is the default for oil forecasts; almost every interesting oil target has a release calendar.
+- `ClockHorizon` only for arbitrary-window research/backtest work (e.g. "forecast of close-to-close return 7 days hence"). Prefer EventHorizon unless the target genuinely has no scheduled release.
+
+**Matching function** (deterministic; implemented once in the grading harness):
+
+```
+For Forecast F and candidate Print P with F.target_variable == P.target_variable:
+  If F.horizon.kind == "event":
+    Match if P.event_id == F.horizon.event_id.
+  If F.horizon.kind == "clock":
+    Match if abs(P.realised_ts_utc − (F.emission_ts_utc + F.horizon.duration)) ≤ tolerance.
+    Default tolerance: 6 hours. Per-desk override allowed via desk spec.
+```
+
+**Event-slip policy (locked):** if an EventHorizon's event fires at a time different from `expected_ts_utc` (EIA delays WPSR by a day, for example), the Grade fires on actual Print arrival. `expected_ts_utc` on the Forecast never mutates post-emission (Forecast is immutable, §3.1). The delta `realised_ts_utc − expected_ts_utc` is recorded in `Grade.schedule_slip_seconds` as a calibration diagnostic and is available for research-loop pattern analysis.
+
+Rationale: auto-re-anchoring would violate Forecast immutability; rejecting on mismatch would be too harsh in normal operation; grading-on-actual-arrival preserves the event-sourced design and gives the research loop a clean signal about release reliability.
 
 ---
 
@@ -344,7 +401,7 @@ Every desk implements the following minimum interface:
 class Desk:
     name: str                   # unique, e.g. "storage_curve"
     spec_path: str              # path to the desk spec document
-    emit_target_variables: list[str]
+    emit_target_variables: list[str]   # all must be members of KNOWN_TARGETS
     emit_horizons: list[Horizon]
 
     def on_schedule_fire(self, now_utc: datetime) -> list[Forecast]:
@@ -360,10 +417,10 @@ Desk internals are unconstrained. PyMC, CatBoost, Kronos inference, LLM extracti
 
 Each desk has a spec document at `desks/<name>/spec.md`. Required sections:
 
-1. **Target variables and horizons** — exactly what the desk emits.
+1. **Target variables and horizons** — exactly what the desk emits; every `target_variable` must be (or be added as) a member of `contracts.target_variables.KNOWN_TARGETS`.
 2. **Directional claim per variable** — positive / negative, with justification referencing a dev-period Spearman or equivalent.
 3. **Pre-registered naive baseline** — random walk, climatology, persistence, or explicit alternative, chosen BEFORE any model is fit.
-4. **Model ladder** — zero-shot → classical specialist → borrowed-compute fine-tune (§9).
+4. **Model ladder** — zero-shot → classical specialist → borrowed-compute fine-tune (§7.3).
 5. **Gate-pass plan** — how the three hard gates (§7) will be demonstrated on test data.
 6. **Data sources** — free / public only, with ingestion code path.
 7. **Internal architecture** — whatever the desk wants; described once at freeze.
@@ -377,7 +434,7 @@ Each desk has a spec document at `desks/<name>/spec.md`. Required sections:
 | 2 | `demand` | BSTS + horseshoe, mixed-frequency BVAR, TabPFN-v2, CatBoost (refining) | Feeds inventory-draw implied forecast to Storage & Curve. |
 | 3 | `storage_curve` | Kronos small, Dynamic Nelson-Siegel + LSTM, functional change-point, CatBoost (COT) | First real desk after stubs. Kronos full reinstatement; relies on sign-preservation gate. |
 | 4 | `geopolitics` | LLM extraction pipeline (two-tier), Bayesian event-impact regression, multi-agent debate for contested events | GPR as pre-registered baseline. |
-| 5 | `macro` | Mixed-frequency BVAR, Markov-switching + HMM, TabPFN-v2, factor model for DXY decomposition | Emits macro regime conditioning info as a Forecast, NOT as a RegimeLabel (the regime classifier is Controller-owned, see §8). |
+| 5 | `macro` | Mixed-frequency BVAR, Markov-switching + HMM, TabPFN-v2, factor model for DXY decomposition | Emits macro regime conditioning info as a Forecast, NOT as a RegimeLabel (see §10.1). |
 | 6 | `regime_classifier` | HDP-HMM + online Bayesian change-point | Owned by the Controller, not a trading desk. Emits RegimeLabel events. Consumes desk outputs, never raw domain data. |
 
 Desk 6 is listed separately because its contract is different — it emits RegimeLabel, not Forecast — and it is domain-blind by construction (inputs are the vector of desk outputs). Under equity-VRP redeployment, desks 1–5 are fully replaced; desk 6 redeploys with zero changes.
@@ -392,7 +449,7 @@ The research loop has two paths that do **categorically different work** and car
 
 | Path | Work | KPI |
 |---|---|---|
-| Event-driven | Reactive: gate failure RCA, regime-transition handling, attribution anomaly investigation, correlation-shift investigation, desk-staleness response, Controller-commissioned requests | Latency from trigger fire to artefact produced |
+| Event-driven | Reactive: gate failure RCA, regime-transition handling, attribution anomaly investigation, correlation-shift investigation, desk-staleness response, data-ingestion-failure response, Controller-commissioned requests | Latency from trigger fire to artefact produced |
 | Periodic (weekly) | Proactive: experiment backlog grooming, capability review, specification drift check, abstraction audit, cross-print pattern synthesis, forward-looking hypothesis generation | Completion rate (did the review run?); output quality (did it produce ≥1 actionable item?) |
 
 Event-driven path **preempts** periodic. Periodic pauses on event fire, handles the event, resumes with post-event state. No parallel processing (event work is minutes to hours; periodic is bounded to hours).
@@ -404,11 +461,12 @@ The trigger list is itself a contract. Adding a new event type is a design chang
 | Trigger | Fires when | Default priority |
 |---|---|---|
 | `gate_failure` | Any desk fails skill, sign-preservation, or hot-swap gate | 0 (highest) |
-| `regime_transition` | Regime classifier flags transition with P > 0.7 | 1 |
-| `weight_staleness` | Realised skill < pre-registered threshold for N days | 2 |
-| `attribution_anomaly` | LODO or Shapley contribution moves outside per-desk pre-registered tolerance band | 2 |
+| `data_ingestion_failure` | A scheduled ingestion produced no Print within `scheduled_release_ts + tolerance` (default 2h past scheduled release). Payload: affected feed, scheduled release ts, actual wall-clock ts, list of desks consuming that feed | 1 |
+| `regime_transition` | Regime classifier flags transition with `max(regime_probabilities) > 0.7` after a regime_id change | 1 |
+| `weight_staleness` | Realised skill of current weight matrix below pre-registered threshold for N consecutive days | 2 |
+| `attribution_anomaly` | LODO or Shapley contribution for any desk moves outside its pre-registered tolerance band | 2 |
 | `correlation_shift` | Pairwise desk-output correlation crosses pre-registered threshold | 3 |
-| `desk_staleness` | Desk emits `staleness=True` or `confidence < threshold` | 3 |
+| `desk_staleness` | Desk emits a Forecast with `staleness=True` or `confidence < threshold` | 3 |
 | `controller_commission` | Controller detects regime-uncertainty above threshold | 4 |
 
 Each trigger carries a structured payload pointing to the specific data to examine, bounding the LLM's working frame.
@@ -425,24 +483,28 @@ Work items per review:
 
 ### 6.4 LLM routing
 
-Two tiers, pre-registered routing rules. Routing decisions logged per invocation; overrides (local fell back to API or vice versa) tracked as a quality metric.
+Two tiers, pre-registered postconditions. Routing decisions logged per invocation; overrides (local fell back to API or vice versa) tracked as a quality metric.
 
 | Tier | Model class | Use | Expected volume |
 |---|---|---|---|
 | Local | Q4-quantised 7–8B (Mistral-7B, Qwen-2.5-7B, Llama-3.1-8B) via MLX or llama.cpp | Daily log summarisation, structured extraction from desk outputs, attribution-DB querying, pattern matching across regime history | High (hundreds of calls/week) |
 | API | Claude Opus/Sonnet, GPT-4o | Experiment design from anomaly, desk-spec revision drafting, RCA on gate failures, cross-desk synthesis | Low (tens of calls/week) |
 
-**Routing rules** (pre-registered):
-- Anything that writes to a desk spec → API.
-- Anything that proposes a hypothesis for experimental testing → API.
-- Anything that interprets cross-desk patterns → API.
-- Everything else → local.
+**Postcondition rules (enforced at the research-loop commit gate):**
+
+Tasks execute on the local tier by default. Any LLM output that contains any of the following artefacts MUST have been produced by an API-tier call; otherwise the artefact is rejected:
+
+- A draft or edit to any desk spec (`desks/*/spec.md`).
+- A new hypothesis proposal scheduled onto the experiment backlog.
+- A cross-desk synthesis artefact (any output citing two or more desks' Forecasts).
+
+Rationale: enforcing routing as a postcondition (artefact class → tier requirement) rather than a pre-routing rule (task-kind → tier assignment) handles the case where a task starts local and escalates partway through; the commit gate checks the artefact class, not the task origin.
 
 Budget target: API spend in the tens of dollars per month in research mode. Overruns are logged as capability-claim debits.
 
 ### 6.5 LLM is forbidden in the trading-decision path
 
-The LLM is never in the Controller's decision flow. This is architectural, not optional. Reintroducing it contaminates attribution (stochasticity, silent-model-version changes, context-window dependence), breaks portability (LLM judgement does not redeploy as shared infrastructure), and violates the "Controller owns no domain opinions" principle. Research-loop LLM output is staged (spec revisions, weight-update proposals) and promoted to the decision path only via the human-gated promotion events (§12).
+The LLM is never in the Controller's decision flow. This is architectural, not optional. Reintroducing it contaminates attribution (stochasticity, silent-model-version changes, context-window dependence), breaks portability (LLM judgement does not redeploy as shared infrastructure), and violates the "Controller owns no domain opinions" principle. Research-loop LLM output is staged (spec revisions, weight-update proposals) and promoted to the decision path only via the human-gated promotion events (§11).
 
 ---
 
@@ -450,7 +512,7 @@ The LLM is never in the Controller's decision flow. This is architectural, not o
 
 ### 7.1 The three hard gates
 
-A desk cannot be promoted into the Controller's input set until it passes all three gates on test data. A desk that fails any gate after promotion is a candidate for retirement (see §12 for the adjudication path).
+A desk cannot be promoted into the Controller's input set until it passes all three gates on test data. A desk that fails any gate after promotion is a candidate for retirement (see §11 for the adjudication path).
 
 **Gate 1 — Skill vs pre-registered naive baseline.**
 
@@ -468,13 +530,13 @@ A stub desk emitting valid Forecast objects with null signal (directional claim 
 
 ### 7.2 LODO as escalating diagnostic
 
-Leave-one-desk-out ablation is run continuously (on every print) but is not a hard gate by default. Three outcomes:
+Leave-one-desk-out ablation is run continuously (on every decision) but is not a hard gate by default. Three outcomes:
 
 | Outcome | Interpretation | Action |
 |---|---|---|
 | Desk harmful | Controller strictly better without the desk (pre-registered window, statistical significance) | **Hard-gate retire** — the desk is actively damaging decisions |
-| Desk redundant | Controller indifferent (strictly equal metrics within tolerance) | Warning-track flag; after N Controller revisions or M months, if still redundant, retire |
-| Desk unused | Controller underweight the desk but using it | Diagnostic only; Controller maturity may change this |
+| Desk redundant | Controller indifferent (strictly equal metrics within tolerance) | Warning-track flag; after **2 Controller weight promotions** or **3 months**, whichever comes first, if still redundant, retire |
+| Desk unused | Controller underweights the desk but using it | Diagnostic only; Controller maturity may change this |
 
 LODO becomes a hard gate (for the harmful case specifically) only after the Controller passes its own maturity threshold: signal-weight distribution stable over a pre-registered window (weight changes below ε for 4 consecutive weeks), attribution accuracy on synthetic known-signal injection above threshold, regime-classification stability above threshold.
 
@@ -505,13 +567,27 @@ That is all. No bandit posteriors, no gradient accumulators, no learning-rate st
 
 On each Controller invocation:
 
-1. Read the current RegimeLabel (most recent `regime_classifier` emit).
+1. Read the current RegimeLabel (most recent `regime_classifier` emit). Use `regime_id` (argmax) as the index into `signal_weights`.
 2. Look up the weight row for the regime.
-3. Compute `combined_signal = sum(weight × desk_forecast)` across all desks.
-4. Apply CVaR-constrained portfolio sizing (regime-conditional covariance) to translate combined_signal into position sizes.
-5. Emit decision event to the audit log.
+3. Compute `combined_signal = sum(weight × desk_forecast.point_estimate)` across all desks and target variables in the weight row.
+4. Apply linear sizing (§8.2a) to translate `combined_signal` into a `position_size`.
+5. Emit a `decision` event to the `decisions` table with full provenance.
 
-All of the above is a pure function of inputs. Replay on historical window reproduces the original decision byte-identically.
+All of the above is a pure function of inputs. Replay on a historical window reproduces the original decision byte-identically.
+
+### 8.2a Sizing function
+
+Phase 1 uses linear, regime-conditional sizing:
+
+```
+position_size = clip(k_regime × combined_signal, −position_limit_regime, +position_limit_regime)
+```
+
+Where:
+- `k_regime: float` is a per-regime scalar gain, stored as an additional entry in the weight matrix at `signal_weights[regime_id][(None, "__k__")]`.
+- `position_limit_regime: float` is a per-regime absolute cap, stored at `signal_weights[regime_id][(None, "__pos_limit__")]`.
+
+Rationale: linear sizing is deterministic, replayable, and portable. The capability claim requires these three; it does not require risk-optimal sizing. CVaR-constrained and utility-theoretic sizing are explicitly deferred to Phase 2, when the portability test has been run and the architecture is validated at the current level of complexity.
 
 ### 8.3 Weight promotion
 
@@ -521,8 +597,8 @@ Controller weights never update in real time. The update path is:
 2. Research loop (either event-driven or periodic) queries the attribution DB, asks: "are the current regime weights still skill-preserving?"
 3. If not, the loop proposes a new weight matrix — a new `SignalWeight` row bundle — staged as a candidate version.
 4. The candidate is validated against recent held-out data on the pre-registered promotion metric.
-5. If it beats the current matrix by a pre-registered margin, it is presented to the human for approval (human-in-the-loop gating, §11).
-6. Upon approval, the candidate is promoted — new `SignalWeight` rows appended to the DB with new `promotion_ts_utc`. The Controller reads the most recent row per (regime, desk, target) tuple; the new weights take effect on the next Controller invocation.
+5. If the candidate beats the current matrix by a pre-registered margin on the held-out data, it **auto-promotes**: new `SignalWeight` rows appended to the DB with new `promotion_ts_utc`. The Controller reads the most recent row per (regime, desk, target) tuple; the new weights take effect on the next Controller invocation. Auto-promotion is permitted only under this staged-candidate + pre-registered-margin + held-out-validation path (steps 3–4); out-of-band weight writes require human sign-off per §11 item 2.
+6. The human reviews the daily/weekly audit summary; any promotion event can be rolled back manually by writing a superseding `SignalWeight` row (a v1.x-permitted human action that follows the same immutable-append discipline).
 
 Promotion is a discrete event, logged as a capability artefact. The attribution DB permits post-hoc comparison of the pre- and post-promotion weight performance on the same print history.
 
@@ -533,16 +609,28 @@ Under equity-VRP redeployment, the Controller redeploys with **zero code changes
 - The weight matrix is re-fitted (equity-VRP desks, equity-VRP regimes, equity-VRP historical data).
 - The regime classifier's internal HDP-HMM is retrained on equity-VRP desk outputs.
 - Desks 1–5 are fully replaced.
+- New `target_variable` constants are added to `contracts/target_variables.py` (v1.x revisions; the registry is domain-inclusive by design).
 
 What does not change:
-- `contracts/v1.py`
-- The bus
-- The grading harness
-- The attribution DB schema (though its contents are domain-specific)
-- The research-loop trigger list (the events are asset-class-agnostic)
-- The Controller's decision flow
+- `contracts/v1.py` type definitions.
+- The bus.
+- The grading harness.
+- The attribution DB schema (though its contents are domain-specific).
+- The research-loop trigger list (the events are asset-class-agnostic).
+- The Controller's decision flow.
+- The sizing function (linear).
 
 This is the capability-claim acceptance test.
+
+### 8.5 Dimensionality discipline
+
+The weight matrix grows combinatorially if unbounded. Pre-registered disciplines to keep it fittable:
+
+**Regime-count cap.** Phase 1 classifier emits at most **6 distinct `regime_id` values** at any time. HDP-HMM's non-parametric capability is retained internally but capped at emission time; additional latent states are merged into a sink regime `regime_other` until the research loop proposes a cap increase (a v1.x revision). Reviewed at every Controller promotion event.
+
+**Horizon weight sharing.** The weight matrix is indexed by `(regime_id, desk_name, target_variable)`. **Horizons within a (desk, target) share a weight by default.** A per-horizon scalar multiplier is permitted as a second parameter only if a desk demonstrates horizon-specific attribution stability (LODO contribution varies by horizon beyond a pre-registered tolerance band). Default is shared; any override is logged as a capability-claim debit.
+
+**Illustrative sizing.** 6 regimes × 6 desks × 3 targets avg = 108 weights. Plus per-regime `k` and `pos_limit` (§8.2a) = 108 + 12 = 120. Over ≥ 2 years of Phase 1 daily/weekly-cadence data, ≥ 200 observations per regime is feasible. Compare to the unbounded case: 6 regimes × 6 desks × 3 targets × 2 horizons = 216 weights, below the point-of-fit-infeasibility threshold only if horizons are shared.
 
 ---
 
@@ -552,13 +640,13 @@ Two methods, co-primary for their respective questions.
 
 ### 9.1 LODO — retirement and harm detection
 
-Run on every print (or batch of prints per grading cycle). For each desk:
+Run on every decision (as written to the `decisions` table). For each desk:
 
-1. Recompute the Controller's decision stream with that desk's Forecasts replaced by the stub (null signal).
-2. Recompute the grading stream.
+1. Recompute the Controller's decision with that desk's Forecasts replaced by the stub (null signal).
+2. Recompute the downstream grading once the relevant Prints land.
 3. Diff the two streams on the pre-registered LODO metric (typically per-decision squared error or PnL attribution).
 
-Per-desk LODO contributions land in the `attribution_lodo` table.
+Per-desk LODO contributions land in the `attribution_lodo` table indexed on `(decision_id, desk_name)`.
 
 Use: retirement decisions per §7.2; correlation-shift trigger; desk-redundancy warnings.
 
@@ -589,12 +677,14 @@ Tiering them as primary/diagnostic (one above the other) is a framing error. The
 
 Vector of desk outputs (Forecast point estimates + uncertainties) plus the Macro desk's emitted macro-regime Forecast. **No raw domain data.** The classifier is domain-blind: under equity-VRP redeployment, the input vector is the five equity-VRP desks' outputs, and the classifier HMM is retrained on that vector.
 
+Macro desk output is valid regime-classifier input by construction (a domain-neutral Forecast). Macro does NOT emit `RegimeLabel` directly; the classifier consumes Macro's (and other desks') Forecast stream and is the sole emitter of `RegimeLabel`.
+
 ### 10.2 Method
 
-- Primary: hierarchical Dirichlet process HMM (HDP-HMM). Non-parametric regime count; no fixed K.
+- Primary: hierarchical Dirichlet process HMM (HDP-HMM). Non-parametric regime count; no fixed K, but capped at emission time per §8.5.
 - Secondary: online Bayesian change-point detection (Adams & MacKay 2007) for fast-break identification.
 
-Emits `RegimeLabel` events on each classification cycle. Regime IDs are opaque strings (`regime_7f3a`, not `regime_contango`).
+Emits `RegimeLabel` events on each classification cycle. Regime IDs are opaque strings (`regime_7f3a`, not `regime_contango`). The Controller reads `regime_id` (argmax) by default; `regime_probabilities` is available for pre-registered weighted-average Controllers in future revisions.
 
 ### 10.3 Gates
 
@@ -610,7 +700,7 @@ The regime classifier is itself a desk (§5.3 desk 6) and must pass:
 Four approval points, all active:
 
 1. **Desk-spec changes require human approval.** The research-loop LLM can draft revisions, but changes merge only on human review. Protects against silent desk-spec drift that would show up as degraded attribution months later.
-2. **Controller-weight updates auto-promote; human sees audit log.** Given the staged-candidate + pre-registered-margin + held-out-validation path, auto-promotion is acceptable; the human reviews the daily/weekly audit summary. Any promotion event can be rolled back manually by writing a superseding `SignalWeight` row.
+2. **Controller-weight updates auto-promote; human sees audit log.** Given the staged-candidate + pre-registered-margin + held-out-validation path (§8.3), auto-promotion is the default; the human reviews the daily/weekly audit summary. Any promotion event can be rolled back manually by writing a superseding `SignalWeight` row. Out-of-band weight writes (not via the staged path) require human sign-off.
 3. **Initial desk deployment requires human sign-off.** A desk enters the Controller input set only after human reviews the dev-period sign-preservation gate results, the skill-gate results, and the hot-swap test. New-desk addition is deliberate, not automatic.
 4. **Gate-failure-triggered retirements require human adjudication.** If a desk fails skill or sign-preservation or (post-maturity) LODO-harm, retirement is proposed by the system but requires human confirmation. Prevents false-positive retirements on transient data-quality issues.
 
@@ -620,21 +710,27 @@ Four approval points, all active:
 
 ### 12.1 Sequence
 
-1. **Week 0 — scaffold**. `contracts/v1.py`, bus with validation, DuckDB schema, grading harness, release-calendar scheduler, input-snapshot hasher, `tests/test_boundary_purity.py`, `tests/test_replay_determinism.py`. No desk work until scaffold is green.
-2. **Weeks 1–2 — stubs for all six desks**. Each stub passes the hot-swap gate (valid boundary contract) and fails the skill gate (null signal). End-to-end pipeline runs against six stubs; attribution DB records zero meaningful contribution from any desk; research-loop triggers are injectable via synthetic Forecasts and fire correctly.
+1. **Week 0 — scaffold**. `contracts/v1.py`, `contracts/target_variables.py`, bus with validation (including registry check and production-mode dirty-tree rejection), DuckDB schema, grading harness with event-horizon matching and slip-recording, release-calendar scheduler, input-snapshot hasher, `tests/test_boundary_purity.py`, `tests/test_replay_determinism.py`. No desk work until scaffold is green.
+2. **Weeks 1–2 — stubs for all six desks**. Each stub passes the hot-swap gate (valid boundary contract) and fails the skill gate (null signal). End-to-end pipeline runs against six stubs; attribution DB records zero meaningful contribution from any desk; research-loop triggers are injectable via synthetic Forecasts and fire correctly. Controller bootstrap state: uniform weights across all stubs (§14.8).
 3. **Desk 1 — Storage & Curve deepen**. Highest novel-tech content (Kronos, DNS + LSTM, functional change-point); earliest and cheapest failure mode; most informative about TSFM validation approach.
 4. **Desk 2 — Geopolitics deepen**. Heterogeneous tech stack (LLM extraction + event-driven pipelines); stress-tests LLM two-tier routing and structured-output validation.
 5. **Desks 3 & 4 — Supply + Demand in parallel**. Shared data-engineering work reduces duplication.
-6. **Desk 5 — Macro deepen**. Classical econometric stack; lowest risk; benefits from mature scaffolding.
+6. **Desk 5 — Macro deepen**. Classical econometric stack; lowest risk; benefits from mature scaffolding. Month-5 checkpoint during Macro build: confirm Phase 2 equity-VRP desk candidates exist (§14.7).
 7. **Controller weight matrix — final step**. Regime-conditional matrix fitted on attribution data from the mature pipeline. Mechanical step: every prior validation event already ran against the Controller skeleton with uniform weights.
 
 ### 12.2 Done-criterion
 
-Phase 1 is complete when: all six desks pass their three hard gates on test-set replay; live event-scoring loop has closed ≥ 1 full round-trip per desk; no outstanding capability-claim debits above per-desk budget.
+Phase 1 is complete when ALL of the following hold:
+
+1. All six desks pass their three hard gates on test-set replay (§7.1).
+2. The live event-scoring loop has run for **≥ 4 continuous weeks with zero infrastructure incidents**. Infrastructure = scheduler, bus, attribution DB, grading harness. Gate failures are NOT infrastructure incidents (they are evidence the gates are working). Scheduler crashes, attribution-DB corruption, bus-validation inconsistencies ARE incidents and reset the 4-week clock.
+3. Each desk has **≥ 10 closed round-trips** (for weekly-cadence desks) or **≥ 20 closed round-trips** (for daily-cadence desks). A closed round-trip = Forecast emitted → Print arrived → Grade computed → Attribution updated.
+4. The research-loop latency KPI is **measured and reported**, not "pending data." Event-driven path reports latency for every fired trigger; periodic path reports completion rate and ≥ 1 actionable-item-per-review.
+5. No outstanding capability-claim debits above per-desk budget.
 
 Explicit non-requirement at Phase 1: portability redeployment to equity VRP. That is Phase 2. Phase 1 exits with the capability claim **asserted**, not **verified**.
 
-Phase 2 deadline: redeployment attempt within 3 months of Phase 1 exit. Longer delay drifts the architecture and invalidates the test.
+Phase 2 deadline: redeployment attempt within **3 months** of Phase 1 exit. Longer delay drifts the architecture and invalidates the test.
 
 ### 12.3 Abandon criteria (any one triggers stop)
 
@@ -647,7 +743,7 @@ Abandonment is a capability-claim artefact (negative result is a deliverable, §
 
 ### 12.4 Budget
 
-6 months calendar time total for Phase 1. Aggressive. Requires strict MVP discipline per desk. Tight against the scaffold-≤ 6-weeks abandon rule. No slack.
+6 months calendar time total for Phase 1. Aggressive. Requires strict MVP discipline per desk. Tight against the scaffold-≤-6-weeks abandon rule. No slack. See §14.6 for the realism flag.
 
 ---
 
@@ -661,6 +757,7 @@ Abandonment is a capability-claim artefact (negative result is a deliverable, §
 - Multi-agent debate at the Controller level (debate is permitted inside desks, e.g. Geopolitics contested events, and inside the research loop, never at the Controller).
 - Cross-commodity Phase 1 portability. Oil only. Equity-VRP portability is a Phase 2 validation event.
 - Real-time online weight updates (bandit / OGD / contextual).
+- CVaR-constrained sizing, utility-theoretic sizing, covariance estimation (deferred to Phase 2; see §8.2a).
 - Execution infrastructure beyond paper backtest + live event-scoring.
 
 ---
@@ -685,34 +782,60 @@ API-tier LLM spend is budgeted in tens of dollars per month. Cost drift beyond t
 
 ### 14.5 Data-quality failure modes
 
-Scraped news, free EIA/OPEC/JODI, and Fed-hosted indices all have schedule slippage, format changes, and occasional outages. The `staleness` flag in the Forecast schema is load-bearing: desks that swallow bad data silently will pass gates spuriously and fail under distribution shift. Data ingestion must emit explicit freshness signals consumed by desks.
+Scraped news, free EIA/OPEC/JODI, and Fed-hosted indices all have schedule slippage, format changes, and occasional outages. The `staleness` flag in the Forecast schema is load-bearing: desks that swallow bad data silently will pass gates spuriously and fail under distribution shift. Data ingestion must emit explicit freshness signals consumed by desks. Scheduled-ingestion failures fire the `data_ingestion_failure` trigger (§6.2).
+
+### 14.6 Budget realism
+
+The 6-month calendar budget assumes zero desks escalate past zero-shot on the model ladder (§7.3). With 6 desks each having some non-zero probability of escalation to classical specialist, the expected number of escalations is ≥ 2, each adding 1–2 weeks of unplanned work. **Realistic completion is 7–8 months.** Exceeding 6 months without hitting an abandon-trigger (§12.3) is a **capability-claim debit** logged in the derivation trace and reviewed at Phase 1 exit. The 6-month budget is not relaxed by this flag — it is aspirational, held up against the realistic estimate to detect scope creep early.
+
+### 14.7 Equity-VRP (Phase 2) readiness
+
+The Phase 2 portability test requires five equity-VRP desk candidates to exist in some form at Phase 1 exit. If the Speckle and Spot project (or equivalent) does not have identifiable desk analogues by Phase 1 month 5, Phase 2 slips. Phase 2 slippage is a capability-claim debit distinct from Phase 1 completion. Phase 1 includes a **month-5 checkpoint** during the Macro-desk build (the lowest-intensity desk in the schedule) to confirm equity-VRP desk candidates are identified; missing this checkpoint fires an explicit flag in the research loop's periodic review.
+
+### 14.8 Cold-start policy (Day 1 of live event-scoring)
+
+On Day 1 of the live event-scoring loop, before any Controller weight has been promoted via the staged-candidate path (§8.3), the Controller operates under **uniform weights across all deployment-signed-off desks**. Uniform weights are emitted as ordinary `SignalWeight` rows with:
+
+- `promotion_ts_utc = boot_ts` (the Controller's init timestamp),
+- `validation_artefact = "cold_start"`.
+
+Under uniform weights, `combined_signal` is the unweighted average of desk forecasts scaled by a bootstrap `k_regime = 1.0` and `pos_limit_regime = default_cold_start_limit` (pre-registered, conservative). The first non-uniform promotion is a discrete event, logged as the first **"Controller maturity milestone"** in the derivation trace.
+
+Rationale: this preserves the "Controller step is a pure function of inputs" principle — the Controller always has a valid weight matrix; there is no null-decision code path. The uniform-weight era is a first-class operational mode with its own audit provenance, not a placeholder.
 
 ---
 
 ## 15. Derivation trace — which decision answered which question
 
-For future readers: the five rounds of clarifying discussion produced these locks. Each is cited as the first point at which the decision was frozen.
+For future readers: the five rounds of clarifying discussion that produced v1.0, plus the v1.1 review response. Each row cites the first point at which the decision was frozen.
 
-| Decision | Frozen in round |
+| Decision | Frozen in |
 |---|---|
-| Solo execution, clean slate, synthetic-only, capability-build | R1 |
-| Live event-scoring loop, event-sourced architecture | R2 |
-| Portability target = equity VRP (same-architecture different-asset-class) | R2 |
-| Typed at Controller boundary only; `contracts/v1.py` owned by Controller | R2 |
-| Hard gates = {skill, sign preservation, hot-swap}; LODO as escalating diagnostic | R2 |
-| Pre-registered directional claim per desk | R2 |
-| All six desks in Phase 1 | R3 |
-| Kronos reinstated with gate 2 as the catch | R3 |
-| Zero-shot default; per-desk escalation ladder; distillation rejected | R3 |
-| LLM in research loop only, never in trading path; two-tier routing | R3 |
-| Regime-conditional linear weights, offline-fit, discrete promotion | R4 |
-| Shapley + LODO as co-primary attribution | R4 |
-| Hybrid event-driven + periodic research loop; categorically different work | R4 |
-| All four human-in-the-loop gates active | R4 |
-| Scaffold → stubs-all-six → S&C → Geopolitics → Supply/Demand → Macro → Controller weights | R5 |
-| Done-criterion: all six desks gate-pass + loop closed once per desk | R5 |
-| Abandon criteria: any of four triggers | R5 |
-| Budget: 6 months calendar | R5 |
+| Solo execution, clean slate, synthetic-only, capability-build | v1.0 (R1) |
+| Live event-scoring loop, event-sourced architecture | v1.0 (R2) |
+| Portability target = equity VRP (same-architecture different-asset-class) | v1.0 (R2) |
+| Typed at Controller boundary only; `contracts/v1.py` owned by Controller | v1.0 (R2) |
+| Hard gates = {skill, sign preservation, hot-swap}; LODO as escalating diagnostic | v1.0 (R2) |
+| Pre-registered directional claim per desk | v1.0 (R2) |
+| All six desks in Phase 1 | v1.0 (R3) |
+| Kronos reinstated with gate 2 as the catch | v1.0 (R3) |
+| Zero-shot default; per-desk escalation ladder; distillation rejected | v1.0 (R3) |
+| LLM in research loop only, never in trading path; two-tier routing | v1.0 (R3) |
+| Regime-conditional linear weights, offline-fit, discrete promotion | v1.0 (R4) |
+| Shapley + LODO as co-primary attribution | v1.0 (R4) |
+| Hybrid event-driven + periodic research loop; categorically different work | v1.0 (R4) |
+| All four human-in-the-loop gates active | v1.0 (R4) |
+| Scaffold → stubs-all-six → S&C → Geopolitics → Supply/Demand → Macro → Controller weights | v1.0 (R5) |
+| Abandon criteria: any of four triggers | v1.0 (R5) |
+| Budget: 6 months calendar | v1.0 (R5) |
+| `target_variable` frozen registry; horizon semantics; event-slip policy | v1.1 (review response) |
+| CVaR → linear sizing commit; dimensionality discipline | v1.1 (review response) |
+| Provenance dirty-tree policy; `data_ingestion_failure` trigger | v1.1 (review response) |
+| Done-criterion strengthened (4-week continuous, 10/20 round-trips, latency KPI reported) | v1.1 (review response) |
+| Cold-start policy (uniform weights); Phase 2 readiness check; budget realism | v1.1 (review response) |
+| `regime_probabilities` on RegimeLabel; routing postconditions; `attribution_lodo` grain fix + `decisions` table | v1.1 (review response) |
+
+Full v1.0 review captured verbatim at `docs/reviews/2026-04-17-v1.0-review.md`.
 
 ---
 
@@ -720,12 +843,12 @@ For future readers: the five rounds of clarifying discussion produced these lock
 
 | Field | Value |
 |---|---|
-| Spec version | v1.0 |
+| Spec version | v1.1 |
 | Date frozen | 2026-04-17 |
 | Domain instance | crude oil (WTI/Brent) |
 | Portability target | equity VRP (Speckle and Spot) |
 | Operator | Henri Rapson |
-| Repo | This repository (new, clean slate as of v1.0) |
-| First artefact to build | `contracts/v1.py` + `tests/test_boundary_purity.py` (Week 0, Day 1) |
+| Repo | This repository (clean slate as of v1.0; v1.1 is a minor-version bump) |
+| First artefact to build | `contracts/v1.py` + `contracts/target_variables.py` + `tests/test_boundary_purity.py` (Week 0, Day 1) |
 
-Any change to §4, §6, §7, §8, §9, §10, or §11 requires a v2 bump. Non-breaking additions can be added under v1.x with an entry in §0.
+Any change to §4, §6, §7, §8, §9, §10, or §11 beyond what this v1.1 already contains requires a v2 bump. Non-breaking additions (new `target_variable` constants, new research-loop triggers, new gate-diagnostic metrics) can be added under v1.x revisions logged in §0.
