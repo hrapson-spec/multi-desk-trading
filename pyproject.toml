@@ -28,6 +28,7 @@ dependencies = [
     # Scheduling orchestrator (Phase 1: cron + Python; Prefect added when needed)
     # "prefect>=3.0",
     "hmmlearn>=0.3.3",
+    "psutil>=7.2.2",
 ]
 
 [project.optional-dependencies]

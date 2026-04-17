@@ -30,6 +30,8 @@ from contracts.v1 import (
     RegimeLabel,
     ResearchLoopEvent,
     SignalWeight,
+    SoakIncident,
+    SoakResourceSample,
 )
 
 _SCHEMA_PATH = Path(__file__).parent / "schema.sql"
@@ -260,6 +262,42 @@ def insert_attribution_shapley(conn: duckdb.DuckDBPyConnection, a: AttributionSh
             a.metric_name,
             a.n_decisions,
             a.coalitions_mode,
+        ],
+    )
+
+
+def insert_soak_resource_sample(conn: duckdb.DuckDBPyConnection, s: SoakResourceSample) -> None:
+    conn.execute(
+        """
+        INSERT INTO soak_resource_samples (
+            sample_id, ts_utc, elapsed_seconds, rss_bytes,
+            open_fds, db_size_bytes, n_decisions
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            s.sample_id,
+            s.ts_utc,
+            s.elapsed_seconds,
+            s.rss_bytes,
+            s.open_fds,
+            s.db_size_bytes,
+            s.n_decisions,
+        ],
+    )
+
+
+def insert_soak_incident(conn: duckdb.DuckDBPyConnection, incident: SoakIncident) -> None:
+    conn.execute(
+        """
+        INSERT INTO soak_incidents (
+            incident_id, detected_ts_utc, incident_class, detail
+        ) VALUES (?, ?, ?, ?)
+        """,
+        [
+            incident.incident_id,
+            incident.detected_ts_utc,
+            incident.incident_class,
+            _dumps(incident.detail),
         ],
     )
 

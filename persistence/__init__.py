@@ -24,6 +24,8 @@ from .db import (
     insert_regime_label,
     insert_research_loop_event,
     insert_signal_weight,
+    insert_soak_incident,
+    insert_soak_resource_sample,
     match_candidate_prints,
     replay_forecasts,
 )
@@ -46,6 +48,8 @@ __all__ = [
     "insert_regime_label",
     "insert_research_loop_event",
     "insert_signal_weight",
+    "insert_soak_incident",
+    "insert_soak_resource_sample",
     "match_candidate_prints",
     "replay_forecasts",
 ]

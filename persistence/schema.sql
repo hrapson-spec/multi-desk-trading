@@ -176,3 +176,32 @@ CREATE TABLE IF NOT EXISTS regime_labels (
 );
 CREATE INDEX IF NOT EXISTS idx_regime_labels_ts
     ON regime_labels (classification_ts_utc);
+
+-- ---------------------------------------------------------------------------
+-- soak_resource_samples: wall-clock Reliability-gate resource telemetry
+-- (spec §12.2 point 3, §14.9 v1.6). Written by soak/monitor.py.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS soak_resource_samples (
+    sample_id       VARCHAR PRIMARY KEY,
+    ts_utc          TIMESTAMPTZ NOT NULL,
+    elapsed_seconds DOUBLE NOT NULL,
+    rss_bytes       BIGINT NOT NULL,
+    open_fds        INTEGER NOT NULL,
+    db_size_bytes   BIGINT NOT NULL,
+    n_decisions     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_soak_resource_samples_ts
+    ON soak_resource_samples (ts_utc);
+
+-- ---------------------------------------------------------------------------
+-- soak_incidents: numeric-thresholded infrastructure incidents during the
+-- Reliability gate run. Gate failures are NOT incidents (§12.2 rule).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS soak_incidents (
+    incident_id     VARCHAR PRIMARY KEY,
+    detected_ts_utc TIMESTAMPTZ NOT NULL,
+    incident_class  VARCHAR NOT NULL,
+    detail          JSON NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_soak_incidents_ts
+    ON soak_incidents (detected_ts_utc);

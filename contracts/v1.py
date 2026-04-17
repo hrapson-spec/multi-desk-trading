@@ -323,6 +323,46 @@ class AttributionShapley(BaseModel):
     coalitions_mode: Literal["exact", "sampled"]
 
 
+class SoakResourceSample(BaseModel):
+    """One resource-usage sample from the Reliability-gate runner (§12.2
+    point 3, v1.6). Written by `soak/monitor.py` at a configurable cadence
+    (default 60 s)."""
+
+    model_config = _FROZEN
+
+    sample_id: str
+    ts_utc: datetime
+    elapsed_seconds: float
+    rss_bytes: int
+    open_fds: int
+    db_size_bytes: int
+    n_decisions: int
+
+
+class SoakIncident(BaseModel):
+    """An infrastructure-incident detection during the Reliability-gate run.
+
+    Per spec §12.2: gate failures are NOT incidents; only scheduler crashes,
+    DB corruption, bus validation inconsistencies, memory leaks, FD leaks,
+    and disk-growth breaches are. Each incident class has a numeric threshold
+    (v1.6 calibration).
+    """
+
+    model_config = _FROZEN
+
+    incident_id: str
+    detected_ts_utc: datetime
+    incident_class: Literal[
+        "memory_leak",
+        "fd_leak",
+        "disk_growth",
+        "scheduler_crash",
+        "db_corruption",
+        "bus_validation_inconsistency",
+    ]
+    detail: dict[str, Any]
+
+
 class LLMArtefact(BaseModel):
     """LLM-produced artefact (spec §6.4).
 
@@ -385,4 +425,6 @@ __all__ = [
     "ResearchLoopEvent",
     "Decision",
     "LLMArtefact",
+    "SoakIncident",
+    "SoakResourceSample",
 ]
