@@ -1,4 +1,4 @@
-# Multi-Desk Trading Architecture — Specification v1.2
+# Multi-Desk Trading Architecture — Specification v1.3
 
 **Status**: Pre-registered / frozen on sign-off.
 **Date frozen**: 2026-04-17.
@@ -18,6 +18,7 @@ Any change to §4, §6, §7, §8, §9, §10, or §11 requires a v2 bump and inva
 | v1.0 | 2026-04-17 | Initial freeze. |
 | v1.1 | 2026-04-17 | Review response. Addresses 16 items (see `docs/reviews/2026-04-17-v1.0-review.md`). Blockers: weight-promotion contradiction fixed (§8.3 vs §11), `target_variable` frozen registry (§4.6, `contracts/target_variables.py`), horizon semantics + event-slip policy (§4.7). Structural: CVaR cut from Phase 1, linear sizing committed (§8.2, §8.2a). Significant: weight-matrix dimensionality discipline (§8.5), provenance dirty-tree policy (§4.3), `data_ingestion_failure` trigger (§6.2), strengthened done-criterion (§12.2). Smaller: N/M pinned (§7.2), `regime_probabilities` on RegimeLabel (§4.3), routing rules as postconditions (§6.4), Macro vs classifier clarified (§10.1), `attribution_lodo` grain fixed + `decisions` table added (§3.2). New flagged risks: §14.6 budget realism, §14.7 Phase 2 readiness, §14.8 cold-start policy. |
 | v1.2 | 2026-04-17 | §3.2 correction: single DuckDB file (`data/duckdb/main.duckdb`) containing all tables, not per-table files. DuckDB is OLAP-oriented and handles many tables in one file efficiently; per-table splits complicate cross-table queries without Phase 1 benefit. Narrow correction; no other sections affected. |
+| v1.3 | 2026-04-17 | Six-item v1.2 review response (see `docs/reviews/2026-04-17-v1.2-review.md`). (A) §14.8 cold-start boot_ts pinned to microsecond precision; §8.3 adds explicit tie-break rule (weight_id lexicographic) for same-ts reads. (B) §8.2a rewritten: `k_regime` and `pos_limit_regime` move to a new `controller_params` table (§3.2, new §4.3 `ControllerParams` type), removing magic-string target_variables from signal_weights. (C) §8.5 capacity feasibility footnote: regularisation assumed, not optional (HDP-HMM regime occupancy is typically skewed, not uniform). (D) `config/data_sources.yaml` added to Week 0 scaffold plan as the owning artefact of the data-source → desks mapping consumed by `data_ingestion_failure` payload (§6.2 unchanged). (E) §8.3/§11 rollback is an explicit distinct human operation with its own audit-log class, not via the auto-promotion margin gate. (F) §15 derivation-trace header adds round-numbering convention note (R# = AskUserQuestion batch; sub-question order within a round preserved in git history but not in the trace). |
 
 ---
 
@@ -117,7 +118,8 @@ Primary store: DuckDB. **Single database file** at `data/duckdb/main.duckdb` con
 | `prints` | one per realised outcome | `(target_variable, realised_ts_utc, vintage_of)` |
 | `grades` | one per (Forecast × Print) match | `(forecast_id, grading_ts_utc)` |
 | `decisions` | one per Controller invocation | `(decision_id, emission_ts_utc, regime_id)` |
-| `signal_weights` | one per promoted weight matrix row | `(regime_id, desk_name, target_variable, promotion_ts_utc)` |
+| `signal_weights` | one per promoted weight matrix row | `(regime_id, desk_name, target_variable, promotion_ts_utc)`. Primary key is `weight_id` (UUID). The tuple is a non-unique index; Controller read query breaks ties on same `promotion_ts_utc` by lexicographic `weight_id` (§8.3). |
+| `controller_params` | one row per regime weight-matrix promotion | `(regime_id, promotion_ts_utc)`. Primary key `params_id` (UUID). Carries `k_regime` and `pos_limit_regime` for the linear sizing function (§8.2a). Separated from `signal_weights` to preserve the target-variable registry invariant (§4.6). |
 | `attribution_lodo` | one per decision, per desk | `(decision_id, desk_name)` |
 | `attribution_shapley` | one per weekly review | `(review_ts_utc, desk_name)` |
 | `research_loop_events` | one per trigger firing or periodic review | `(event_type, triggered_at_utc)` |
@@ -303,6 +305,25 @@ class SignalWeight(BaseModel):
     weight: float
     promotion_ts_utc: datetime
     validation_artefact: str  # path to the held-out validation result
+                              # or "cold_start" for the uniform-weight bootstrap (§14.8)
+
+
+class ControllerParams(BaseModel):
+    """Per-regime scalar parameters for the linear sizing function (§8.2a).
+
+    Separated from SignalWeight because k_regime and pos_limit_regime are
+    Controller-internal scalars, not per-(desk, target_variable) signal weights;
+    storing them in the signal_weights table would require sentinel
+    target_variable strings that violate the §4.6 registry invariant.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    params_id: str           # UUID, unique per promotion
+    regime_id: str
+    k_regime: float          # scalar gain in position = clip(k × combined_signal, ...)
+    pos_limit_regime: float  # absolute position cap (≥ 0)
+    promotion_ts_utc: datetime
+    validation_artefact: str  # path to the held-out validation result,
                               # or "cold_start" for the uniform-weight bootstrap (§14.8)
 
 
@@ -581,14 +602,14 @@ All of the above is a pure function of inputs. Replay on a historical window rep
 Phase 1 uses linear, regime-conditional sizing:
 
 ```
-position_size = clip(k_regime × combined_signal, −position_limit_regime, +position_limit_regime)
+position_size = clip(k_regime × combined_signal, −pos_limit_regime, +pos_limit_regime)
 ```
 
-Where:
-- `k_regime: float` is a per-regime scalar gain, stored as an additional entry in the weight matrix at `signal_weights[regime_id][(None, "__k__")]`.
-- `position_limit_regime: float` is a per-regime absolute cap, stored at `signal_weights[regime_id][(None, "__pos_limit__")]`.
+Where `k_regime` and `pos_limit_regime` are per-regime scalars stored in the `controller_params` table (§3.2) via the `ControllerParams` Pydantic type (§4.3). The Controller's decision flow reads the most recent `ControllerParams` row for the current `regime_id` at decision time, alongside the `signal_weights` rows for the same regime.
 
-Rationale: linear sizing is deterministic, replayable, and portable. The capability claim requires these three; it does not require risk-optimal sizing. CVaR-constrained and utility-theoretic sizing are explicitly deferred to Phase 2, when the portability test has been run and the architecture is validated at the current level of complexity.
+Rationale for the separate table: storing `k_regime` / `pos_limit_regime` as rows in `signal_weights` would require sentinel `target_variable` strings (e.g. `__k__`, `__pos_limit__`) that violate the §4.6 registry invariant, and a nullable `desk_name` column that weakens the event schema's type signature. A dedicated table keeps both disciplines intact.
+
+Rationale for linear sizing: deterministic, replayable, and portable. The capability claim requires these three; it does not require risk-optimal sizing. CVaR-constrained and utility-theoretic sizing are explicitly deferred to Phase 2, when the portability test has been run and the architecture is validated at the current level of complexity.
 
 ### 8.3 Weight promotion
 
@@ -599,7 +620,9 @@ Controller weights never update in real time. The update path is:
 3. If not, the loop proposes a new weight matrix — a new `SignalWeight` row bundle — staged as a candidate version.
 4. The candidate is validated against recent held-out data on the pre-registered promotion metric.
 5. If the candidate beats the current matrix by a pre-registered margin on the held-out data, it **auto-promotes**: new `SignalWeight` rows appended to the DB with new `promotion_ts_utc`. The Controller reads the most recent row per (regime, desk, target) tuple; the new weights take effect on the next Controller invocation. Auto-promotion is permitted only under this staged-candidate + pre-registered-margin + held-out-validation path (steps 3–4); out-of-band weight writes require human sign-off per §11 item 2.
-6. The human reviews the daily/weekly audit summary; any promotion event can be rolled back manually by writing a superseding `SignalWeight` row (a v1.x-permitted human action that follows the same immutable-append discipline).
+6. The human reviews the daily/weekly audit summary. Rollback is a **distinct human operation**, not a variant of the auto-promotion path. A rollback writes a superseding `SignalWeight` (and, if applicable, `ControllerParams`) row with `validation_artefact="rollback:<reason>"` and bypasses the margin check by construction. Rollbacks require explicit human sign-off (§11 item 2 clarification), log a distinct audit-log event class, and are tracked as capability-claim debits in the derivation trace. Rationale: a human-initiated rollback is often motivated by the current matrix misbehaving on recent data the validation harness didn't see; forcing such rollbacks through the auto-promotion margin gate would block the very intervention the rollback exists to enable.
+
+**Tie-break rule for same-`promotion_ts_utc` reads.** If two or more `SignalWeight` (or `ControllerParams`) rows for the same `(regime_id, desk_name, target_variable)` carry identical `promotion_ts_utc`, the Controller reads the row with lexicographically greatest `weight_id` (or `params_id`). This guarantees deterministic reads under the extraordinary case of microsecond-collision during cold-start re-boots (§14.8) and in tests with frozen clocks.
 
 Promotion is a discrete event, logged as a capability artefact. The attribution DB permits post-hoc comparison of the pre- and post-promotion weight performance on the same print history.
 
@@ -631,7 +654,9 @@ The weight matrix grows combinatorially if unbounded. Pre-registered disciplines
 
 **Horizon weight sharing.** The weight matrix is indexed by `(regime_id, desk_name, target_variable)`. **Horizons within a (desk, target) share a weight by default.** A per-horizon scalar multiplier is permitted as a second parameter only if a desk demonstrates horizon-specific attribution stability (LODO contribution varies by horizon beyond a pre-registered tolerance band). Default is shared; any override is logged as a capability-claim debit.
 
-**Illustrative sizing.** 6 regimes × 6 desks × 3 targets avg = 108 weights. Plus per-regime `k` and `pos_limit` (§8.2a) = 108 + 12 = 120. Over ≥ 2 years of Phase 1 daily/weekly-cadence data, ≥ 200 observations per regime is feasible. Compare to the unbounded case: 6 regimes × 6 desks × 3 targets × 2 horizons = 216 weights, below the point-of-fit-infeasibility threshold only if horizons are shared.
+**Illustrative sizing.** 6 regimes × 6 desks × 3 targets avg = 108 weights. Plus per-regime `k` and `pos_limit` (§8.2a) = 108 + 12 = 120. Compare to the unbounded case: 6 regimes × 6 desks × 3 targets × 2 horizons = 216 weights, below the point-of-fit-infeasibility threshold only if horizons are shared.
+
+**Regularisation is assumed, not optional.** HDP-HMM regime occupancy is typically highly skewed — one regime often holds 50–60% of observations while others hold 5–15% each. On 2 years of weekly-cadence data (~104 observations), minority-regime sample counts fall well below 100, which is insufficient for OLS-quality weight fits. The Controller's weight-promotion harness MUST use a regularised estimator: ridge regression (Tikhonov with per-regime scaling) for the weight rows and Bayesian shrinkage toward the uniform-weight prior (§14.8 cold-start) for both weights and `k_regime` / `pos_limit_regime`. The Controller's promoted-weight validation artefact MUST record the regularisation method and hyperparameters; changing the regularisation method between promotions is a capability-claim debit.
 
 ---
 
@@ -795,12 +820,15 @@ The Phase 2 portability test requires five equity-VRP desk candidates to exist i
 
 ### 14.8 Cold-start policy (Day 1 of live event-scoring)
 
-On Day 1 of the live event-scoring loop, before any Controller weight has been promoted via the staged-candidate path (§8.3), the Controller operates under **uniform weights across all deployment-signed-off desks**. Uniform weights are emitted as ordinary `SignalWeight` rows with:
+On Day 1 of the live event-scoring loop, before any Controller weight has been promoted via the staged-candidate path (§8.3), the Controller operates under **uniform weights across all deployment-signed-off desks**. Uniform weights are emitted as ordinary `SignalWeight` rows and one matching `ControllerParams` row with:
 
-- `promotion_ts_utc = boot_ts` (the Controller's init timestamp),
+- `promotion_ts_utc = boot_ts` (the Controller's init timestamp, **microsecond-precision** `datetime.now(tz=UTC)`; Python's stdlib guarantees microsecond resolution on all supported platforms).
 - `validation_artefact = "cold_start"`.
+- `k_regime = 1.0`, `pos_limit_regime = default_cold_start_limit` (pre-registered, conservative).
 
-Under uniform weights, `combined_signal` is the unweighted average of desk forecasts scaled by a bootstrap `k_regime = 1.0` and `pos_limit_regime = default_cold_start_limit` (pre-registered, conservative). The first non-uniform promotion is a discrete event, logged as the first **"Controller maturity milestone"** in the derivation trace.
+Under uniform weights, `combined_signal` is the unweighted average of desk forecasts. The first non-uniform promotion is a discrete event, logged as the first **"Controller maturity milestone"** in the derivation trace.
+
+**Collision semantics.** Microsecond-precision `boot_ts` makes same-timestamp collisions vanishingly unlikely in practice but not impossible (frozen-clock tests; containerised replays; high-rate restart loops). In the extraordinary case of identical `promotion_ts_utc` across two `SignalWeight` or `ControllerParams` rows, the Controller's read query breaks ties by lexicographic `weight_id` / `params_id` (§8.3). This guarantees deterministic reads even under pathological re-boot patterns.
 
 Rationale: this preserves the "Controller step is a pure function of inputs" principle — the Controller always has a valid weight matrix; there is no null-decision code path. The uniform-weight era is a first-class operational mode with its own audit provenance, not a placeholder.
 
@@ -808,7 +836,9 @@ Rationale: this preserves the "Controller step is a pure function of inputs" pri
 
 ## 15. Derivation trace — which decision answered which question
 
-For future readers: the five rounds of clarifying discussion that produced v1.0, plus the v1.1 review response. Each row cites the first point at which the decision was frozen.
+For future readers: the five rounds of clarifying discussion that produced v1.0, plus subsequent review responses. Each row cites the first point at which the decision was frozen.
+
+**Round-numbering convention.** `R#` refers to an AskUserQuestion **batch**; each batch contained 1–4 questions answered in a single response. Multiple decisions froze within a single batch simultaneously. Sub-ordering of decisions within a round is preserved in git history but not in this trace table; where a decision is ambiguous about "which question within the round," consult the spec-edit commit for that decision.
 
 | Decision | Frozen in |
 |---|---|
@@ -835,6 +865,8 @@ For future readers: the five rounds of clarifying discussion that produced v1.0,
 | Done-criterion strengthened (4-week continuous, 10/20 round-trips, latency KPI reported) | v1.1 (review response) |
 | Cold-start policy (uniform weights); Phase 2 readiness check; budget realism | v1.1 (review response) |
 | `regime_probabilities` on RegimeLabel; routing postconditions; `attribution_lodo` grain fix + `decisions` table | v1.1 (review response) |
+| DuckDB single-file layout (§3.2) | v1.2 (review response) |
+| `controller_params` separate table; rollback as distinct human operation; `boot_ts` microsecond precision + tie-break rule; regularisation assumed for weight fits; `config/data_sources.yaml` as the owning artefact for ingestion-failure payload | v1.3 (review response) |
 
 Full v1.0 review captured verbatim at `docs/reviews/2026-04-17-v1.0-review.md`.
 
@@ -844,7 +876,7 @@ Full v1.0 review captured verbatim at `docs/reviews/2026-04-17-v1.0-review.md`.
 
 | Field | Value |
 |---|---|
-| Spec version | v1.2 |
+| Spec version | v1.3 |
 | Date frozen | 2026-04-17 |
 | Domain instance | crude oil (WTI/Brent) |
 | Portability target | equity VRP (Speckle and Spot) |

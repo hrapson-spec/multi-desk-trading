@@ -30,15 +30,17 @@ Ten modules / test files. All live under the repo root.
 | 7 | `persistence/db.py` | Connection management, point-in-time query helpers | ~100 |
 | 8 | `grading/match.py` | Forecast × Print matching per §4.7 + Grade emission | ~120 |
 | 9 | `scheduler/calendar.py` | Release-calendar scheduler (cron-style) | ~80 |
-| 10 | `provenance/hash.py` | Input-snapshot hasher + code_commit resolver | ~60 |
-| 11 | `tests/test_boundary_purity.py` | Load-bearing: Controller runs against stubs | ~100 |
-| 12 | `tests/test_replay_determinism.py` | Load-bearing: byte-identical replay | ~100 |
-| 13 | `tests/test_bus_validation.py` | Registry + dirty-tree rejection | ~80 |
-| 14 | `tests/test_horizon_matching.py` | Event + clock horizon matching | ~80 |
-| 15 | `tests/test_persistence.py` | Schema round-trip, replay queries | ~60 |
-| 16 | `tests/conftest.py` | Shared fixtures (synthetic calendar, stub desks) | ~80 |
+| 10 | `config/release_calendar.yaml` | Release-schedule config consumed by scheduler | ~40 |
+| 11 | `config/data_sources.yaml` | Data-source → desks mapping; owning artefact for `data_ingestion_failure` payload (§6.2) | ~30 |
+| 12 | `provenance/hash.py` | Input-snapshot hasher + code_commit resolver | ~60 |
+| 13 | `tests/test_boundary_purity.py` | Load-bearing: Controller runs against stubs | ~100 |
+| 14 | `tests/test_replay_determinism.py` | Load-bearing: byte-identical replay | ~100 |
+| 15 | `tests/test_bus_validation.py` | Registry + dirty-tree rejection + tie-break | ~80 |
+| 16 | `tests/test_horizon_matching.py` | Event + clock horizon matching | ~80 |
+| 17 | `tests/test_persistence.py` | Schema round-trip, replay queries | ~60 |
+| 18 | `tests/conftest.py` | Shared fixtures (synthetic calendar, stub desks) | ~80 |
 
-Total: ~1,360 LOC across 16 files. 4 weeks of solo work is feasible at ~350 LOC/week average; headroom for debugging is built in.
+Total: ~1,430 LOC across 18 files. 4 weeks of solo work is feasible at ~360 LOC/week average; headroom for debugging is built in.
 
 ---
 
@@ -154,6 +156,33 @@ def matches(forecast: Forecast, p: Print, tolerance_seconds: float = 21600) -> b
 
 And a main loop `grade_all(db, forecasts_to_grade)` that scans pending-grade forecasts, finds matching prints, computes squared_error / absolute_error / sign_agreement / within_uncertainty / schedule_slip_seconds, and emits `Grade` events.
 
+### 5.6a `config/data_sources.yaml`
+
+Owning artefact for the data-source → desks mapping consumed by the `data_ingestion_failure` trigger payload (spec §6.2). Each entry:
+
+```yaml
+data_sources:
+  eia_wpsr:
+    description: "EIA Weekly Petroleum Status Report"
+    scheduled_release:
+      cron: "30 10 * * 3"     # Wed 10:30 ET
+      tz: "America/New_York"
+    tolerance_minutes: 120    # past scheduled release before ingestion_failure fires
+    consumed_by: [storage_curve, supply, demand]
+  cftc_cot:
+    description: "CFTC Commitments of Traders (disaggregated)"
+    scheduled_release:
+      cron: "30 15 * * 5"     # Fri 15:30 ET
+      tz: "America/New_York"
+    tolerance_minutes: 120
+    consumed_by: [storage_curve]
+  # ... additional feeds as desks register dependencies
+```
+
+The scheduler loads this at startup. On an ingestion miss (no Print with matching `target_variable` lands within `scheduled_release + tolerance_minutes`), the scheduler emits a `data_ingestion_failure` `ResearchLoopEvent` with payload `{feed_name, scheduled_release_ts, actual_wall_clock_ts, consumed_by}`.
+
+For Week 0, the YAML is seeded with a skeleton entry per the above schema; the `consumed_by` lists are empty until desks register in Weeks 1+. The scheduler fires with empty `consumed_by` gracefully (research-loop event still emits; the payload's `consumed_by` is `[]`).
+
 ### 5.7 `scheduler/calendar.py`
 
 Simple: a YAML-backed cron-style scheduler. Config at `config/release_calendar.yaml` listing the events from spec §3.3. Each entry has `event_id`, `cron_expr` (or similar), and `emission_offset` (forecasts emit this long before the event).
@@ -239,6 +268,7 @@ No linting-debt shipped. All four green before Week 0 is declared done.
 | 0.2 | `persistence/` + `test_persistence.py` | Insert/query roundtrip green; schema loads into a fresh DB |
 | 0.3 | `bus/bus.py` + `test_bus_validation.py` | Bus rejects malformed, persists valid; dirty-tree rejection works |
 | 0.4 | `grading/match.py` + `test_horizon_matching.py`; `scheduler/calendar.py`; `provenance/hash.py` | All three integrate; match function passes both clock and event tests |
+| 0.5a | `config/data_sources.yaml` skeleton + scheduler integration | Scheduler loads YAML; ingestion-failure trigger fires in a synthetic test |
 | 0.5 | `test_boundary_purity.py` + `test_replay_determinism.py` integration | Both load-bearing tests green end-to-end |
 | 0.6 | Buffer: address any integration fragility; documentation tidy; final CI green | All quality gates (§6.4) green; scaffold accepted |
 
