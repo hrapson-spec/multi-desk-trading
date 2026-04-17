@@ -32,6 +32,8 @@ from contracts.v1 import ResearchLoopEvent
 if TYPE_CHECKING:
     import duckdb
 
+    from research_loop.dispatcher import Dispatcher
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CALENDAR = REPO_ROOT / "config" / "release_calendar.yaml"
 DEFAULT_DATA_SOURCES = REPO_ROOT / "config" / "data_sources.yaml"
@@ -273,6 +275,115 @@ class Scheduler:
                 )
             )
         return emitted
+
+    def check_incident_recoveries(
+        self,
+        conn: duckdb.DuckDBPyConnection,
+        now_utc: datetime,
+        actual_prints_per_feed: dict[str, list[datetime]],
+    ) -> list[str]:
+        """Close feed_incidents when Prints resume (§14.5 v1.7 recovery).
+
+        For each currently-open feed_incidents row: find the next
+        scheduled firing AFTER the incident's opened_ts_utc; if a Print
+        for that feed landed within tolerance of that firing, close the
+        incident AND reset the Page-Hinkley detector via
+        `feed_latency_monitor.reset_for_feed` (so the next drift episode
+        is detected against a clean baseline).
+
+        Returns the list of feed_names whose incidents were closed.
+
+        Semantics:
+          - Healthy-resume signal = one scheduled firing post-open whose
+            release landed on time. A single on-time Print is enough to
+            declare the feed healthy; more would be conservative but
+            also delays reinstatement for no load-bearing reason.
+          - Closure is NOT idempotent on the first call (writes
+            closed_ts_utc), but IS a no-op on subsequent calls because
+            the handler only returns feeds whose incidents are
+            currently open.
+        """
+        from persistence import (
+            close_feed_incident,
+            get_open_feed_incidents,
+        )
+        from research_loop.feed_latency_monitor import reset_for_feed
+
+        closed: list[str] = []
+        for incident in get_open_feed_incidents(conn):
+            feed = str(incident["feed_name"])
+            opened_ts = incident["opened_ts_utc"]
+            assert isinstance(opened_ts, datetime)
+            ds = self.data_sources.get(feed)
+            tolerance = timedelta(minutes=ds.tolerance_minutes if ds is not None else 120)
+            # Only firings AFTER opened_ts count as recovery signals —
+            # a Print that arrived BEFORE the incident was opened has
+            # already been classified as late by the opening path.
+            firings = [
+                (ev, ts)
+                for ev, ts in self.firings_between(opened_ts, now_utc)
+                if ev.event_id == feed
+            ]
+            prints_for_feed = actual_prints_per_feed.get(feed, [])
+            recovered = False
+            for _ev, scheduled_ts in firings:
+                if any(
+                    abs((p - scheduled_ts).total_seconds()) <= tolerance.total_seconds()
+                    for p in prints_for_feed
+                ):
+                    recovered = True
+                    break
+            if not recovered:
+                continue
+            close_feed_incident(
+                conn,
+                feed_incident_id=str(incident["feed_incident_id"]),
+                closed_ts_utc=now_utc,
+                resolution_artefact=f"auto:scheduler_recovery:{feed}",
+            )
+            reset_for_feed(conn, feed)
+            closed.append(feed)
+        return closed
+
+    def submit_feed_reliability_review(
+        self,
+        dispatcher: Dispatcher,
+        *,
+        now_utc: datetime,
+        feed_names: list[str] | None = None,
+        **payload_overrides: object,
+    ) -> ResearchLoopEvent:
+        """Submit a feed_reliability_review event to the dispatcher
+        (spec §6.2, §14.5 v1.7 Layer 2 periodic review).
+
+        If `feed_names` is None, defaults to every feed in the
+        scheduler's data_sources config — i.e. review all known feeds.
+        Extra payload kwargs override defaults (lookback_days,
+        retirement_threshold, recovery_days,
+        max_retirements_per_7_days, reinstate_weight).
+
+        Returns the ResearchLoopEvent that was submitted (already
+        persisted by dispatcher.submit).
+
+        This helper is intended to be called on a periodic cadence —
+        weekly by default per §6.3 — by the long-running process
+        (soak runner, production daemon, or manual operator script).
+        The helper itself does NOT schedule the cadence; that's the
+        caller's responsibility.
+        """
+        if feed_names is None:
+            feed_names = sorted(self.data_sources.keys())
+        payload: dict[str, object] = {"feed_names": feed_names}
+        payload.update(payload_overrides)
+        event = ResearchLoopEvent(
+            event_id=str(uuid.uuid4()),
+            event_type="feed_reliability_review",
+            triggered_at_utc=now_utc,
+            priority=2,
+            payload=payload,
+        )
+        dispatcher.submit(event)
+        return event
 
 
 __all__: Iterable[str] = [

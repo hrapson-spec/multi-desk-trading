@@ -38,6 +38,7 @@ from .feed_reliability import (
     count_recent_auto_retirements,
     feeds_eligible_for_reinstatement,
     feeds_meeting_retirement_criteria,
+    historical_shapley_share,
     retired_desks_for_feed,
 )
 from .handlers import (
@@ -103,6 +104,7 @@ __all__ = [
     "feeds_eligible_for_reinstatement",
     "feeds_meeting_retirement_criteria",
     "gate_failure_handler",
+    "historical_shapley_share",
     "initial_state",
     "is_harmful",
     "load_or_initial",

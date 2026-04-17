@@ -585,3 +585,124 @@ def test_handler_no_op_when_nothing_qualifies(conn):
     assert data["retirements_performed"] == []
     assert data["reinstatement_fallbacks"] == []
     assert data["cap_reached"] is False
+
+
+# ---------------------------------------------------------------------------
+# historical_shapley_share + Shapley-informed reinstatement path
+# ---------------------------------------------------------------------------
+
+
+def _seed_shapley_row(
+    conn,
+    *,
+    review_ts_utc: datetime,
+    desk_name: str,
+    shapley_value: float,
+) -> None:
+    import uuid as _uuid
+
+    from contracts.v1 import AttributionShapley
+    from persistence import insert_attribution_shapley
+
+    insert_attribution_shapley(
+        conn,
+        AttributionShapley(
+            attribution_id=str(_uuid.uuid4()),
+            review_ts_utc=review_ts_utc,
+            desk_name=desk_name,
+            shapley_value=shapley_value,
+            metric_name="combined_signal_marginal",
+            n_decisions=1,
+            coalitions_mode="exact",
+        ),
+    )
+
+
+def test_historical_shapley_share_empty_when_no_rows(conn):
+    from research_loop import historical_shapley_share
+
+    assert historical_shapley_share(conn, desk_name="supply", lookback_days=90, now_utc=NOW) is None
+
+
+def test_historical_shapley_share_computes_mean_share(conn):
+    from research_loop import historical_shapley_share
+
+    # Review 1: supply=10, macro=30 → supply share = 10/40 = 0.25
+    # Review 2: supply=20, macro=20 → supply share = 20/40 = 0.50
+    review1_ts = NOW - timedelta(days=14)
+    review2_ts = NOW - timedelta(days=7)
+    for ts, supply_v, macro_v in [
+        (review1_ts, 10.0, 30.0),
+        (review2_ts, 20.0, 20.0),
+    ]:
+        _seed_shapley_row(conn, review_ts_utc=ts, desk_name="supply", shapley_value=supply_v)
+        _seed_shapley_row(conn, review_ts_utc=ts, desk_name="macro", shapley_value=macro_v)
+
+    share = historical_shapley_share(conn, desk_name="supply", lookback_days=30, now_utc=NOW)
+    assert share is not None
+    # Mean of [0.25, 0.50] = 0.375.
+    assert share == pytest.approx(0.375)
+
+
+def test_historical_shapley_share_respects_lookback(conn):
+    from research_loop import historical_shapley_share
+
+    old_ts = NOW - timedelta(days=120)
+    _seed_shapley_row(conn, review_ts_utc=old_ts, desk_name="supply", shapley_value=10.0)
+    _seed_shapley_row(conn, review_ts_utc=old_ts, desk_name="macro", shapley_value=10.0)
+    # Lookback = 30 days → the 120d-old row is out of window.
+    assert historical_shapley_share(conn, desk_name="supply", lookback_days=30, now_utc=NOW) is None
+
+
+def test_handler_reinstatement_prefers_shapley_share(conn):
+    """With Shapley rows available, reinstatement uses the historical
+    share and populates reinstatements_performed (not fallbacks)."""
+    _seed_two_regimes_with_desks(conn, ["supply"])
+    # Retire supply (simulating prior review).
+    retire_desk_for_all_regimes(
+        conn,
+        desk_name="supply",
+        target_variable=WTI_FRONT_MONTH_CLOSE,
+        reason="eia_wpsr",
+        now_utc=NOW - timedelta(days=30),
+    )
+    # Seed Shapley rows giving supply a 40% historical share.
+    review_ts = NOW - timedelta(days=10)
+    _seed_shapley_row(conn, review_ts_utc=review_ts, desk_name="supply", shapley_value=40.0)
+    _seed_shapley_row(conn, review_ts_utc=review_ts, desk_name="macro", shapley_value=60.0)
+
+    result = feed_reliability_review_handler(
+        conn,
+        _review_event(feed_names=["eia_wpsr"], recovery_days=14, reinstate_weight=0.1),
+    )
+    data = json.loads(result.artefact)
+    # Shapley-informed path populates reinstatements_performed, not fallbacks.
+    assert len(data["reinstatements_performed"]) == 2  # both regimes
+    assert data["reinstatement_fallbacks"] == []
+    for record in data["reinstatements_performed"]:
+        assert record["source"] == "shapley"
+        # Supply's historical share = 40/100 = 0.4
+        assert record["weight"] == pytest.approx(0.4)
+
+
+def test_handler_falls_back_when_no_shapley_rows(conn):
+    """Without Shapley rows, reinstatement falls back to the
+    conservative direct-insert weight."""
+    _seed_two_regimes_with_desks(conn, ["supply"])
+    retire_desk_for_all_regimes(
+        conn,
+        desk_name="supply",
+        target_variable=WTI_FRONT_MONTH_CLOSE,
+        reason="eia_wpsr",
+        now_utc=NOW - timedelta(days=30),
+    )
+    result = feed_reliability_review_handler(
+        conn,
+        _review_event(feed_names=["eia_wpsr"], recovery_days=14, reinstate_weight=0.15),
+    )
+    data = json.loads(result.artefact)
+    assert data["reinstatements_performed"] == []
+    assert len(data["reinstatement_fallbacks"]) == 2
+    for record in data["reinstatement_fallbacks"]:
+        assert record["source"] == "fallback"
+        assert record["weight"] == pytest.approx(0.15)

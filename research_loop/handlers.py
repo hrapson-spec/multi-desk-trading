@@ -37,6 +37,7 @@ from .feed_reliability import (
     active_target_variables_for_desk,
     feeds_eligible_for_reinstatement,
     feeds_meeting_retirement_criteria,
+    historical_shapley_share,
     retired_desks_for_feed,
 )
 from .promotion import propose_and_promote_from_shapley
@@ -533,29 +534,50 @@ def feed_reliability_review_handler(
     )
     reinstatements_performed: list[dict[str, object]] = []
     reinstatement_fallbacks: list[dict[str, object]] = []
+    shapley_lookback_days = int(event.payload.get("shapley_lookback_days", 90))
     for feed in recovered_feeds:
         retired = retired_desks_for_feed(conn, feed_name=feed)
         if not retired:
             continue
         for regime_id, desk, target in retired:
+            # Shapley-informed primary path: use the desk's historical
+            # share of total |Shapley| as the reinstatement weight. This
+            # targets the retired desk without disturbing others
+            # (propose_and_promote_from_shapley would re-weight every
+            # desk, which is invasive for single-desk reinstatement).
+            shapley_share = historical_shapley_share(
+                conn,
+                desk_name=desk,
+                lookback_days=shapley_lookback_days,
+                now_utc=now_utc,
+            )
+            if shapley_share is not None and shapley_share > 0.0:
+                chosen_weight = shapley_share
+                source = "shapley"
+            else:
+                chosen_weight = reinstate_weight
+                source = "fallback"
             sw = reinstate_desk_direct(
                 conn,
                 regime_id=regime_id,
                 desk_name=desk,
                 target_variable=target,
-                weight=reinstate_weight,
+                weight=chosen_weight,
                 reason=feed,
                 now_utc=now_utc,
             )
-            reinstatement_fallbacks.append(
-                {
-                    "regime_id": sw.regime_id,
-                    "desk_name": sw.desk_name,
-                    "target_variable": sw.target_variable,
-                    "weight": sw.weight,
-                    "feed_name": feed,
-                }
-            )
+            record = {
+                "regime_id": sw.regime_id,
+                "desk_name": sw.desk_name,
+                "target_variable": sw.target_variable,
+                "weight": sw.weight,
+                "feed_name": feed,
+                "source": source,
+            }
+            if source == "shapley":
+                reinstatements_performed.append(record)
+            else:
+                reinstatement_fallbacks.append(record)
 
     artefact = json.dumps(
         {

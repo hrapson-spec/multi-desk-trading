@@ -178,6 +178,67 @@ def count_recent_auto_retirements(
     return int(row[0]) if row is not None else 0
 
 
+def historical_shapley_share(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    desk_name: str,
+    lookback_days: int,
+    now_utc: datetime,
+) -> float | None:
+    """Compute the desk's historical share of total |Shapley| over
+    recent reviews.
+
+    Algorithm: for each `review_ts_utc` in the lookback, compute
+    `desk_share = |shapley_value_desk| / sum(|shapley_value|) over all
+    desks in that review`. Return the mean share across reviews, or
+    None if the desk has no attribution_shapley rows in the window.
+
+    This gives a bounded [0, 1] weight anchor for reinstatement —
+    preferred over the `propose_and_promote_from_shapley` path because
+    the latter re-weights every desk in the regime (invasive: we don't
+    want to disturb unaffected desks while reinstating one).
+
+    Returns None when:
+      - The desk has no attribution_shapley rows in the lookback, OR
+      - All rows in the lookback have total_abs == 0 (no informative
+        attribution).
+    """
+    if now_utc.tzinfo is None:
+        raise ValueError("now_utc must be timezone-aware")
+    window_start = now_utc - timedelta(days=lookback_days)
+
+    review_rows = conn.execute(
+        """
+        SELECT review_ts_utc, desk_name, shapley_value
+        FROM attribution_shapley
+        WHERE review_ts_utc >= ? AND review_ts_utc <= ?
+        ORDER BY review_ts_utc, desk_name
+        """,
+        [window_start, now_utc],
+    ).fetchall()
+    if not review_rows:
+        return None
+
+    # Group by review_ts_utc.
+    by_review: dict[datetime, list[tuple[str, float]]] = {}
+    for r in review_rows:
+        ts = r[0]
+        by_review.setdefault(ts, []).append((str(r[1]), float(r[2])))
+
+    shares: list[float] = []
+    for desks_in_review in by_review.values():
+        total_abs = sum(abs(v) for _, v in desks_in_review)
+        if total_abs <= 0.0:
+            continue
+        desk_value = next((v for d, v in desks_in_review if d == desk_name), None)
+        if desk_value is None:
+            continue
+        shares.append(abs(desk_value) / total_abs)
+    if not shares:
+        return None
+    return sum(shares) / len(shares)
+
+
 def active_target_variables_for_desk(
     conn: duckdb.DuckDBPyConnection,
     desk_name: str,
