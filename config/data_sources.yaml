@@ -1,0 +1,24 @@
+# Data-source → desks mapping (spec §14.7 flagged dependency; v1.3 review item D).
+# Owning artefact for the `data_ingestion_failure` research-loop trigger payload.
+# The scheduler emits the trigger with `consumed_by` drawn from this file.
+#
+# Schema:
+#   feed_name: stable identifier (matches event_id when the feed IS the event).
+#   description: human-readable.
+#   tolerance_minutes: window past scheduled release before the trigger fires.
+#   consumed_by: list of desk_name values. Empty until desks register; Week 0
+#                seeds the file with empty lists so the scheduler can load it.
+#
+# Phase 1 seed entries mirror release_calendar.yaml.
+
+data_sources:
+
+  - feed_name: eia_wpsr
+    description: "EIA Weekly Petroleum Status Report"
+    tolerance_minutes: 120
+    consumed_by: []            # will include [storage_curve, supply, demand]
+
+  - feed_name: cftc_cot
+    description: "CFTC Commitments of Traders (disaggregated)"
+    tolerance_minutes: 120
+    consumed_by: []            # will include [storage_curve]

@@ -15,6 +15,7 @@ Rationale: eliminates the silent-failure mode where a typo in a desk's
 target_variable produces a new unique string that no Print will ever match,
 causing the Forecast to persist but never be graded.
 """
+
 from __future__ import annotations
 
 # -----------------------------------------------------------------------------
@@ -38,9 +39,11 @@ WTI_FRONT_MONTH_CLOSE = "wti_front_month_close"
 # Frozen set of all known targets
 # -----------------------------------------------------------------------------
 
-KNOWN_TARGETS: frozenset[str] = frozenset({
-    WTI_FRONT_MONTH_CLOSE,
-})
+KNOWN_TARGETS: frozenset[str] = frozenset(
+    {
+        WTI_FRONT_MONTH_CLOSE,
+    }
+)
 
 
 def is_known(target_variable: str) -> bool:

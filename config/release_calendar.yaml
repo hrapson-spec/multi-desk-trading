@@ -1,0 +1,27 @@
+# Release-calendar configuration consumed by scheduler/calendar.py.
+# Entries are scheduled Print-producing events; desks emit Forecasts ahead
+# of these and the grading harness matches on event_id (spec §4.7).
+#
+# Schema:
+#   event_id: stable string identifier; used as EventHorizon.event_id.
+#   description: human-readable.
+#   cron: 5-field cron expression (minute hour dom month dow).
+#   tz: IANA timezone name; the cron is interpreted in this zone, stored UTC.
+#   target_variable: which target_variable Prints for this event carry.
+#
+# Phase 1 seeds only two entries; additional releases register as desks come
+# online (spec §12.1 sequencing).
+
+events:
+
+  - event_id: eia_wpsr
+    description: "EIA Weekly Petroleum Status Report"
+    cron: "30 10 * * 3"        # Wed 10:30 ET
+    tz: "America/New_York"
+    target_variable: wti_front_month_close
+
+  - event_id: cftc_cot
+    description: "CFTC Commitments of Traders (disaggregated)"
+    cron: "30 15 * * 5"        # Fri 15:30 ET
+    tz: "America/New_York"
+    target_variable: wti_front_month_close

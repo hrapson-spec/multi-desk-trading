@@ -15,10 +15,15 @@ dependencies = [
     "pydantic>=2.7",
     # Persistence
     "duckdb>=1.0",
+    "pytz",  # Required by DuckDB for TIMESTAMPTZ Python bridging.
     # Data
     "numpy>=1.26",
     "pandas>=2.2",
-    # Scheduling (Phase 1: cron + Python; Prefect added when needed)
+    # Configuration
+    "pyyaml>=6.0",
+    # Scheduler (cron parser)
+    "croniter>=2.0",
+    # Scheduling orchestrator (Phase 1: cron + Python; Prefect added when needed)
     # "prefect>=3.0",
 ]
 
@@ -51,6 +56,14 @@ models = [
 Homepage = "https://github.com/hrapson-spec/multi-desk-trading"
 Spec = "https://github.com/hrapson-spec/multi-desk-trading/blob/main/docs/architecture_spec_v1.md"
 
+[tool.hatch.build.targets.wheel]
+packages = ["bus", "contracts", "grading", "persistence", "provenance", "scheduler"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"persistence/schema.sql" = "persistence/schema.sql"
+"config/release_calendar.yaml" = "config/release_calendar.yaml"
+"config/data_sources.yaml" = "config/data_sources.yaml"
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
@@ -61,3 +74,15 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+
+[tool.mypy]
+python_version = "3.11"
+
+[[tool.mypy.overrides]]
+module = ["contracts.*", "bus.*"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["croniter.*", "yaml.*"]
+ignore_missing_imports = true
+

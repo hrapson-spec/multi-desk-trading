@@ -32,7 +32,8 @@ Synthetic / research-only. Free public data sources only (EIA, OPEC MOMR text, J
 ## Status
 
 - [x] v1.0 architecture spec frozen (2026-04-17)
-- [ ] Week 0 scaffold: `contracts/v1.py`, bus, DuckDB schema, grading harness, `tests/test_boundary_purity.py`
+- [x] v1.1–v1.3 review responses shipped (see `docs/reviews/`)
+- [x] Week 0 scaffold: `contracts/v1.py` + `contracts/target_variables.py` + `bus/`, DuckDB schema (11 tables), grading harness (§4.7 matching), scheduler + `config/{release_calendar,data_sources}.yaml`, `provenance/`. Load-bearing tests `test_boundary_purity.py` + `test_replay_determinism.py` green. Tag `scaffold-v1.0`.
 - [ ] Stubs for all six desks
 - [ ] Desk 1 (Storage & Curve) deepened
 - [ ] Desks 2–5 deepened (Geopolitics → Supply/Demand parallel → Macro)
