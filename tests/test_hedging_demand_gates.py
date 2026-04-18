@@ -1,15 +1,13 @@
-"""Gate tests for HedgingDemandDesk (Phase 2 scale-out desk 2, v1.13).
+"""Gate tests for HedgingDemandDesk (Phase 2 scale-out desk 2, v1.14+).
 
-Three-gate check mirroring `test_dealer_inventory_gates.py`. Key
-differences per the design-review response:
+Three-gate check mirroring `test_dealer_inventory_gates.py`. Key points:
 
-- **Gate 3 language recalibrated** (D9 in capability_debits.md): the
-  existing gate harness uses `run_controller_fn=lambda: True` stubs,
-  so the runtime hot-swap claim is currently DeskProtocol conformance
-  + attribute parity, not a full controller-execution proof. The
-  tests below assert what the harness actually verifies, not the
-  stronger claim the spec's old language implied.
-- **Single-source Gate 3 test** (m-2): one
+- **Gate 3 is now real runtime hot-swap** (D9 closed at v1.14): the
+  main three-gate test uses `eval.build_hot_swap_callables`, which
+  exercises `Controller.decide()` end-to-end with a real desk and a
+  `StubDesk` swap. The DeskProtocol test below is supplementary
+  attribute-conformance coverage, not the primary Gate 3 proof.
+- **Single supplementary conformance test** (m-2): one
   `test_hedging_demand_matches_deskprotocol` — no duplicate.
 - **Gates 1 + 2 pinned** (m-1): exact metrics recorded on first run
   and asserted within tolerance. Regression signal kicks in if future
@@ -46,16 +44,17 @@ NOW = datetime(2026, 4, 18, 10, 0, 0, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------
-# Gate 3 — DeskProtocol conformance (the honest claim per D9)
+# Gate 3 supplementary check — DeskProtocol conformance still matters,
+# but runtime hot-swap is now proved by the main three-gate test below.
 # ---------------------------------------------------------------------------
 
 
 def test_hedging_demand_matches_deskprotocol():
-    """Gate 3 (honest form): HedgingDemandDesk and a generic StubDesk
+    """Supplementary Gate 3 precondition: HedgingDemandDesk and a generic StubDesk
     configured with the same name/target/event_id both satisfy
-    DeskProtocol. This is the portability invariant that the existing
-    gate harness actually proves — runtime controller hot-swap is a
-    stronger claim tracked as open debit D9."""
+    DeskProtocol. Runtime controller hot-swap is verified separately by
+    `test_hedging_demand_classical_three_gates_on_mvp_market` via
+    `build_hot_swap_callables`."""
     d = HedgingDemandDesk()
     assert d.name == "hedging_demand"
     assert d.target_variable == VIX_30D_FORWARD
@@ -117,14 +116,12 @@ def test_hedging_demand_classical_fits_and_predicts():
 
 
 def test_hedging_demand_sign_derives_from_score():
-    """Force negative, zero, positive ridge outputs by constructing
-    a model with known coefficients; assert each emits the correct
-    directional_claim.sign."""
+    """The emitted sign should follow the model's directional-score head."""
     model = ClassicalHedgingDemandModel(horizon_days=HORIZON, alpha=1e-3)
-    # Force-fit: directly assign coefficients so predict is a pure function
-    # of hd_last. coef[0] controls hd_last contribution; intercept controls
-    # baseline.
-    model.coef_ = np.array([1.0, 0.0, 0.0, 0.0, 0.0])
+    # Minimal fitted state for predict(); the directional-score head now
+    # follows the leading hedging-pressure features rather than the fitted
+    # point-estimate coefficient vector.
+    model.coef_ = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     model.intercept_ = 0.0
     model.n_train_ = 100
 
@@ -133,10 +130,11 @@ def test_hedging_demand_sign_derives_from_score():
     channels = EquityObservationChannels.build(path, mode="clean", seed=0)
     desk = HedgingDemandDesk(model=model)
 
-    # Manipulate hd_obs array such that at i=20 the last value is very positive,
-    # very negative, or zero.
+    # Manipulate the leading hedging-pressure channels so the score is clearly
+    # negative, positive, then neutral.
     hd_comp = channels.by_desk["hedging_demand"].components
     hd_comp["hedging_demand_level"][:20] = 0.0
+    hd_comp["put_skew_proxy"][:20] = 0.0
     # Very negative → score < 0 → sign=negative.
     hd_comp["hedging_demand_level"][19] = -10.0
     f = desk.forecast_from_observation(channels, 20, NOW)
@@ -147,10 +145,9 @@ def test_hedging_demand_sign_derives_from_score():
     f = desk.forecast_from_observation(channels, 20, NOW)
     assert f.directional_claim.sign == "positive"
 
-    # Very close to zero → sign=none.
-    hd_comp["hedging_demand_level"][19] = 0.0
-    # Need the *mean* to dominate; force window to be zero-mean too.
+    # Zero out both leading score channels → sign=none.
     hd_comp["hedging_demand_level"][:20] = 0.0
+    hd_comp["put_skew_proxy"][:20] = 0.0
     f = desk.forecast_from_observation(channels, 20, NOW)
     assert f.directional_claim.sign == "none"
 
@@ -218,14 +215,11 @@ def _fit_and_drive():
 # surfacing the regression. Update only when a deliberate model change
 # justifies re-recording.
 # ---------------------------------------------------------------------------
-# Recorded 2026-04-18 at tag phase2-desk2-hedging-demand-v1.13 (pre-tag run).
-# G1 fails Gate 1 threshold (negative improvement vs RW baseline on vol);
-# G2 is flat because the ridge emits near-constant scores over the held-out
-# window at this config. Both failures expand capability-debit D7 per the
-# Phase 2 MVP precedent. Gate 3 passes as DeskProtocol conformance.
-_PINNED_G1_RELATIVE_IMPROVEMENT = -0.1060
-_PINNED_G2_DEV_CORR = 0.0000
-_PINNED_G2_TEST_CORR = 0.0000
+# Re-recorded after the direct vol-delta head and correct Gate 2 metric-key
+# wiring (`dev_rho` / `test_rho`, not the old mistaken `*_corr` lookup).
+_PINNED_G1_RELATIVE_IMPROVEMENT = 0.0356
+_PINNED_G2_DEV_RHO = 0.2155
+_PINNED_G2_TEST_RHO = -0.1403
 _PIN_TOLERANCE = 0.005  # loose enough to absorb float noise, tight enough to catch drift
 
 
@@ -308,8 +302,8 @@ def test_hedging_demand_classical_three_gates_on_mvp_market(tmp_path):
 
     # Gates 1 + 2 pinned metrics (m-1).
     g1_rel_impr = report.gate1_skill.metrics.get("relative_improvement", 0.0)
-    g2_dev = report.gate2_sign_preservation.metrics.get("dev_corr", 0.0)
-    g2_test = report.gate2_sign_preservation.metrics.get("test_corr", 0.0)
+    g2_dev = report.gate2_sign_preservation.metrics.get("dev_rho", 0.0)
+    g2_test = report.gate2_sign_preservation.metrics.get("test_rho", 0.0)
 
     print(
         f"\nPhase 2 Desk 2 hedging_demand gates: "
@@ -323,9 +317,9 @@ def test_hedging_demand_classical_three_gates_on_mvp_market(tmp_path):
         f"{_PINNED_G1_RELATIVE_IMPROVEMENT:.4f}. Update the pin if the change is "
         "deliberate."
     )
-    assert g2_dev == pytest.approx(_PINNED_G2_DEV_CORR, abs=_PIN_TOLERANCE), (
-        f"G2 dev_corr drifted: {g2_dev:.4f} vs pinned {_PINNED_G2_DEV_CORR:.4f}."
+    assert g2_dev == pytest.approx(_PINNED_G2_DEV_RHO, abs=_PIN_TOLERANCE), (
+        f"G2 dev_rho drifted: {g2_dev:.4f} vs pinned {_PINNED_G2_DEV_RHO:.4f}."
     )
-    assert g2_test == pytest.approx(_PINNED_G2_TEST_CORR, abs=_PIN_TOLERANCE), (
-        f"G2 test_corr drifted: {g2_test:.4f} vs pinned {_PINNED_G2_TEST_CORR:.4f}."
+    assert g2_test == pytest.approx(_PINNED_G2_TEST_RHO, abs=_PIN_TOLERANCE), (
+        f"G2 test_rho drifted: {g2_test:.4f} vs pinned {_PINNED_G2_TEST_RHO:.4f}."
     )

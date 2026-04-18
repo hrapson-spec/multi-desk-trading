@@ -64,6 +64,7 @@ class GeopoliticsDesk(StubDesk):
         pred = self.model.predict(
             obs["event_indicator"],
             obs["event_intensity"],
+            obs["event_intensity_raw"],
             channels.market_price,
             i,
         )
@@ -94,6 +95,7 @@ class GeopoliticsDesk(StubDesk):
         pred = self.model.predict(
             obs["event_indicator"],
             obs["event_intensity"],
+            obs["event_intensity_raw"],
             channels.market_price,
             i,
         )

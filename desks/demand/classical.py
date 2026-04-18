@@ -1,9 +1,10 @@
 """Classical specialist for the Demand desk (plan §A, spec §5.3).
 
 Structural mirror of `ClassicalSupplyModel`: consumes the demand
-observation channel with the same [last, mean, std, trend] feature
-vector over a 10-day lookback, fits ridge on the stationary log-return
-target, and converts back to a price via the shared market_price.
+observation channel and a companion demand-level state. The feature
+vector now mixes short-horizon signal summaries with level context over
+the same 10-day window, then fits ridge on the stationary log-return
+target and converts back to a price via the shared market_price.
 
 Kept as a distinct class (vs a single shared generic) so per-desk
 feature-engineering choices stay locally readable.
@@ -25,7 +26,7 @@ ALPHA_DEFAULT = 1.0
 
 @dataclass
 class ClassicalDemandModel:
-    """Ridge(demand-channel features) → log-return → price."""
+    """Ridge(demand-signal + demand-level features) → log-return → price."""
 
     lookback: int = LOOKBACK_DEFAULT
     horizon_days: int = HORIZON_DEFAULT
@@ -35,27 +36,54 @@ class ClassicalDemandModel:
     intercept_: float | None = field(default=None, init=False)
     n_train_: int = field(default=0, init=False)
 
-    def _features(self, demand: np.ndarray, i: int) -> np.ndarray | None:
-        if i < self.lookback + 1:
+    def _features(self, demand: np.ndarray, demand_level: np.ndarray, i: int) -> np.ndarray | None:
+        if i < self.lookback + 2:
             return None
         window = demand[i - self.lookback : i]
-        if np.any(~np.isfinite(window)):
+        level_window = demand_level[i - self.lookback : i]
+        if np.any(~np.isfinite(window)) or np.any(~np.isfinite(level_window)):
             return None
-        diffs = np.diff(window)
-        if len(diffs) < 2:
+        if len(window) < 2:
             return None
         trend = float(np.polyfit(np.arange(len(window)), window, 1)[0])
-        return np.array([float(window[-1]), float(window.mean()), float(window.std()), trend])
+        signal_last = float(window[-1])
+        signal_prev = float(window[-2])
+        level_last = float(level_window[-1])
+        level_gap = float(level_last - level_window.mean())
+        return np.array(
+            [
+                signal_last,
+                signal_prev,
+                float(window.mean()),
+                float(window.std()),
+                trend,
+                signal_last - signal_prev,
+                level_last,
+                level_gap,
+            ]
+        )
 
-    def fit(self, demand: np.ndarray, market_price: np.ndarray) -> None:
-        if len(demand) != len(market_price):
+    def fit(
+        self,
+        demand: np.ndarray,
+        demand_level_or_market_price: np.ndarray,
+        market_price: np.ndarray | None = None,
+    ) -> None:
+        if market_price is None:
+            demand_level = demand
+            market_price = demand_level_or_market_price
+        else:
+            demand_level = demand_level_or_market_price
+
+        if not (len(demand) == len(demand_level) == len(market_price)):
             raise ValueError(
-                f"demand and market_price lengths differ: {len(demand)} vs {len(market_price)}"
+                "demand, demand_level, and market_price lengths must match: "
+                f"{len(demand)}, {len(demand_level)}, {len(market_price)}"
             )
         X_list: list[np.ndarray] = []
         y_list: list[float] = []
         for i in range(1, len(market_price) - self.horizon_days):
-            f = self._features(demand, i)
+            f = self._features(demand, demand_level, i)
             if f is None:
                 continue
             log_ret = float(
@@ -73,11 +101,22 @@ class ClassicalDemandModel:
         self.n_train_ = len(X_list)
 
     def predict(
-        self, demand: np.ndarray, market_price: np.ndarray, i: int
+        self,
+        demand: np.ndarray,
+        demand_level_or_market_price: np.ndarray,
+        market_price_or_i: np.ndarray | int,
+        i: int | None = None,
     ) -> tuple[float, float] | None:
         if self.coef_ is None or self.intercept_ is None:
             raise RuntimeError("model not fitted; call .fit() first")
-        f = self._features(demand, i)
+        if i is None:
+            demand_level = demand
+            market_price = demand_level_or_market_price
+            i = int(market_price_or_i)
+        else:
+            demand_level = demand_level_or_market_price
+            market_price = market_price_or_i
+        f = self._features(demand, demand_level, i)
         if f is None:
             return None
         log_ret_pred = float(f @ self.coef_ + self.intercept_)

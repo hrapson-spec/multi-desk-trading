@@ -71,22 +71,26 @@ def _fit_all_desks(channels: ObservationChannels, market_price: np.ndarray) -> d
     supply_model = ClassicalSupplyModel(horizon_days=HORIZON, alpha=small_alpha)
     supply_model.fit(
         channels.by_desk["supply"].components["supply"][:TRAIN_END],
+        channels.by_desk["supply"].components["supply_level"][:TRAIN_END],
         market_price[:TRAIN_END],
     )
     demand_model = ClassicalDemandModel(horizon_days=HORIZON, alpha=small_alpha)
     demand_model.fit(
         channels.by_desk["demand"].components["demand"][:TRAIN_END],
+        channels.by_desk["demand"].components["demand_level"][:TRAIN_END],
         market_price[:TRAIN_END],
     )
     geo_model = ClassicalGeopoliticsModel(horizon_days=HORIZON, alpha=small_alpha)
     geo_model.fit(
         channels.by_desk["geopolitics"].components["event_indicator"][:TRAIN_END],
         channels.by_desk["geopolitics"].components["event_intensity"][:TRAIN_END],
+        channels.by_desk["geopolitics"].components["event_intensity_raw"][:TRAIN_END],
         market_price[:TRAIN_END],
     )
-    macro_model = ClassicalMacroModel(lookback=60, horizon_days=HORIZON, alpha=small_alpha)
+    macro_model = ClassicalMacroModel(horizon_days=HORIZON, alpha=small_alpha)
     macro_model.fit(
         channels.by_desk["macro"].components["xi"][:TRAIN_END],
+        channels.by_desk["macro"].components["xi_level"][:TRAIN_END],
         market_price[:TRAIN_END],
     )
     return {

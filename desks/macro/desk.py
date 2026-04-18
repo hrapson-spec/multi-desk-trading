@@ -61,8 +61,13 @@ class MacroDesk(StubDesk):
     ) -> Forecast:
         if self.model is None:
             return self._build_stub_forecast(now_utc)
-        xi = channels.by_desk[self.name].components["xi"]
-        pred = self.model.predict(xi, channels.market_price, i)
+        obs = channels.by_desk[self.name].components
+        pred = self.model.predict(
+            obs["xi"],
+            obs["xi_level"],
+            channels.market_price,
+            i,
+        )
         if pred is None:
             return self._build_stub_forecast(now_utc)
         point, _score = pred
@@ -86,8 +91,13 @@ class MacroDesk(StubDesk):
     def directional_score(self, channels: ObservationChannels, i: int) -> float | None:
         if self.model is None:
             return None
-        xi = channels.by_desk[self.name].components["xi"]
-        pred = self.model.predict(xi, channels.market_price, i)
+        obs = channels.by_desk[self.name].components
+        pred = self.model.predict(
+            obs["xi"],
+            obs["xi_level"],
+            channels.market_price,
+            i,
+        )
         if pred is None:
             return None
         return pred[1]

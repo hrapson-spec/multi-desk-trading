@@ -1,9 +1,10 @@
-"""Tests for research_loop.handlers.regime_transition_handler v0.2.
+"""Tests for research_loop.handlers.regime_transition_handler v0.3.
 
-v0.2 contract: on regime transition, look up historical decisions for
-the to_regime in a lookback window; if ≥min_decisions exist, compute
-Shapley over them and propose_and_promote_from_shapley for the
-to_regime. Otherwise fall back to log-only.
+v0.3 contract: on regime transition, look up historical decisions and
+matching realised Prints for the to_regime in a lookback window; if
+≥min_decisions exist, compute grading-space Shapley, run the held-out
+margin validation, and promote only when the candidate beats the
+incumbent. Otherwise fall back to log-only.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from contracts.v1 import (
     DirectionalClaim,
     EventHorizon,
     Forecast,
+    Print,
     Provenance,
     RegimeLabel,
     ResearchLoopEvent,
@@ -32,9 +34,10 @@ from persistence import (
     init_db,
     insert_decision,
     insert_forecast,
+    insert_print,
 )
 from research_loop.handlers import (
-    REGIME_TRANSITION_ARTEFACT_V02,
+    REGIME_TRANSITION_ARTEFACT_V03,
     regime_transition_handler,
 )
 
@@ -108,8 +111,12 @@ def _seed_history_for_to_regime(conn, n_decisions: int) -> list[datetime]:
         # but still inside the default 30-day lookback window.
         ts = TRANSITION_TS - timedelta(days=i + 1)
         ts_list.append(ts)
-        storage_val = 40.0 + 10.0 * i  # varying — feeds Shapley differentiation
-        macro_val = 80.0 + 5.0 * i
+        storage_val = 45.0 + 8.0 * i
+        # Macro is intentionally higher-scale but noisier / less aligned with
+        # the realised print path, so the normalized grading-space Shapley
+        # candidate should shift weight toward storage_curve and beat the
+        # incumbent equal-weight bundle on held-out MSE.
+        macro_val = 82.0 + 2.0 * i + (14.0 if i % 2 == 0 else -11.0)
         fcasts = {
             ("storage_curve", WTI_FRONT_MONTH_CLOSE): _fcast("storage_curve", storage_val, ts),
             ("macro", WTI_FRONT_MONTH_CLOSE): _fcast("macro", macro_val, ts),
@@ -122,6 +129,15 @@ def _seed_history_for_to_regime(conn, n_decisions: int) -> list[datetime]:
             recent_forecasts=fcasts,
         )
         insert_decision(conn, d)
+        insert_print(
+            conn,
+            Print(
+                print_id=f"print-{i}",
+                realised_ts_utc=ts,
+                target_variable=WTI_FRONT_MONTH_CLOSE,
+                value=storage_val,
+            ),
+        )
     return ts_list
 
 
@@ -175,7 +191,7 @@ def test_no_history_for_to_regime_is_insufficient(conn):
     )
     result = regime_transition_handler(conn, event)
     data = json.loads(result.artefact)
-    assert data["handler"] == "regime_transition_v0.2"
+    assert data["handler"] == "regime_transition_v0.3"
     assert data["action"] == "insufficient_history_for_refresh"
     assert data["refresh_detail"]["n_decisions"] == 0
     # No signal_weights rows should have been written (cold-start not
@@ -204,10 +220,10 @@ def test_below_min_decisions_is_insufficient(conn):
     assert data["refresh_detail"]["n_decisions"] == 3
     assert data["refresh_detail"]["min_required"] == 5
 
-    # No new SignalWeight rows tagged with REGIME_TRANSITION_ARTEFACT_V02.
+    # No new SignalWeight rows tagged with REGIME_TRANSITION_ARTEFACT_V03.
     rows = conn.execute(
         "SELECT count(*) FROM signal_weights WHERE validation_artefact = ?",
-        [REGIME_TRANSITION_ARTEFACT_V02],
+        [REGIME_TRANSITION_ARTEFACT_V03],
     ).fetchone()
     assert rows[0] == 0
 
@@ -217,7 +233,7 @@ def test_below_min_decisions_is_insufficient(conn):
 # ---------------------------------------------------------------------------
 
 
-def test_sufficient_history_triggers_shapley_refresh(conn):
+def test_sufficient_history_triggers_validated_refresh(conn):
     _seed_history_for_to_regime(conn, n_decisions=6)
     event = ResearchLoopEvent(
         event_id=str(uuid.uuid4()),
@@ -232,13 +248,15 @@ def test_sufficient_history_triggers_shapley_refresh(conn):
     )
     result = regime_transition_handler(conn, event)
     data = json.loads(result.artefact)
-    assert data["action"] == "refreshed_from_shapley"
+    assert data["action"] == "refreshed_from_validated_shapley"
     assert data["refresh_detail"]["n_decisions"] == 6
-    assert data["refresh_detail"]["validation_artefact"] == REGIME_TRANSITION_ARTEFACT_V02
+    assert data["refresh_detail"]["n_prints"] == 6
+    assert data["refresh_detail"]["validation_artefact"] == REGIME_TRANSITION_ARTEFACT_V03
+    assert data["refresh_detail"]["validation"]["passed"] is True
     # Exactly two desks promoted (storage_curve + macro).
     assert data["refresh_detail"]["n_desks_promoted"] == 2
 
-    # New SignalWeight rows exist for TO_REGIME tagged with the v0.2 artefact.
+    # New SignalWeight rows exist for TO_REGIME tagged with the v0.3 artefact.
     rows = conn.execute(
         """
         SELECT desk_name, weight, validation_artefact
@@ -246,7 +264,7 @@ def test_sufficient_history_triggers_shapley_refresh(conn):
         WHERE regime_id = ? AND validation_artefact = ?
         ORDER BY desk_name
         """,
-        [TO_REGIME, REGIME_TRANSITION_ARTEFACT_V02],
+        [TO_REGIME, REGIME_TRANSITION_ARTEFACT_V03],
     ).fetchall()
     assert len(rows) == 2
     desk_weights = {r[0]: r[1] for r in rows}
@@ -255,11 +273,11 @@ def test_sufficient_history_triggers_shapley_refresh(conn):
     # Both weights are >= 0 (Shapley-proportional rules).
     assert all(w >= 0.0 for w in desk_weights.values())
 
-    # The Controller's live read (latest row per desk) now picks the v0.2 bundle.
+    # The Controller's live read (latest row per desk) now picks the v0.3 bundle.
     live = get_latest_signal_weights(conn, TO_REGIME)
     live_by_desk = {r["desk_name"]: r for r in live}
-    assert live_by_desk["storage_curve"]["validation_artefact"] == REGIME_TRANSITION_ARTEFACT_V02
-    assert live_by_desk["macro"]["validation_artefact"] == REGIME_TRANSITION_ARTEFACT_V02
+    assert live_by_desk["storage_curve"]["validation_artefact"] == REGIME_TRANSITION_ARTEFACT_V03
+    assert live_by_desk["macro"]["validation_artefact"] == REGIME_TRANSITION_ARTEFACT_V03
 
 
 def test_custom_min_decisions_overrides_default(conn):
@@ -279,7 +297,7 @@ def test_custom_min_decisions_overrides_default(conn):
     )
     result = regime_transition_handler(conn, event)
     data = json.loads(result.artefact)
-    assert data["action"] == "refreshed_from_shapley"
+    assert data["action"] == "refreshed_from_validated_shapley"
     assert data["refresh_detail"]["n_decisions"] == 3
 
 
@@ -343,4 +361,4 @@ def test_refresh_only_counts_to_regime_decisions(conn):
     data = json.loads(result.artefact)
     # Must count ONLY the 6 TO_REGIME decisions, not 6 + 10.
     assert data["refresh_detail"]["n_decisions"] == 6
-    assert data["action"] == "refreshed_from_shapley"
+    assert data["action"] == "refreshed_from_validated_shapley"

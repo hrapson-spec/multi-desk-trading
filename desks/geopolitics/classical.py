@@ -44,36 +44,48 @@ class ClassicalGeopoliticsModel:
     intercept_: float | None = field(default=None, init=False)
     n_train_: int = field(default=0, init=False)
 
-    def _features(self, indicator: np.ndarray, intensity: np.ndarray, i: int) -> np.ndarray | None:
+    def _features(
+        self,
+        indicator: np.ndarray,
+        signal: np.ndarray,
+        raw_intensity: np.ndarray,
+        i: int,
+    ) -> np.ndarray | None:
         if i < self.lookback + 1:
             return None
         ind_window = indicator[i - self.lookback : i]
-        int_window = intensity[i - self.lookback : i]
-        if np.any(~np.isfinite(ind_window)) or np.any(~np.isfinite(int_window)):
+        signal_window = signal[i - self.lookback : i]
+        if np.any(~np.isfinite(ind_window)) or np.any(~np.isfinite(signal_window)):
             return None
         rolling_count = float(np.nansum(ind_window > 0.5))  # threshold at 0.5 for noisy indicator
-        rolling_intensity = float(np.nanmean(int_window))
-        current_intensity = float(int_window[-1])
+        rolling_signal = float(np.nanmean(signal_window))
+        current_signal = float(signal_window[-1])
         # Days since last event (capped at lookback)
         fire_idx = np.where(ind_window > 0.5)[0]
         if fire_idx.size:
             days_since = float(self.lookback - fire_idx[-1] - 1)
         else:
             days_since = float(self.lookback)
-        return np.array([rolling_count, rolling_intensity, current_intensity, days_since])
+        return np.array([rolling_count, rolling_signal, current_signal, days_since])
 
     def fit(
         self,
         indicator: np.ndarray,
-        intensity: np.ndarray,
-        market_price: np.ndarray,
+        signal: np.ndarray,
+        raw_intensity_or_market_price: np.ndarray,
+        market_price: np.ndarray | None = None,
     ) -> None:
-        if not (len(indicator) == len(intensity) == len(market_price)):
+        if market_price is None:
+            raw_intensity = signal
+            market_price = raw_intensity_or_market_price
+        else:
+            raw_intensity = raw_intensity_or_market_price
+        if not (len(indicator) == len(signal) == len(raw_intensity) == len(market_price)):
             raise ValueError("channel array lengths must match")
         X_list: list[np.ndarray] = []
         y_list: list[float] = []
         for i in range(1, len(market_price) - self.horizon_days):
-            f = self._features(indicator, intensity, i)
+            f = self._features(indicator, signal, raw_intensity, i)
             if f is None:
                 continue
             log_ret = float(
@@ -93,13 +105,21 @@ class ClassicalGeopoliticsModel:
     def predict(
         self,
         indicator: np.ndarray,
-        intensity: np.ndarray,
-        market_price: np.ndarray,
-        i: int,
+        signal: np.ndarray,
+        raw_intensity_or_market_price: np.ndarray,
+        market_price_or_i: np.ndarray | int,
+        i: int | None = None,
     ) -> tuple[float, float] | None:
         if self.coef_ is None or self.intercept_ is None:
             raise RuntimeError("model not fitted; call .fit() first")
-        f = self._features(indicator, intensity, i)
+        if i is None:
+            raw_intensity = signal
+            market_price = raw_intensity_or_market_price
+            i = int(market_price_or_i)
+        else:
+            raw_intensity = raw_intensity_or_market_price
+            market_price = market_price_or_i
+        f = self._features(indicator, signal, raw_intensity, i)
         if f is None:
             return None
         log_ret_pred = float(f @ self.coef_ + self.intercept_)

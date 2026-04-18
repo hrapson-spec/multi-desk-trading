@@ -20,19 +20,36 @@ In production (not Phase 2 MVP scope): dealer flow data would come from options 
 
 ## Model
 
-`ClassicalDealerInventoryModel` — ridge over 5 features:
-- `dealer_flow[i-1]`, `dealer_flow.mean(window)`, `dealer_flow_trend(window)`
-- `vega_exposure[i-1]`, `vega_exposure.mean(window)`
+`ClassicalDealerInventoryModel` — ridge over a 10-feature summary
+surface:
+- `flow_last`, `flow_mean`, `flow_delta`, `flow_trend`
+- `vega_last`, `vega_mean`, `vega_delta`
+- `vega_last / current_vol`
+- `current_vol`
+- `current_vol - vol_mean(window)`
 
-Fit target: log-return of vol over `horizon_days=3`. Prediction: next-period vol level.
+Fit target: `future_vol - current_vol` over `horizon_days=3`.
+Prediction: next-period vol level.
 
-Phase 2 MVP capability-claim debit (parallel to oil D1): ridge-on-5-features is a deliberately modest model. The architectural test is whether this desk passes the three hard gates and composes with LODO/Shapley. Model quality escalation (§7.3) is a Phase 2 scale-out item.
+The desk keeps the pre-registered positive directional claim; the
+separate `directional_score` used by Gate 2 is driven by current dealer
+flow plus vol-normalized vega pressure.
+
+Phase 2 MVP capability-claim debit (parallel to oil D1): this
+ridge-on-summary-features head is still deliberately modest. The
+architectural test is whether this desk passes the three hard gates and
+composes with LODO/Shapley. Model quality escalation (§7.3) is a Phase
+2 scale-out item.
 
 ## Gates
 
 - **Gate 3 (runtime hot-swap)**: strict — Controller.decide() must run to completion with either `DealerInventoryDesk` or a `StubDesk`-swap. Portability invariant. Evidenced by `tests/test_dealer_inventory_gates.py::test_dealer_inventory_classical_passes_three_gates_on_mvp_market` via `eval.hot_swap.build_hot_swap_callables`. Attribute-conformance as `StubDesk` → `DeskProtocol` remains a necessary precondition (`test_dealer_inventory_gate3_always_passes_strict`). D9 closed 2026-04-18 at tag `gate3-runtime-harness-v1.14`.
-- **Gate 1 (skill)**: capability claim — ridge must beat the vol-random-walk baseline on the held-out split.
-- **Gate 2 (sign preservation)**: capability claim — positive-sign convention dev → test.
+- **Gate 1 (skill)**: capability claim — ridge must beat the
+  vol-random-walk baseline on the held-out split. Current pinned MVP
+  slice is positive (`relative_improvement = +0.0424`).
+- **Gate 2 (sign preservation)**: capability claim — positive-sign
+  convention dev → test. Current pinned MVP slice remains unstable
+  (`dev_rho = -0.0109`, `test_rho = +0.0456`), so D7 stays open.
 
 ## Phase 2 scale-out
 

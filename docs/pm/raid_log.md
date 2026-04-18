@@ -45,12 +45,12 @@ Conventions:
 |---|---|---|---|---|---|---|
 | I-01 | 4h Reliability gate soak not yet executed (§12.2 item 3 operator-side step) | Medium | 2026-04-17 | Henri | Open | Phase 1 code-complete; this is the one remaining code-external step |
 | I-02 | D1 Phase A model weakness: 5/10 seeds miss ≥3/5 Gate 1/2 aggregate | Medium | Session-long | Henri | Open (accepted debit) | Documented + spec-recalibrated in v1.11. Phase 2 scale-out work addresses via §7.3 |
-| I-03 | D7 Phase 2 MVP model quality: dealer_inventory fails G1+G2 on minimal market | Medium | 2026-04-18 | Henri | Open (accepted debit) | Gate 3 passes strict. Scale-out or richer market fixes |
-| I-04 | HDP-HMM deferred (D3) — fixed K=4 regime classifier | Low | Phase 1 | Henri | Monitoring | Upgrade path via v0.3; no load-bearing impact |
+| I-03 | D7 Phase 2 MVP model quality: dealer_inventory Gate 2 remains unstable on the minimal market | Medium | 2026-04-18 | Henri | Open (accepted debit) | Gate 3 passes runtime hot-swap; Gate 1 is now positive on the pinned slice, but dev/test sign preservation is still weak |
+| I-04 | D3 fixed-K regime-classifier weakness | Low | Phase 1 | Henri | Closed 2026-04-18 | Adaptive-K Gaussian HMM shipped; fixed K=4 no longer the default path |
 | I-05 | Phase 3 not yet scoped in spec | Medium | 2026-04-18 | Henri | Open | Needs spec v2.x revision post-Phase 2 scale-out |
 | I-06 | Real Speckle-and-Spot data wiring not planned in detail | Medium | 2026-04-18 | Henri | Open | External dependency; see R-02 |
-| I-07 | D7 expanded to cover hedging_demand (Gates 1+2 still fail on minimal synthetic market) | Medium | 2026-04-18 | Henri | Open (accepted debit) | Mirror of oil D1. Scale-out or richer market fixes |
-| I-08 | D8 same-target aggregation normalization (dealer_inventory + hedging_demand both target VIX_30D_FORWARD) | Medium | 2026-04-18 | Henri | Open | Blocks Shapley attribution claims. Fix: contribution-space aggregation in attribution harness |
+| I-07 | D7 expanded to cover hedging_demand (Gate 2 still fails on minimal synthetic market) | Medium | 2026-04-18 | Henri | Open (accepted debit) | Mirror of oil D1. Gate 1 is now positive on the pinned slice; residual issue is dev/test sign flip |
+| I-08 | D8 same-target attribution normalization (dealer_inventory + hedging_demand both target VIX_30D_FORWARD) | Medium | 2026-04-18 | Henri | Closed 2026-04-18 | Normalized grading-space Shapley shipped; same-target attribution fairness no longer open |
 | I-09 | D9 Gate 3 is DeskProtocol conformance only (runtime hot-swap needs real Controller.decide harness) | High | 2026-04-18 | Henri | Closed 2026-04-18 | Closed at tag `gate3-runtime-harness-v1.14`. `eval/hot_swap.py::build_hot_swap_callables` shipped; 7 integration callsites migrated; Controller retire-exclusion fix (B-4) landed alongside at `controller/decision.py:96-104`. Full suite 397 passed + 1 skipped. Scope caveat: pre-v1.14 Gate 3 passes are attribute-conformance only; v1.14 onward is runtime hot-swap. See capability_debits.md D9 + D-14 decision row below. |
 
 ## Decisions (log of key choices + rationale)

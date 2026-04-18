@@ -24,6 +24,8 @@ import pytest
 from attribution import (
     SHAPLEY_EXACT_MAX_N,
     SHAPLEY_METRIC_POSITION_SIZE_DELTA,
+    SHAPLEY_METRIC_SQUARED_ERROR_REDUCTION,
+    compute_shapley_grading_space,
     compute_shapley_signal_space,
     persist_shapley_rows,
 )
@@ -274,6 +276,101 @@ def test_shapley_empty_window_is_empty_output(conn):
         review_ts_utc=review,
     )
     assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# Grading-space Shapley (normalized contribution space, D6/D8)
+# ---------------------------------------------------------------------------
+
+
+def test_grading_space_same_target_scale_neutrality(conn):
+    """Affine-rescaled same-target desks should split credit symmetrically.
+
+    D8 root cause: raw-level coalitions reward forecast scale by construction.
+    The normalized grading-space path should instead treat two affine-equivalent
+    same-target signals as equally informative.
+    """
+    boot = datetime(2026, 4, 16, 9, 0, 0, tzinfo=UTC)
+    review = datetime(2026, 4, 23, 0, 0, 0, tzinfo=UTC)
+    seed_cold_start(
+        conn,
+        desks=[("a", WTI_FRONT_MONTH_CLOSE), ("b", WTI_FRONT_MONTH_CLOSE)],
+        regime_ids=["regime_boot"],
+        boot_ts=boot,
+        default_cold_start_limit=1000.0,
+    )
+    ctrl = Controller(conn=conn)
+
+    decisions = []
+    recent_by_decision = {}
+    prints_by_decision = {}
+    for idx, base in enumerate([10.0, 20.0, 30.0, 40.0], start=1):
+        ts = datetime(2026, 4, 16, 9 + idx, 0, 0, tzinfo=UTC)
+        recent = {
+            ("a", WTI_FRONT_MONTH_CLOSE): _fcast("a", base, ts),
+            ("b", WTI_FRONT_MONTH_CLOSE): _fcast("b", 100.0 + 10.0 * base, ts),
+        }
+        decision = ctrl.decide(now_utc=ts, regime_label=_regime(ts), recent_forecasts=recent)
+        decisions.append(decision)
+        recent_by_decision[decision.decision_id] = recent
+        prints_by_decision[decision.decision_id] = 1000.0 + 20.0 * base
+
+    rows = compute_shapley_grading_space(
+        conn=conn,
+        decisions=decisions,
+        recent_forecasts_by_decision=recent_by_decision,
+        prints_by_decision=prints_by_decision,
+        review_ts_utc=review,
+    )
+    by_desk = {row.desk_name: row for row in rows}
+    assert by_desk["a"].metric_name == SHAPLEY_METRIC_SQUARED_ERROR_REDUCTION
+    assert by_desk["b"].metric_name == SHAPLEY_METRIC_SQUARED_ERROR_REDUCTION
+    assert by_desk["a"].shapley_value == pytest.approx(by_desk["b"].shapley_value, abs=1e-9)
+
+
+def test_grading_space_prefers_information_over_scale(conn):
+    """The better-aligned desk should outrank a larger-scale noisy desk."""
+    boot = datetime(2026, 4, 16, 9, 0, 0, tzinfo=UTC)
+    review = datetime(2026, 4, 23, 0, 0, 0, tzinfo=UTC)
+    seed_cold_start(
+        conn,
+        desks=[("signal", WTI_FRONT_MONTH_CLOSE), ("scale", WTI_FRONT_MONTH_CLOSE)],
+        regime_ids=["regime_boot"],
+        boot_ts=boot,
+        default_cold_start_limit=1000.0,
+    )
+    ctrl = Controller(conn=conn)
+
+    signal_series = [12.0, 18.0, 27.0, 34.0, 43.0]
+    scale_series = [110.0, 90.0, 130.0, 95.0, 125.0]
+    print_series = [13.0, 19.0, 28.0, 35.0, 44.0]
+
+    decisions = []
+    recent_by_decision = {}
+    prints_by_decision = {}
+    for idx, (signal_value, scale_value, print_value) in enumerate(
+        zip(signal_series, scale_series, print_series, strict=True),
+        start=1,
+    ):
+        ts = datetime(2026, 4, 16, 9 + idx, 30, 0, tzinfo=UTC)
+        recent = {
+            ("signal", WTI_FRONT_MONTH_CLOSE): _fcast("signal", signal_value, ts),
+            ("scale", WTI_FRONT_MONTH_CLOSE): _fcast("scale", scale_value, ts),
+        }
+        decision = ctrl.decide(now_utc=ts, regime_label=_regime(ts), recent_forecasts=recent)
+        decisions.append(decision)
+        recent_by_decision[decision.decision_id] = recent
+        prints_by_decision[decision.decision_id] = print_value
+
+    rows = compute_shapley_grading_space(
+        conn=conn,
+        decisions=decisions,
+        recent_forecasts_by_decision=recent_by_decision,
+        prints_by_decision=prints_by_decision,
+        review_ts_utc=review,
+    )
+    by_desk = {row.desk_name: row.shapley_value for row in rows}
+    assert by_desk["signal"] > by_desk["scale"]
 
 
 # ---------------------------------------------------------------------------

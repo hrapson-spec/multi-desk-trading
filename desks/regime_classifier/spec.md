@@ -1,7 +1,9 @@
 # Regime Classifier — Spec
 
 **Phase**: 1 (final-step deepen).
-**Status**: Week 1-2 stub only. Always emits regime_boot.
+**Status**: Shipped with two paths:
+- `GroundTruthRegimeClassifier` for isolation testing.
+- `HMMRegimeClassifier` for data-driven regime inference.
 
 ## 1. Output
 
@@ -24,8 +26,8 @@ the unconditional weight matrix; must still function (Gate 3 hot-swap).
 ## 4. Model ladder
 
 1. Zero-shot: N/A (no off-the-shelf oil regime classifier).
-2. Classical specialist: Hierarchical Dirichlet process HMM (HDP-HMM), non-parametric regime count, capped to max 6 distinct regime_ids at emission time per §8.5. Online Bayesian change-point detection (Adams-MacKay 2007) for fast-break identification.
-3. Fine-tune: N/A.
+2. Shipped classical specialist: adaptive-K Gaussian HMM over market-price log-returns, selecting `K ∈ [2, 6]` by BIC and emitting at most 6 distinct `regime_id` values per §8.5.
+3. Future deepen: HDP-HMM / online Bayesian change-point detection if the bounded Gaussian-HMM family proves insufficient.
 
 ## 5. Gate-pass plan
 
@@ -43,12 +45,13 @@ equity VRP unchanged.
 
 ## 7. Internal architecture
 
-HDP-HMM in PyMC or a small custom Gibbs sampler; online change-point in
-numpy. Both run local on 8GB M-series.
+Shipped path: bounded Gaussian-HMM via hmmlearn, fit causally on
+market-price log-returns and selected by BIC over a capped state-count
+range. Future deepen remains HDP-HMM in PyMC or a small custom Gibbs
+sampler plus online change-point detection if needed.
 
 ## 8. Capability-claim debits
 
 - **Pre-emptive**: Phase 2 equity-VRP redeployment is the acceptance test.
   If the classifier requires any equity-specific features (not just desk
-  outputs), the domain-blind claim breaks — that's a debit on the portability
-  target.
+  outputs), the domain-blind claim breaks — that's a portability debit.

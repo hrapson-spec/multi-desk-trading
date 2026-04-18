@@ -37,7 +37,8 @@ Forecast(
 
 ### Sign derivation
 
-**Not hardcoded.** The ridge model emits signed predictions over log-return of vol. The desk derives `sign` from the score at each emission:
+**Not hardcoded.** The ridge model emits a signed direct-vol-delta score.
+The desk derives `sign` from that score at each emission:
 
 | Condition | Sign |
 |---|---|
@@ -49,22 +50,34 @@ Rationale: hardcoding `sign="positive"` while the score occasionally goes negati
 
 ## Model
 
-`ClassicalHedgingDemandModel` — ridge over 5 features:
+`ClassicalHedgingDemandModel` — ridge over a 10-feature summary
+surface:
 
 | Feature | Description |
 |---|---|
 | `hd_last` | Most recent hedging_demand observation |
 | `hd_mean` | Mean of hedging_demand over lookback window |
+| `hd_delta` | One-step hedging_demand change |
 | `hd_trend` | Linear-fit slope of hedging_demand over lookback |
 | `skew_last` | Most recent put_skew_proxy observation |
 | `skew_mean` | Mean of put_skew_proxy over lookback |
+| `skew_delta` | One-step skew change |
+| `skew_last / current_vol` | Vol-normalized skew pressure |
+| `current_vol` | Current vol level |
+| `current_vol - vol_mean(window)` | Vol level gap vs recent mean |
 
-Fit target: log-return of `vol_level` (= `market_price`) over `horizon_days = 3`. Prediction: next-period vol level.
+Fit target: `future_vol - current_vol` over `horizon_days = 3`.
+Prediction: next-period vol level.
 
 ### Hyperparameter notes
 
-- `lookback=15` (days). Chosen so the summary window > 2× the hd process half-life (≈ 6.6 days at `hd_ar1=0.9`). Governs the *summary window*, not lag depth — the ridge uses 5 summary statistics, not 15 lagged values. Changing this is a capability debit.
-- `alpha=1e-3`. Mirror of oil supply/demand desks' small-alpha ridge for return-space targets.
+- `lookback=15` (days). Chosen so the summary window > 2× the hd
+  process half-life (≈ 6.6 days at `hd_ar1=0.9`). Governs the
+  *summary window*, not lag depth — the ridge uses 10 summary
+  statistics, not 15 lagged values. Changing this is a capability
+  debit.
+- `alpha=1e-3`. Mirror of the other compact classical desks' small-alpha
+  ridge for short-horizon delta targets.
 - `horizon_days=3`. Matches `ClassicalDealerInventoryModel`.
 
 ### Train/serve distribution (M-1 fix)
@@ -74,12 +87,17 @@ Fit target: log-return of `vol_level` (= `market_price`) over `horizon_days = 3`
 ## Gates
 
 - **Gate 3 — runtime hot-swap** (strict). Must pass. Portability invariant per §8.4. Evidenced by `tests/test_hedging_demand_gates.py::test_hedging_demand_classical_three_gates_on_mvp_market` via `eval.hot_swap.build_hot_swap_callables` (Controller.decide() exercised end-to-end with Decision validity + combined_signal delta + contributing_ids membership assertions). D9 closed 2026-04-18 at tag `gate3-runtime-harness-v1.14`.
-- **Gate 1 — skill** (capability claim). Ridge should beat the vol-random-walk baseline on log-return of vol. May fail on the minimal MVP market; that failure expands capability-debit D7.
+- **Gate 1 — skill** (capability claim). Ridge should beat the
+  vol-random-walk baseline on the held-out vol-level target. Current
+  pinned MVP slice is positive (`relative_improvement = +0.0356`).
 - **Gate 2 — sign preservation** (capability claim). Positive-sign convention dev → test. Dynamic-sign derivation means correlations on dev vs test should align in magnitude.
 
 ### Pinned G1/G2 metrics
 
-`tests/test_hedging_demand_gates.py::test_hedging_demand_classical_three_gates_on_mvp_market` pins the exact `relative_improvement` / `dev_corr` / `test_corr` values recorded at first test run. Drift triggers a test failure — the plan's soft "print only" approach would have hidden gradual regression.
+`tests/test_hedging_demand_gates.py::test_hedging_demand_classical_three_gates_on_mvp_market`
+pins the exact `relative_improvement` / `dev_rho` / `test_rho` values
+recorded on the current MVP slice. Drift triggers a test failure — the
+plan's soft "print only" approach would have hidden gradual regression.
 
 ## put_skew_proxy semantics caveat
 

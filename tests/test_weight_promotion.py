@@ -135,12 +135,11 @@ def test_propose_normalises_shapley_magnitudes():
     assert all(p.validation_artefact == PROMOTION_ARTEFACT_SHAPLEY_V02 for p in proposal)
 
 
-def test_propose_handles_negative_shapley_as_absolute_magnitude():
+def test_propose_zeroes_negative_shapley_desks():
     ts = datetime(2026, 4, 20, 16, 30, 0, tzinfo=UTC)
     current = _current_weights_stub([("a", 0.5), ("b", 0.5)])
-    # Desk b pushes strongly negative — it still has |influence| so it
-    # retains a proportional weight. The Controller's sizing sign comes
-    # from desk_forecast.point_estimate, not from the weight's sign.
+    # Desk b is harmful under the review metric, so it should not retain
+    # positive weight in the candidate bundle.
     shapley = [_shapley("a", 10.0, ts), _shapley("b", -30.0, ts)]
     proposal = propose_weights_from_shapley(
         shapley_rows=shapley,
@@ -148,8 +147,8 @@ def test_propose_handles_negative_shapley_as_absolute_magnitude():
         new_promotion_ts_utc=ts,
     )
     by_desk = {p.desk_name: p.weight for p in proposal}
-    assert by_desk["a"] == pytest.approx(0.25)
-    assert by_desk["b"] == pytest.approx(0.75)
+    assert by_desk["a"] == pytest.approx(1.0)
+    assert by_desk["b"] == pytest.approx(0.0)
 
 
 def test_propose_zero_shapley_desk_gets_zero_weight():

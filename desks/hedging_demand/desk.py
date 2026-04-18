@@ -6,7 +6,7 @@ VIX_30D_FORWARD.
 
 M-3 fix from design review: `directional_claim.sign` is DERIVED from
 the ridge score, not hardcoded. A ridge model emits signed predictions
-over log-return of vol; hardcoding sign="positive" while the score
+over direct vol-delta; hardcoding sign="positive" while the score
 occasionally goes negative produces internally-incoherent Forecasts.
 Threshold: |score| < 1e-6 → "none"; > 0 → "positive"; < 0 → "negative".
 

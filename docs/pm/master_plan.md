@@ -3,7 +3,7 @@
 **Project**: multi-desk-trading architecture  
 **Owner**: Henri Rapson (sole operator)  
 **Started**: 2026-04-17  
-**Current spec version**: v1.14  
+**Current spec version**: v1.15
 **Last updated**: 2026-04-18
 
 ## 1. Purpose
@@ -36,7 +36,7 @@ Three phases with discrete gates. Spec §12 is authoritative; this section is th
 | 2026-04-17 | Three hard gates + attribution | `gates-v1.0`, `lodo-v0.1`, `shapley-v0.1` | LODO + Shapley co-primary |
 | 2026-04-17 | Storage-curve classical specialist | `storage-curve-classical-v0.1` | Load-bearing desk |
 | 2026-04-17 | Phases A+B+C simulator + 5 desks | `phases-abc-v0.1` | Clean → leakage → realistic contamination |
-| 2026-04-17 | HMM regime classifier | `hmm-classifier-v0.2` | 4-state Gaussian via hmmlearn |
+| 2026-04-17 | HMM regime classifier | `hmm-classifier-v0.2` | Original ship was fixed 4-state Gaussian via hmmlearn; current worktree upgrades this to adaptive-K Gaussian HMM (BIC-selected `K ∈ [2, 6]`) |
 | 2026-04-17 | LLM routing postcondition gate | `llm-routing-v0.1` | §6.4 enforcement |
 | 2026-04-17 | Soak runner infrastructure | `soak-runner-v0.1` | Checkpoint-resume + numeric thresholds |
 | 2026-04-17 | Research-loop v0.2 handlers (3×) | `gate-failure-retire-v0.2`, `regime-transition-refresh-v0.2`, `latency-kpi-v0.1` | Auto-retire + Shapley refresh + KPI |
@@ -44,7 +44,7 @@ Three phases with discrete gates. Spec §12 is authoritative; this section is th
 | 2026-04-17 | Reliability gate calibration | `reliability-gate-v1.8`, `reliability-loose-ends-v1.9`, `reliability-gate-v1.10` | 28d → 7d → 48h → 4h |
 | 2026-04-17 | **Phase 1 complete** | `phase1-complete-v1.11` | §12.2 all six criteria met |
 | 2026-04-18 | **Phase 2 MVP complete** | `phase2-mvp-v1.12` | Architectural portability claim VERIFIED |
-| 2026-04-18 | Phase 2 Desk 2 `hedging_demand` | `phase2-desk2-hedging-demand-v1.13` | Post-design-review ship; D7 expanded, D8+D9 opened |
+| 2026-04-18 | Phase 2 Desk 2 `hedging_demand` | `phase2-desk2-hedging-demand-v1.13` | Post-design-review ship; D7 expanded; D8 and D9 were subsequently closed |
 | 2026-04-18 | **D9 Gate 3 runtime harness closed** | `gate3-runtime-harness-v1.14` | `eval/hot_swap.py` + 7 migrated callsites + Controller retire-exclusion fix (B-4). Desk 3 unblocked. |
 
 ### In flight / immediate next
@@ -114,7 +114,7 @@ Solo operator — no meetings. PM artefacts update on major milestones (tag a ne
 
 ## 8. Related artefacts
 
-- `docs/architecture_spec_v1.md` — authoritative spec (v1.14).
+- `docs/architecture_spec_v1.md` — authoritative spec (v1.15).
 - `docs/phase1_completion.md` — Phase 1 evidence manifest.
 - `docs/phase2_mvp_completion.md` — Phase 2 MVP evidence manifest.
 - `docs/capability_debits.md` — consolidated debit log.

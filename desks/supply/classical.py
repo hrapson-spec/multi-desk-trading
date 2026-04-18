@@ -42,34 +42,45 @@ class ClassicalSupplyModel:
     intercept_: float | None = field(default=None, init=False)
     n_train_: int = field(default=0, init=False)
 
-    def _features(self, supply: np.ndarray, i: int) -> np.ndarray | None:
+    def _features(self, supply: np.ndarray, supply_level: np.ndarray, i: int) -> np.ndarray | None:
         """Compact per-timestep feature vector: [last, mean, std, trend]."""
         if i < self.lookback + 1:
             return None
         window = supply[i - self.lookback : i]
         if np.any(~np.isfinite(window)):
             return None
-        diffs = np.diff(window)
-        if len(diffs) < 2:
+        if len(window) < 2:
             return None
         trend = float(np.polyfit(np.arange(len(window)), window, 1)[0])
         return np.array([float(window[-1]), float(window.mean()), float(window.std()), trend])
 
-    def fit(self, supply: np.ndarray, market_price: np.ndarray) -> None:
+    def fit(
+        self,
+        supply: np.ndarray,
+        supply_level_or_market_price: np.ndarray,
+        market_price: np.ndarray | None = None,
+    ) -> None:
         """Build (features at i, log-return over horizon) pairs and fit ridge.
 
         Uses the stationary log-return target (not the non-stationary price
         level) to avoid the cumulative-drift trap that afflicts raw-price
         targets — same design as ClassicalStorageCurveModel.
         """
-        if len(supply) != len(market_price):
+        if market_price is None:
+            supply_level = supply
+            market_price = supply_level_or_market_price
+        else:
+            supply_level = supply_level_or_market_price
+
+        if not (len(supply) == len(supply_level) == len(market_price)):
             raise ValueError(
-                f"supply and market_price lengths differ: {len(supply)} vs {len(market_price)}"
+                "supply, supply_level, and market_price lengths must match: "
+                f"{len(supply)}, {len(supply_level)}, {len(market_price)}"
             )
         X_list: list[np.ndarray] = []
         y_list: list[float] = []
         for i in range(1, len(market_price) - self.horizon_days):
-            f = self._features(supply, i)
+            f = self._features(supply, supply_level, i)
             if f is None:
                 continue
             log_ret = float(
@@ -88,12 +99,23 @@ class ClassicalSupplyModel:
         self.n_train_ = len(X_list)
 
     def predict(
-        self, supply: np.ndarray, market_price: np.ndarray, i: int
+        self,
+        supply: np.ndarray,
+        supply_level_or_market_price: np.ndarray,
+        market_price_or_i: np.ndarray | int,
+        i: int | None = None,
     ) -> tuple[float, float] | None:
         """Returns (point_estimate_price, directional_score) or None."""
         if self.coef_ is None or self.intercept_ is None:
             raise RuntimeError("model not fitted; call .fit() first")
-        f = self._features(supply, i)
+        if i is None:
+            supply_level = supply
+            market_price = supply_level_or_market_price
+            i = int(market_price_or_i)
+        else:
+            supply_level = supply_level_or_market_price
+            market_price = market_price_or_i
+        f = self._features(supply, supply_level, i)
         if f is None:
             return None
         log_ret_pred = float(f @ self.coef_ + self.intercept_)

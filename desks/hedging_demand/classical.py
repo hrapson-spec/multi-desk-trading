@@ -1,8 +1,10 @@
 """Classical specialist for the hedging_demand desk (Phase 2 v1.13).
 
 Predicts next-period vol level from compact statistics of the
-hedging_demand + put_skew_proxy observation channels. Ridge over
-5 features: [hd_last, hd_mean, hd_trend, skew_last, skew_mean].
+hedging_demand + put_skew_proxy observation channels. The current
+feature vector mixes level, change, trend, vol-normalized skew pressure,
+and simple vol context so the model learns a direct vol-delta rather
+than a tiny log-return.
 
 Economic intuition: institutional put-buying pressure raises OTM
 skew AND drives next-period IV up. The correlation is baked into
@@ -38,7 +40,7 @@ ALPHA_DEFAULT = 1e-3
 
 @dataclass
 class ClassicalHedgingDemandModel:
-    """Ridge(hd + skew features) → log-return-of-vol → vol."""
+    """Ridge(hd + skew features) → direct vol-delta → vol."""
 
     lookback: int = LOOKBACK_DEFAULT
     horizon_days: int = HORIZON_DEFAULT
@@ -52,26 +54,41 @@ class ClassicalHedgingDemandModel:
         self,
         hd: np.ndarray,
         skew: np.ndarray,
+        market_price: np.ndarray,
         i: int,
     ) -> np.ndarray | None:
-        """Per-timestep feature vector: last/mean/trend of hd +
-        last/mean of skew proxy."""
-        if i < self.lookback + 1:
+        """Hedging/skew features for direct vol-delta prediction."""
+        if i < self.lookback + 2:
             return None
         hd_window = hd[i - self.lookback : i]
         skew_window = skew[i - self.lookback : i]
-        if np.any(~np.isfinite(hd_window)) or np.any(~np.isfinite(skew_window)):
+        vol_window = market_price[i - self.lookback : i]
+        if (
+            np.any(~np.isfinite(hd_window))
+            or np.any(~np.isfinite(skew_window))
+            or np.any(~np.isfinite(vol_window))
+        ):
             return None
         if len(hd_window) < 2:
             return None
-        trend = float(np.polyfit(np.arange(len(hd_window)), hd_window, 1)[0])
+        hd_trend = float(np.polyfit(np.arange(len(hd_window)), hd_window, 1)[0])
+        hd_last = float(hd_window[-1])
+        hd_prev = float(hd_window[-2])
+        skew_last = float(skew_window[-1])
+        skew_prev = float(skew_window[-2])
+        current_vol = max(float(vol_window[-1]), 1.0)
         return np.array(
             [
-                float(hd_window[-1]),
+                hd_last,
                 float(hd_window.mean()),
-                trend,
-                float(skew_window[-1]),
+                hd_last - hd_prev,
+                hd_trend,
+                skew_last,
                 float(skew_window.mean()),
+                skew_last - skew_prev,
+                skew_last / current_vol,
+                current_vol,
+                current_vol - float(vol_window.mean()),
             ]
         )
 
@@ -81,8 +98,7 @@ class ClassicalHedgingDemandModel:
         skew: np.ndarray,
         market_price: np.ndarray,
     ) -> None:
-        """Build (features at i, log-return-of-vol over horizon) pairs
-        and fit ridge. market_price is the vol_level series.
+        """Build (features at i, future_vol - current_vol) pairs and fit ridge.
 
         M-1: callers should pass NOISY observation channels (not clean
         latent) so train distribution matches serve distribution."""
@@ -93,16 +109,15 @@ class ClassicalHedgingDemandModel:
         features_list: list[np.ndarray] = []
         y_list: list[float] = []
         for i in range(1, len(market_price) - self.horizon_days):
-            f = self._features(hd, skew, i)
+            f = self._features(hd, skew, market_price, i)
             if f is None:
                 continue
             future_vol = float(market_price[i + self.horizon_days])
             current_vol = float(market_price[i - 1])
-            if current_vol <= 0 or future_vol <= 0:
+            if current_vol <= 0:
                 continue
-            log_ret = float(np.log(future_vol) - np.log(current_vol))
             features_list.append(f)
-            y_list.append(log_ret)
+            y_list.append(float(future_vol - current_vol))
         if len(features_list) < 5:
             raise ValueError(f"insufficient training rows: got {len(features_list)}; need ≥5")
 
@@ -121,18 +136,19 @@ class ClassicalHedgingDemandModel:
         i: int,
     ) -> tuple[float, float] | None:
         """Returns (point_estimate_vol, directional_score) or None.
-        directional_score is the predicted log-return of vol."""
+        directional_score is the leading hedging-pressure signal."""
         if self.coef_ is None or self.intercept_ is None:
             raise RuntimeError("model not fitted; call .fit() first")
-        f = self._features(hd, skew, i)
+        f = self._features(hd, skew, market_price, i)
         if f is None:
             return None
-        log_ret_pred = float(f @ self.coef_ + self.intercept_)
+        delta_pred = float(f @ self.coef_ + self.intercept_)
         current_vol = float(market_price[i - 1])
         if current_vol <= 0:
             return None
-        point = current_vol * float(np.exp(log_ret_pred))
-        directional_score = log_ret_pred
+        point = current_vol + delta_pred
+        # Use the leading hedging-pressure signal as the directional score.
+        directional_score = float(f[0] + 0.25 * f[7])
         return point, directional_score
 
     def fingerprint(self) -> str:

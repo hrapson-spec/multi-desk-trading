@@ -64,8 +64,13 @@ class SupplyDesk(StubDesk):
     ) -> Forecast:
         if self.model is None:
             return self._build_stub_forecast(now_utc)
-        supply = channels.by_desk[self.name].components["supply"]
-        pred = self.model.predict(supply, channels.market_price, i)
+        obs = channels.by_desk[self.name].components
+        pred = self.model.predict(
+            obs["supply"],
+            obs["supply_level"],
+            channels.market_price,
+            i,
+        )
         if pred is None:
             return self._build_stub_forecast(now_utc)
         point, _score = pred
@@ -89,8 +94,13 @@ class SupplyDesk(StubDesk):
     def directional_score(self, channels: ObservationChannels, i: int) -> float | None:
         if self.model is None:
             return None
-        supply = channels.by_desk[self.name].components["supply"]
-        pred = self.model.predict(supply, channels.market_price, i)
+        obs = channels.by_desk[self.name].components
+        pred = self.model.predict(
+            obs["supply"],
+            obs["supply_level"],
+            channels.market_price,
+            i,
+        )
         if pred is None:
             return None
         return pred[1]

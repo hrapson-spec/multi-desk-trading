@@ -53,7 +53,7 @@ Conventions:
 **Resolved**: 2026-04-18 (v1.9 commit `reliability-loose-ends-v1.9`)  
 **Found by**: Self-critique — the original plan described "try Shapley first, fall back to direct" but the code always used fallback.  
 **Investigation**: `propose_and_promote_from_shapley` re-weights ALL desks in the regime, which is invasive for a single-desk reinstatement. The plan's description was architecturally wrong.  
-**Fix**: New `historical_shapley_share(conn, desk_name, lookback_days, now_utc)` computes mean |Shapley| share across recent reviews (bounded [0, 1]). Handler uses it when available; falls back to `reinstate_desk_direct(weight=0.1)` when desk has no recent Shapley rows. Source tracked in artefact: `source="shapley"` vs `"fallback"`.  
+**Fix**: New `historical_shapley_share(conn, desk_name, lookback_days, now_utc)` computes mean |Shapley| share across recent reviews (bounded [0, 1]). The live handler now uses it when available, then falls back to `latest_nonzero_weight_for_desk(...)`, and only then to `reinstate_desk_direct(weight=0.1)` when neither attribution nor weight history exists. Source tracked in artefact as `source="shapley"`, `source="historical_weight"`, or `source="fallback"`.  
 **Lessons**: "Try X first" plans need validation that X is actually applicable in the targeted scenario. Blindly wiring the plan would have produced worse behaviour than no Shapley-first.
 
 ### P-05 — Portability test flagged `VRP` token in `soak/data_feed.py` docstring

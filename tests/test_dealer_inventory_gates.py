@@ -84,9 +84,11 @@ def _fit_and_drive():
     path = EquityVolMarket(n_days=N_DAYS, seed=SEED).generate()
     channels = EquityObservationChannels.build(path, mode="clean", seed=SEED)
     model = ClassicalDealerInventoryModel(horizon_days=HORIZON, alpha=1e-3)
+    flow_obs = channels.by_desk["dealer_inventory"].components["dealer_flow"]
+    vega_obs = channels.by_desk["dealer_inventory"].components["vega_exposure"]
     model.fit(
-        path.dealer_flow[:TRAIN_END],
-        path.vega_exposure[:TRAIN_END],
+        flow_obs[:TRAIN_END],
+        vega_obs[:TRAIN_END],
         channels.market_price[:TRAIN_END],
     )
     desk = DealerInventoryDesk(model=model)
@@ -135,12 +137,14 @@ def test_dealer_inventory_classical_fits_and_predicts():
     path = EquityVolMarket(n_days=200, seed=SEED).generate()
     channels = EquityObservationChannels.build(path, mode="clean", seed=SEED)
     model = ClassicalDealerInventoryModel(horizon_days=HORIZON, alpha=1e-3)
+    flow_obs = channels.by_desk["dealer_inventory"].components["dealer_flow"]
+    vega_obs = channels.by_desk["dealer_inventory"].components["vega_exposure"]
     model.fit(
-        path.dealer_flow[:120],
-        path.vega_exposure[:120],
+        flow_obs[:120],
+        vega_obs[:120],
         channels.market_price[:120],
     )
-    out = model.predict(path.dealer_flow, path.vega_exposure, channels.market_price, 50)
+    out = model.predict(flow_obs, vega_obs, channels.market_price, 50)
     assert out is not None
     point, score = out
     assert np.isfinite(point)
@@ -148,7 +152,7 @@ def test_dealer_inventory_classical_fits_and_predicts():
     assert point > 0  # vol is positive.
 
     # Too-early index returns None (insufficient history).
-    assert model.predict(path.dealer_flow, path.vega_exposure, channels.market_price, 3) is None
+    assert model.predict(flow_obs, vega_obs, channels.market_price, 3) is None
 
 
 def test_dealer_inventory_falls_back_to_stub_when_unfit():
@@ -247,8 +251,8 @@ def test_dealer_inventory_classical_passes_three_gates_on_mvp_market(tmp_path):
         f"\nPhase 2 MVP dealer_inventory gates: "
         f"G1={g1} G2={g2} G3={g3}  "
         f"(G1 improvement={report.gate1_skill.metrics.get('relative_improvement', 0.0):+.2%}; "
-        f"G2 dev_corr={report.gate2_sign_preservation.metrics.get('dev_corr', 0.0):+.3f} "
-        f"test_corr={report.gate2_sign_preservation.metrics.get('test_corr', 0.0):+.3f})"
+        f"G2 dev_rho={report.gate2_sign_preservation.metrics.get('dev_rho', 0.0):+.3f} "
+        f"test_rho={report.gate2_sign_preservation.metrics.get('test_rho', 0.0):+.3f})"
     )
 
     # Gate 1 and Gate 2 are capability claims — soft-assert via print.

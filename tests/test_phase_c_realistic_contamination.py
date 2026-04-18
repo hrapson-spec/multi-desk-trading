@@ -62,25 +62,42 @@ def _fit_desks_on_channels(channels):
     sc_model.fit(market_price[:TRAIN_END])
 
     supply_obs = channels.by_desk["supply"].components["supply"]
+    supply_level_obs = channels.by_desk["supply"].components["supply_level"]
     supply_model = ClassicalSupplyModel(horizon_days=HORIZON, alpha=small_alpha)
-    supply_model.fit(_clean_slice(supply_obs, TRAIN_END), market_price[:TRAIN_END])
+    supply_model.fit(
+        _clean_slice(supply_obs, TRAIN_END),
+        _clean_slice(supply_level_obs, TRAIN_END),
+        market_price[:TRAIN_END],
+    )
 
     demand_obs = channels.by_desk["demand"].components["demand"]
+    demand_level_obs = channels.by_desk["demand"].components["demand_level"]
     demand_model = ClassicalDemandModel(horizon_days=HORIZON, alpha=small_alpha)
-    demand_model.fit(_clean_slice(demand_obs, TRAIN_END), market_price[:TRAIN_END])
+    demand_model.fit(
+        _clean_slice(demand_obs, TRAIN_END),
+        _clean_slice(demand_level_obs, TRAIN_END),
+        market_price[:TRAIN_END],
+    )
 
     ind_obs = channels.by_desk["geopolitics"].components["event_indicator"]
     int_obs = channels.by_desk["geopolitics"].components["event_intensity"]
+    raw_int_obs = channels.by_desk["geopolitics"].components["event_intensity_raw"]
     geo_model = ClassicalGeopoliticsModel(horizon_days=HORIZON, alpha=small_alpha)
     geo_model.fit(
         _clean_slice(ind_obs, TRAIN_END),
         _clean_slice(int_obs, TRAIN_END),
+        _clean_slice(raw_int_obs, TRAIN_END),
         market_price[:TRAIN_END],
     )
 
     xi_obs = channels.by_desk["macro"].components["xi"]
-    macro_model = ClassicalMacroModel(lookback=60, horizon_days=HORIZON, alpha=small_alpha)
-    macro_model.fit(_clean_slice(xi_obs, TRAIN_END), market_price[:TRAIN_END])
+    xi_level_obs = channels.by_desk["macro"].components["xi_level"]
+    macro_model = ClassicalMacroModel(horizon_days=HORIZON, alpha=small_alpha)
+    macro_model.fit(
+        _clean_slice(xi_obs, TRAIN_END),
+        _clean_slice(xi_level_obs, TRAIN_END),
+        market_price[:TRAIN_END],
+    )
 
     return {
         "storage_curve": StorageCurveDesk(model=sc_model),

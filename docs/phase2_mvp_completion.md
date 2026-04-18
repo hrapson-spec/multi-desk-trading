@@ -62,7 +62,12 @@ Evidence: git diff audit + parametrized portability tests + end-to-end Gate 3 pa
 
 ## Capability debit opened in this phase
 
-- **D7 (Phase 2 MVP model quality).** On the minimal synthetic equity-vol market, the dealer_inventory ridge fails Gate 1 (skill) and Gate 2 (sign preservation). See `capability_debits.md` for scope + mitigation.
+- **D7 (Phase 2 MVP model quality).** At the `phase2-mvp-v1.12` ship
+  point, the dealer_inventory ridge failed Gate 1 (skill) and Gate 2
+  (sign preservation) on the minimal synthetic equity-vol market. The
+  current worktree has since narrowed that debit: Gate 1 is now positive
+  on the pinned MVP slice, while Gate 2 remains unstable. See
+  `capability_debits.md` for the current scope.
 
 ## Capability debit closed in this phase
 

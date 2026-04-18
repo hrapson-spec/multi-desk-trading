@@ -239,6 +239,41 @@ def historical_shapley_share(
     return sum(shares) / len(shares)
 
 
+def latest_nonzero_weight_for_desk(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    regime_id: str,
+    desk_name: str,
+    target_variable: str,
+    now_utc: datetime,
+) -> float | None:
+    """Latest positive historical weight for a retired desk-regime pair.
+
+    Used as the first fallback when Shapley history is unavailable: it is
+    strictly better than a hard-coded seed weight because it preserves the
+    last known in-regime sizing choice for that desk.
+    """
+    if now_utc.tzinfo is None:
+        raise ValueError("now_utc must be timezone-aware")
+    row = conn.execute(
+        """
+        SELECT weight
+        FROM signal_weights
+        WHERE regime_id = ?
+          AND desk_name = ?
+          AND target_variable = ?
+          AND weight > 0.0
+          AND promotion_ts_utc <= ?
+        ORDER BY promotion_ts_utc DESC, weight_id DESC
+        LIMIT 1
+        """,
+        [regime_id, desk_name, target_variable, now_utc],
+    ).fetchone()
+    if row is None:
+        return None
+    return float(row[0])
+
+
 def active_target_variables_for_desk(
     conn: duckdb.DuckDBPyConnection,
     desk_name: str,

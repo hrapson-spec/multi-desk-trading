@@ -406,7 +406,7 @@ def test_gate_failure_handler_rejects_wrong_event_type(conn):
 
 
 def test_regime_transition_handler_logs_structured_artefact(conn):
-    """No historical decisions for the to_regime → v0.2 fails safe with
+    """No historical decisions for the to_regime → v0.3 fails safe with
     action='insufficient_history_for_refresh'."""
     ts = datetime(2026, 4, 16, 10, 0, 0, tzinfo=UTC)
     event = ResearchLoopEvent(
@@ -422,7 +422,7 @@ def test_regime_transition_handler_logs_structured_artefact(conn):
     )
     result = regime_transition_handler(conn, event)
     artefact = json.loads(result.artefact)
-    assert artefact["handler"] == "regime_transition_v0.2"
+    assert artefact["handler"] == "regime_transition_v0.3"
     assert artefact["from"] == "regime_boot"
     assert artefact["to"] == "regime_contango"
     assert artefact["probability"] == pytest.approx(0.82)

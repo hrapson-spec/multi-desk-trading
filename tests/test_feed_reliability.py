@@ -571,11 +571,13 @@ def test_handler_reinstates_on_recovered_feed(conn):
         _review_event(feed_names=["eia_wpsr"], recovery_days=14, reinstate_weight=0.1),
     )
     data = json.loads(result.artefact)
-    assert len(data["reinstatement_fallbacks"]) == 2
-    # Supply weight now 0.1 in both regimes.
+    assert data["reinstatement_fallbacks"] == []
+    assert len(data["reinstatements_performed"]) == 2
+    # Historical-weight fallback restores the last live weight. With only one
+    # active desk in the cold-start bundle, that weight is 1.0.
     for regime in ("regime_boot", "regime_contango"):
         live = {r["desk_name"]: r["weight"] for r in get_latest_signal_weights(conn, regime)}
-        assert live["supply"] == pytest.approx(0.1)
+        assert live["supply"] == pytest.approx(1.0)
 
 
 def test_handler_no_op_when_nothing_qualifies(conn):
@@ -685,9 +687,9 @@ def test_handler_reinstatement_prefers_shapley_share(conn):
         assert record["weight"] == pytest.approx(0.4)
 
 
-def test_handler_falls_back_when_no_shapley_rows(conn):
-    """Without Shapley rows, reinstatement falls back to the
-    conservative direct-insert weight."""
+def test_handler_uses_historical_weight_when_no_shapley_rows(conn):
+    """Without Shapley rows, reinstatement falls back to the last known
+    positive weight for the retired desk-regime pair."""
     _seed_two_regimes_with_desks(conn, ["supply"])
     retire_desk_for_all_regimes(
         conn,
@@ -701,8 +703,8 @@ def test_handler_falls_back_when_no_shapley_rows(conn):
         _review_event(feed_names=["eia_wpsr"], recovery_days=14, reinstate_weight=0.15),
     )
     data = json.loads(result.artefact)
-    assert data["reinstatements_performed"] == []
-    assert len(data["reinstatement_fallbacks"]) == 2
-    for record in data["reinstatement_fallbacks"]:
-        assert record["source"] == "fallback"
-        assert record["weight"] == pytest.approx(0.15)
+    assert data["reinstatement_fallbacks"] == []
+    assert len(data["reinstatements_performed"]) == 2
+    for record in data["reinstatements_performed"]:
+        assert record["source"] == "historical_weight"
+        assert record["weight"] == pytest.approx(1.0)
