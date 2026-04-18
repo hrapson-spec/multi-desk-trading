@@ -1,18 +1,34 @@
-"""Equity-vol latent state (Phase 2 MVP).
+"""Equity-vol latent state (Phase 2, v1.13 = 4-factor).
 
-3-factor model mirroring the oil sim's pattern but scoped to vol:
+4-factor model mirroring the oil sim's pattern but scoped to vol:
 
-  v_t : vol level. OU process around a regime-dependent mean.
-  f_t : dealer_flow (AR(1)). Correlated with NEXT-period vol shocks
-        — gives a dealer_inventory desk something to forecast off.
-  p_t : spot log-price. Simple random walk; not the target variable
-        (VIX_30D_FORWARD is). Included only to make the
-        ObservationChannels.market_price surface consistent with the
-        oil shape so downstream code (baselines, LODO etc.) has the
-        field it expects.
+  v_t   : vol level. OU process around a regime-dependent mean.
+  f_t   : dealer_flow (AR(1)). Correlated with next-period vol shocks
+          — feeds the dealer_inventory desk (MVP).
+  hd_t  : hedging_demand (AR(1)). Correlated with next-period vol
+          shocks — feeds the hedging_demand desk (v1.13). Separate
+          signal stream from dealer_flow by domain design.
+  p_t   : spot log-price. Simple random walk; not the target variable
+          (VIX_30D_FORWARD is). Kept so market_price surface parity
+          with oil holds.
 
-The 30-day forward vol target — derivable from v_t via simple
-forecasting — is what dealer_inventory tries to predict.
+Derived signals:
+  vega_exposure  = dealer_flow × vol_level  (serves dealer_inventory)
+  put_skew_proxy = hedging_demand × vol_level  (serves hedging_demand;
+                  NOT clipped to positive — real put skew is ≥ 0 but
+                  this proxy is signed by construction. See spec.md.)
+
+Seed-offset convention (v1.13):
+  seed       — main RNG stream (dealer_flow + vol + spot). Load-bearing
+               for dealer_inventory determinism — MUST NOT CHANGE.
+  seed + 1   — regime sequence (existing).
+  seed + 2   — hedging_demand latent shocks (new, v1.13).
+  seed + 3   — hedging_demand observation noise (in observations.py).
+All offsets are 32-bit masked to avoid any future overflow concerns.
+
+The first ~20 indices are burn-in (hd[0] = 0 forces put_skew_proxy[0]
+= 0 regardless of vol); downstream tests skip `[:20]` or pick indices
+well past the warm-up.
 """
 
 from __future__ import annotations
@@ -47,6 +63,15 @@ class EquityVolMarketConfig:
     flow_vol_corr: float = 0.35
     # Spot log-price random walk step std.
     spot_step_std: float = 0.01
+    # hedging_demand (v1.13) — institutional put-buying pressure.
+    hd_ar1: float = 0.90
+    # Stationary std of hedging_demand ≈ hd_shock_std / sqrt(1 − hd_ar1²) ≈ 0.92.
+    hd_shock_std: float = 0.4
+    # Correlation of hedging_demand innovation with next-step vol shock.
+    # Stronger than flow_vol_corr because hedging demand is a direct
+    # IV-pressure signal, whereas dealer flow is a derived secondary signal.
+    hd_vol_corr: float = 0.55
+    hd_init_value: float = 0.0
 
 
 def phase2_mvp_config() -> EquityVolMarketConfig:
@@ -58,13 +83,15 @@ def phase2_mvp_config() -> EquityVolMarketConfig:
 
 @dataclass(frozen=True)
 class EquityVolPath:
-    """Realised 3-factor latent state + regime sequence."""
+    """Realised 4-factor latent state + regime sequence (v1.13)."""
 
     n_days: int
     vol_level: np.ndarray  # shape (n_days,)
     dealer_flow: np.ndarray  # shape (n_days,)
     vega_exposure: np.ndarray  # shape (n_days,) — derived from dealer_flow × vol
     spot_log_price: np.ndarray  # shape (n_days,)
+    hedging_demand: np.ndarray  # shape (n_days,) — v1.13
+    put_skew_proxy: np.ndarray  # shape (n_days,) — derived from hedging_demand × vol, v1.13
     regimes: VolRegimeSequence
 
 
@@ -124,8 +151,30 @@ class EquityVolMarket:
         vega_exposure = flow * vol
 
         # Spot log-price: independent RW (unused by dealer_inventory).
+        # IMPORTANT: must be drawn BEFORE any v1.13 additions to preserve
+        # the pre-v1.13 main-rng stream state — dealer_inventory golden
+        # fixtures depend on this ordering.
         spot_shocks = rng.standard_normal(self.n_days) * cfg.spot_step_std
         spot_log_price = np.cumsum(spot_shocks)
+
+        # --- v1.13: hedging_demand (isolated RNG stream, seed+2) ---
+        # Correlation is embedded via `hd_shocks_unit = r * vol_shocks_unscaled
+        # + sqrt(1 - r²) * hd_noise`. Valid because `vol_shocks_unscaled` has
+        # unit variance by construction (Cholesky of the 2x2 flow-vol cov with
+        # unit diagonal yields a unit-variance second column).
+        hd_rng = np.random.default_rng((self.seed + 2) & 0xFFFFFFFF)
+        hd_noise = hd_rng.standard_normal(self.n_days)
+        r = cfg.hd_vol_corr
+        hd_shocks_unit = r * vol_shocks_unscaled + np.sqrt(1.0 - r * r) * hd_noise
+        hedging_demand = np.empty(self.n_days, dtype=np.float64)
+        hedging_demand[0] = cfg.hd_init_value
+        for t in range(1, self.n_days):
+            hedging_demand[t] = (
+                cfg.hd_ar1 * hedging_demand[t - 1] + cfg.hd_shock_std * hd_shocks_unit[t]
+            )
+        # Derived: put_skew_proxy = hedging_demand × vol_level. Signed by
+        # construction (unlike real-world put skew which is strictly ≥ 0).
+        put_skew_proxy = hedging_demand * vol
 
         return EquityVolPath(
             n_days=self.n_days,
@@ -133,5 +182,7 @@ class EquityVolMarket:
             dealer_flow=flow,
             vega_exposure=vega_exposure,
             spot_log_price=spot_log_price,
+            hedging_demand=hedging_demand,
+            put_skew_proxy=put_skew_proxy,
             regimes=regimes,
         )

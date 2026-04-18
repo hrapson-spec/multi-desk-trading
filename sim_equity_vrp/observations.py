@@ -28,7 +28,7 @@ from .latent_state import EquityVolPath
 
 EquityMode = Literal["clean"]
 
-DESK_NAMES: tuple[str, ...] = ("dealer_inventory",)
+DESK_NAMES: tuple[str, ...] = ("dealer_inventory", "hedging_demand")
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,9 @@ class EquityObservationConfig:
 
     dealer_flow_noise_std: float = 0.05
     vega_exposure_noise_std: float = 0.5
+    # v1.13 — hedging_demand desk channels.
+    hedging_demand_noise_std: float = 0.05
+    put_skew_proxy_noise_std: float = 0.1
 
 
 @dataclass(frozen=True)
@@ -79,13 +82,28 @@ class EquityObservationChannels:
 
         n = latent.n_days
         # dealer_inventory sees dealer_flow + vega_exposure with noise.
+        # These draws MUST come first — v1.13 hedging_demand noise uses an
+        # isolated RNG stream so this ordering stays bit-identical to v1.12.
         flow_obs = latent.dealer_flow + rng.standard_normal(n) * cfg.dealer_flow_noise_std
         vega_obs = latent.vega_exposure + rng.standard_normal(n) * cfg.vega_exposure_noise_std
+        # v1.13: hedging_demand channels on a SEPARATE RNG (seed+3) so the
+        # main `rng` stream advances identically to v1.12 → dealer_inventory
+        # golden fixtures hold.
+        hd_rng = np.random.default_rng((seed + 3) & 0xFFFFFFFF)
+        hd_obs = latent.hedging_demand + hd_rng.standard_normal(n) * cfg.hedging_demand_noise_std
+        skew_obs = latent.put_skew_proxy + hd_rng.standard_normal(n) * cfg.put_skew_proxy_noise_std
         by_desk = {
             "dealer_inventory": EquityDeskObservation(
                 components={
                     "dealer_flow": flow_obs,
                     "vega_exposure": vega_obs,
+                },
+                stale_mask=np.zeros(n, dtype=bool),
+            ),
+            "hedging_demand": EquityDeskObservation(
+                components={
+                    "hedging_demand_level": hd_obs,
+                    "put_skew_proxy": skew_obs,
                 },
                 stale_mask=np.zeros(n, dtype=bool),
             ),
