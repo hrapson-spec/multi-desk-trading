@@ -30,9 +30,12 @@ WTI_FRONT_MONTH_CLOSE = "wti_front_month_close"
 # -----------------------------------------------------------------------------
 # Phase 2 domain instance: equity VRP (Speckle and Spot)
 # -----------------------------------------------------------------------------
-# Populated at Phase 2 redeployment; intentionally empty at v1.1 freeze.
-# When added, each new constant follows the same pattern as above and is
-# appended to KNOWN_TARGETS as a v1.x revision.
+# Populated at Phase 2 MVP per spec v1.12 (§14.7 synthetic-only month-5
+# checkpoint). The portability test asserts these constants only appear
+# here — shared-infra stays domain-neutral.
+
+VIX_30D_FORWARD = "vix_30d_forward"
+SPX_30D_IMPLIED_VOL = "spx_30d_implied_vol"
 
 
 # -----------------------------------------------------------------------------
@@ -42,6 +45,8 @@ WTI_FRONT_MONTH_CLOSE = "wti_front_month_close"
 KNOWN_TARGETS: frozenset[str] = frozenset(
     {
         WTI_FRONT_MONTH_CLOSE,
+        VIX_30D_FORWARD,
+        SPX_30D_IMPLIED_VOL,
     }
 )
 
