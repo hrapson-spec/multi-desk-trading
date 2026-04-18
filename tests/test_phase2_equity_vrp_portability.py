@@ -64,6 +64,12 @@ EQUITY_VRP_TERMS = [
     "vol_quiet",
     "vol_recovery",
     "VRP",
+    # v1.13 additions for hedging_demand desk:
+    "hedging",
+    "hedging_demand",
+    "put_skew",
+    "open_interest",
+    "put_call_ratio",
 ]
 
 EQUITY_VRP_PATTERN = re.compile(
