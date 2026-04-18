@@ -49,6 +49,9 @@ Conventions:
 | I-04 | HDP-HMM deferred (D3) — fixed K=4 regime classifier | Low | Phase 1 | Henri | Monitoring | Upgrade path via v0.3; no load-bearing impact |
 | I-05 | Phase 3 not yet scoped in spec | Medium | 2026-04-18 | Henri | Open | Needs spec v2.x revision post-Phase 2 scale-out |
 | I-06 | Real Speckle-and-Spot data wiring not planned in detail | Medium | 2026-04-18 | Henri | Open | External dependency; see R-02 |
+| I-07 | D7 expanded to cover hedging_demand (Gates 1+2 still fail on minimal synthetic market) | Medium | 2026-04-18 | Henri | Open (accepted debit) | Mirror of oil D1. Scale-out or richer market fixes |
+| I-08 | D8 same-target aggregation normalization (dealer_inventory + hedging_demand both target VIX_30D_FORWARD) | Medium | 2026-04-18 | Henri | Open | Blocks Shapley attribution claims. Fix: contribution-space aggregation in attribution harness |
+| I-09 | D9 Gate 3 is DeskProtocol conformance only (runtime hot-swap needs real Controller.decide harness) | High | 2026-04-18 | Henri | Open | Must fix BEFORE Desk 3 (2026-05-16 deadline). Replace lambda:True stubs with seeded controller run |
 
 ## Decisions (log of key choices + rationale)
 
@@ -64,6 +67,9 @@ Conventions:
 | D-08 | 2026-04-18 | Phase 2: MVP scope (1 desk) before full 5-desk | User answered via AskUserQuestion | All 5 at once; external checkpoint first | Reversible — scale-out is planned next |
 | D-09 | 2026-04-18 | Phase 2: sibling `sim_equity_vrp/` (not rename `sim/` → `sim_oil/`) | Smaller diff; oil runs alongside | Rename | Reversible but touches many imports |
 | D-10 | 2026-04-18 | §12.2 item 2 Logic gate recalibrated: separate strict invariants from capability claim | Reality-calibrated (5/10 seeds hit full aggregate) | Demand 10/10; block Phase 1 | Hard to reverse — tests encoded |
+| D-11 | 2026-04-18 | Desk 2 pre-implementation design review request-changes integrated (5 blocking + 6 major) before any code landed | Critic-first: addresses B-1 (test indexing), B-2 (RNG isolation + golden fixtures), B-3 (Gate 3 recalibration + D9), B-4 (drop Shapley criterion + D8), B-5 (data_sources routing), + M-1/M-2/M-3/M-6 | Accept original plan as-is (fake Gate 3, silent dealer_inventory drift risk, unbacked Shapley claim, decorative feed_names, train/serve mismatch) | Reversible — re-plan if pattern doesn't scale to Desk 3+ |
+| D-12 | 2026-04-18 | Golden-fixture regression test for dealer_inventory pinned as load-bearing gate | Catches silent drift if hedging_demand (or future) extension perturbs the RNG stream | Rely on determinism-by-inspection | Re-recording hashes requires spec v1.x dependency-version revision |
+| D-13 | 2026-04-18 | G1/G2 metrics pinned as exact regression values instead of soft-assert | Regression signal kicks in on silent model drift | Print-only per MVP precedent | Re-pinning is a deliberate commit when a model change justifies it |
 
 ---
 

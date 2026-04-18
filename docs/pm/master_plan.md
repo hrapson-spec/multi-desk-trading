@@ -3,7 +3,7 @@
 **Project**: multi-desk-trading architecture  
 **Owner**: Henri Rapson (sole operator)  
 **Started**: 2026-04-17  
-**Current spec version**: v1.12  
+**Current spec version**: v1.13  
 **Last updated**: 2026-04-18
 
 ## 1. Purpose
@@ -44,6 +44,7 @@ Three phases with discrete gates. Spec §12 is authoritative; this section is th
 | 2026-04-17 | Reliability gate calibration | `reliability-gate-v1.8`, `reliability-loose-ends-v1.9`, `reliability-gate-v1.10` | 28d → 7d → 48h → 4h |
 | 2026-04-17 | **Phase 1 complete** | `phase1-complete-v1.11` | §12.2 all six criteria met |
 | 2026-04-18 | **Phase 2 MVP complete** | `phase2-mvp-v1.12` | Architectural portability claim VERIFIED |
+| 2026-04-18 | Phase 2 Desk 2 `hedging_demand` | `phase2-desk2-hedging-demand-v1.13` | Post-design-review ship; D7 expanded, D8+D9 opened |
 
 ### In flight / immediate next
 
@@ -58,7 +59,8 @@ Targets based on Phase 2 deadline of 2026-07-17 (three months from Phase 1 exit)
 
 | Date (target) | Milestone | Scope |
 |---|---|---|
-| 2026-05-02 | Phase 2 desk 2: `hedging_demand` | Mirror of oil `supply` desk. Model hedging flow → next-period vol |
+| 2026-05-02 | ~~Phase 2 desk 2: `hedging_demand`~~ | **Shipped early 2026-04-18 post-design-review** |
+| before 2026-05-16 | Gate 3 runtime-harness upgrade (D9) | Replace `lambda: True` stubs with a seeded Controller.decide() run; apply retroactively to dealer_inventory + hedging_demand. MUST ship before Desk 3. |
 | 2026-05-16 | Phase 2 desk 3: `term_structure` | Implied-realized term spread; mirror of oil `demand` desk |
 | 2026-06-06 | Phase 2 desk 4: `earnings_calendar` | Event-driven vol expansion; mirror of oil `geopolitics` |
 | 2026-06-20 | Phase 2 desk 5: `macro_regime` | Equity vol-regime (quiet/stress/recovery) desk; mirror of oil `macro` |

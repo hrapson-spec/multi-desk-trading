@@ -113,34 +113,84 @@ sufficient statistic under the characteristic-function assumption.
 **Pinned by.** `research_loop/promotion.py:20-29` + `attribution/`
 module docstrings.
 
-### D7. Phase 2 MVP model quality (dealer_inventory Gates 1 + 2)
+### D7. Phase 2 equity-VRP model quality (dealer_inventory + hedging_demand Gates 1 + 2)
 
-**Claim relaxed.** Phase 2 MVP ships one equity-VRP desk
-(`dealer_inventory`) against a minimal synthetic equity-vol market.
-On the default seed/config, the desk passes Gate 3 (hot-swap, strict,
-portability invariant) but fails Gate 1 (skill) and Gate 2 (sign
-preservation).
+**Claim relaxed.** Phase 2 equity-VRP desks so far
+(`dealer_inventory` MVP, `hedging_demand` v1.13) pass Gate 3
+(portability invariant — as DeskProtocol conformance per D9) but
+fail Gate 1 (skill) and Gate 2 (sign preservation) on the minimal
+synthetic equity-vol market.
 
-Specifically observed at tag `phase2-mvp-v1.12`:
-- G1 relative_improvement ≈ −0.5% (within noise of the random-walk
-  baseline on vol level).
-- G2 dev_corr = 0.000, test_corr = 0.000 (flat predicted-return
-  signal — ridge is effectively an intercept against the minimal
-  5-feature encoding of dealer_flow + vega_exposure).
+Observed at tag `phase2-mvp-v1.12`:
+- dealer_inventory G1 relative_improvement ≈ −0.5%, G2 dev/test_corr ≈ 0.
 
-**Scope.** MVP architectural claim is verified regardless: the desk
-composes with the bus, Controller, grading harness, and attribution
-layer end-to-end. Gate 3 passes; portability tests pass.
+Observed at tag `phase2-desk2-hedging-demand-v1.13`:
+- hedging_demand G1 relative_improvement = −0.1060, G2 dev/test_corr = 0.0000 (pinned).
 
-**Mitigation.** Phase 2 scale-out: the remaining four desks
-(`hedging_demand`, `term_structure`, `earnings_calendar`,
-`macro_regime`) + a richer synthetic vol market OR real Speckle-and-
-Spot data would give the ridge something non-trivial to fit. §7.3
-escalation ladder applies to equity-VRP desks the same way it applied
-to oil D1.
+**Scope.** Architectural claim is verified regardless: both desks
+compose with the bus, Controller, grading harness, and attribution
+layer end-to-end. Gate 3 passes as DeskProtocol conformance (see D9);
+portability tests pass.
+
+**Mitigation.** Phase 2 scale-out: the remaining three desks
+(`term_structure`, `earnings_calendar`, `macro_regime`) + a richer
+synthetic vol market OR real Speckle-and-Spot data would give the
+ridge something non-trivial to fit. §7.3 escalation ladder applies
+to equity-VRP desks the same way it applied to oil D1.
 
 **Pinned by.** `docs/phase2_mvp_completion.md`;
-`tests/test_dealer_inventory_gates.py::test_dealer_inventory_classical_passes_three_gates_on_mvp_market`.
+`tests/test_dealer_inventory_gates.py`;
+`tests/test_hedging_demand_gates.py::test_hedging_demand_classical_three_gates_on_mvp_market` (pinned G1/G2 values — regression signal on silent drift).
+
+### D8. Same-target aggregation normalization (Phase 2)
+
+**Claim.** Both `dealer_inventory` and `hedging_demand` target
+`VIX_30D_FORWARD`. The Controller's `combined_signal` currently sums
+raw `point_estimate` levels across desks. Under this aggregation,
+Shapley share reflects forecast SCALE (absolute vol level) not
+independent information content — making the metric non-comparable
+across same-target desks.
+
+**Scope.** Blocks any "measurable Shapley contribution" claim for
+same-target Phase 2 desks. No Phase 2 attribution harness exists
+today to compute realised-decision Shapley in a normalized space.
+
+**Mitigation.** Phase 2 attribution-harness upgrade (v0.3 class):
+aggregate in contribution space (e.g., weighted log-return or
+z-scored forecast) before Shapley. §8.2a sizing already normalises
+via `k_regime`, but the post-aggregation attribution path does not.
+
+**Pinned by.** Spec §9.2 (Shapley definition); no test encodes the
+gap yet — D8 is the ticket to encode + fix.
+
+### D9. Gate 3 is DeskProtocol conformance, not runtime controller hot-swap
+
+**Claim relaxed.** The existing gate harness
+(`tests/test_dealer_inventory_gates.py::_fit_and_drive`,
+`tests/test_hedging_demand_gates.py::_fit_and_drive`) passes
+`run_controller_fn=lambda: True, run_controller_with_stub_fn=lambda: True`
+to `GateRunner.run`, making `gate3_hot_swap.passed` trivially True.
+The dedicated Gate 3 tests verify DeskProtocol conformance +
+attribute parity.
+
+**Scope.** "Gate 3 strict" as originally phrased implies a runtime
+hot-swap proof (Controller emits a valid Decision with the real
+desk replaced by a StubDesk, end-to-end). The shipped tests do NOT
+verify this — they verify architectural conformance only. Both are
+valuable but distinct; the spec language is being recalibrated.
+
+**Mitigation.** Ship a proper runtime Gate 3 harness before Desk 3
+(target 2026-05-16):
+- Replace the lambda stubs with a seeded `Controller.decide()` run.
+- Emit a Decision with the real desk.
+- Swap the desk to a `StubDesk` with matching attributes.
+- Re-run `decide()`; assert Decision validity + expected-structural-
+  change (combined_signal drops to expected stub value).
+- Apply this harness to dealer_inventory + hedging_demand + future
+  desks retroactively.
+
+**Pinned by.** `docs/architecture_spec_v1.md` v1.13 §15 derivation
+trace note; test files' comments flag the known-weakness locations.
 
 ## Closed debits (historical)
 
@@ -149,14 +199,17 @@ to oil D1.
 ## Budget assessment
 
 **All debits are in-budget.** Each names a bounded upgrade path and
-none invalidates the Phase 1 or Phase 2 MVP architectural claim:
+none invalidates the Phase 1 or Phase 2 architectural claim:
 
 - D1: oil model weakness, not architecture weakness. Storage_curve + hot-swap passes uphold the Phase 1 claim.
 - D2, D6: attribution/promotion path are extensible; v0.3 primitives already shipped.
 - D3: HDP-HMM is a non-parametric upgrade to an already-working fixed-K classifier.
 - D4: cold-start bridge that self-heals as Shapley data accumulates.
 - D5: CLOSED by Phase 2 MVP ship.
-- D7: equity-VRP model weakness mirror of D1. Gate 3 passes (portability invariant); Gate 1+2 are scale-out work.
+- D7: equity-VRP model weakness mirror of D1, now covering both dealer_inventory + hedging_demand. Gate 3 passes as DeskProtocol conformance (see D9); Gates 1+2 are scale-out work.
+- D8: same-target aggregation normalization — v1.13 opened, blocks Shapley attribution claims across same-target desks.
+- D9: Gate 3 is currently DeskProtocol conformance not runtime hot-swap — v1.13 opened, scheduled for fix before Desk 3 (2026-05-16).
 
-**Phase 1 §12.2 item 6 satisfied. Phase 2 MVP architectural claim
-verified (D7 scoped to model-quality only).**
+**Phase 1 §12.2 item 6 satisfied. Phase 2 architectural claim
+verified through Desk 2 (D7 model-quality, D8 same-target
+attribution, D9 Gate 3 scope — all scoped + mitigated).**
