@@ -26,7 +26,7 @@ import pytest
 
 from attribution import compute_shapley_signal_space
 from contracts.target_variables import WTI_FRONT_MONTH_CLOSE
-from contracts.v1 import Forecast, Print
+from contracts.v1 import Forecast, Print, Provenance, RegimeLabel
 from controller import Controller, seed_cold_start
 from desks.demand import ClassicalDemandModel, DemandDesk
 from desks.geopolitics import ClassicalGeopoliticsModel, GeopoliticsDesk
@@ -34,7 +34,7 @@ from desks.macro import ClassicalMacroModel, MacroDesk
 from desks.regime_classifier import GroundTruthRegimeClassifier
 from desks.storage_curve import ClassicalStorageCurveModel, StorageCurveDesk
 from desks.supply import ClassicalSupplyModel, SupplyDesk
-from eval import GateRunner
+from eval import GateRunner, build_hot_swap_callables
 from eval.data import random_walk_price_baseline
 from persistence.db import connect, init_db
 from sim.latent_state import LatentMarket, phase_a_config
@@ -164,7 +164,9 @@ def phase_b_setup():
 # ---------------------------------------------------------------------------
 
 
-def _run_gates(name, drive, channels, market_price):
+def _run_gates(name, drive, channels, market_price, desk_instance, tmp_path):
+    """v1.14: Gate 3 via eval.build_hot_swap_callables. desk_instance +
+    tmp_path threaded through from the caller."""
     rw_baseline: Callable[[int, list[Print]], float] = random_walk_price_baseline(
         prices=market_price, emission_indices=drive["emission_indices"]
     )
@@ -172,6 +174,43 @@ def _run_gates(name, drive, channels, market_price):
     half = n // 2
     dev_s, test_s = drive["scores"][:half], drive["scores"][half:]
     dev_o, test_o = drive["outcomes"][:half], drive["outcomes"][half:]
+
+    # Gate 3 harness setup.
+    conn = connect(tmp_path / f"gate3_phase_b_{name}.duckdb")
+    init_db(conn)
+    seed_cold_start(
+        conn,
+        desks=[(name, desk_instance.target_variable)],
+        regime_ids=["regime_boot"],
+        boot_ts=NOW - timedelta(hours=1),
+    )
+    real_forecast = next(
+        (f for f in drive["forecasts"] if not f.staleness),
+        drive["forecasts"][0],
+    )
+    regime_label = RegimeLabel(
+        classification_ts_utc=NOW,
+        regime_id="regime_boot",
+        regime_probabilities={"regime_boot": 1.0},
+        transition_probabilities={"regime_boot": 1.0},
+        classifier_provenance=Provenance(
+            desk_name="regime_classifier",
+            model_name="stub",
+            model_version="0.0.0",
+            input_snapshot_hash="0" * 64,
+            spec_hash="0" * 64,
+            code_commit="0" * 40,
+        ),
+    )
+    real_fn, stub_fn = build_hot_swap_callables(
+        conn=conn,
+        real_desk=desk_instance,
+        real_forecast=real_forecast,
+        regime_label=regime_label,
+        recent_forecasts_other={},
+        now_utc=NOW,
+    )
+
     runner = GateRunner(desk_name=name)
     report = runner.run(
         desk_forecasts=drive["forecasts"],
@@ -179,8 +218,8 @@ def _run_gates(name, drive, channels, market_price):
         baseline_fn=rw_baseline,
         directional_split=(dev_s, test_s, dev_o, test_o),
         expected_sign="positive",
-        run_controller_fn=lambda: True,
-        run_controller_with_stub_fn=lambda: True,
+        run_controller_fn=real_fn,
+        run_controller_with_stub_fn=stub_fn,
     )
     return (
         report.gate1_skill.passed,
@@ -189,7 +228,7 @@ def _run_gates(name, drive, channels, market_price):
     )
 
 
-def test_phase_b_gate_pass_rate_under_leakage(phase_b_setup):
+def test_phase_b_gate_pass_rate_under_leakage(phase_b_setup, tmp_path):
     """Under 10% leakage, ≥ 2 of 5 desks pass Gate 1 (skill degrades as
     leakage rises) and ≥ 3 of 5 pass Gate 2 (sign preservation is more
     robust). Gate 3 (hot-swap) stays at 5/5."""
@@ -198,7 +237,8 @@ def test_phase_b_gate_pass_rate_under_leakage(phase_b_setup):
     results = {}
     for name in DESK_NAMES_ORDERED:
         drive = phase_b_setup["per_desk"][name]
-        results[name] = _run_gates(name, drive, channels, market_price)
+        desk_instance = phase_b_setup["desks"][name]
+        results[name] = _run_gates(name, drive, channels, market_price, desk_instance, tmp_path)
 
     g1 = sum(r[0] for r in results.values())
     g2 = sum(r[1] for r in results.values())

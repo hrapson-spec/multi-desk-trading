@@ -26,11 +26,13 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 
 from contracts.target_variables import VIX_30D_FORWARD
-from contracts.v1 import Print
+from contracts.v1 import Print, Provenance, RegimeLabel
+from controller import seed_cold_start
 from desks.base import StubDesk
 from desks.dealer_inventory import ClassicalDealerInventoryModel, DealerInventoryDesk
-from eval import GateRunner
+from eval import GateRunner, build_hot_swap_callables
 from eval.data import random_walk_price_baseline
+from persistence import connect, init_db
 from sim_equity_vrp import EquityObservationChannels, EquityVolMarket
 
 N_DAYS = 1200
@@ -164,11 +166,13 @@ def test_dealer_inventory_falls_back_to_stub_when_unfit():
 # ---------------------------------------------------------------------------
 
 
-def test_dealer_inventory_classical_passes_three_gates_on_mvp_market():
+def test_dealer_inventory_classical_passes_three_gates_on_mvp_market(tmp_path):
     """§12.2-analogue for Phase 2: run Gate 1 + Gate 2 + Gate 3 on the
-    fitted classical desk. Gate 3 strict. If Gate 1 or 2 fails on the
-    synthetic MVP market, this test xfails — the failure is a model-
-    quality debit (Phase 2 D7 candidate), not an architecture failure."""
+    fitted classical desk. Gate 3 v1.14: uses the real runtime
+    hot-swap harness (Controller.decide() exercised end-to-end). If
+    Gate 1 or 2 fails on the synthetic MVP market, this test still
+    passes on Gate 3 — the G1/G2 failure is a model-quality debit
+    (D7), not an architecture failure."""
     drive = _fit_and_drive()
     rw_baseline = random_walk_price_baseline(
         prices=drive["channels"].market_price,
@@ -181,6 +185,40 @@ def test_dealer_inventory_classical_passes_three_gates_on_mvp_market():
         drive["outcomes"][:half],
         drive["outcomes"][half:],
     )
+
+    # --- v1.14: real Gate 3 harness -------------------------------------
+    conn = connect(tmp_path / "gate3_dealer_inventory.duckdb")
+    init_db(conn)
+    seed_cold_start(
+        conn,
+        desks=[("dealer_inventory", VIX_30D_FORWARD)],
+        regime_ids=["regime_boot"],
+        boot_ts=NOW - timedelta(hours=1),
+    )
+    real_forecast = next(f for f in drive["forecasts"] if not f.staleness)
+    regime_label = RegimeLabel(
+        classification_ts_utc=NOW,
+        regime_id="regime_boot",
+        regime_probabilities={"regime_boot": 1.0},
+        transition_probabilities={"regime_boot": 1.0},
+        classifier_provenance=Provenance(
+            desk_name="regime_classifier",
+            model_name="stub",
+            model_version="0.0.0",
+            input_snapshot_hash="0" * 64,
+            spec_hash="0" * 64,
+            code_commit="0" * 40,
+        ),
+    )
+    real_fn, stub_fn = build_hot_swap_callables(
+        conn=conn,
+        real_desk=DealerInventoryDesk(),
+        real_forecast=real_forecast,
+        regime_label=regime_label,
+        recent_forecasts_other={},
+        now_utc=NOW,
+    )
+
     runner = GateRunner(desk_name="dealer_inventory")
     report = runner.run(
         desk_forecasts=drive["forecasts"],
@@ -188,14 +226,18 @@ def test_dealer_inventory_classical_passes_three_gates_on_mvp_market():
         baseline_fn=rw_baseline,
         directional_split=directional_split,
         expected_sign="positive",
-        run_controller_fn=lambda: True,
-        run_controller_with_stub_fn=lambda: True,
+        run_controller_fn=real_fn,
+        run_controller_with_stub_fn=stub_fn,
     )
 
-    # Gate 3 is strict — portability invariant.
+    # Gate 3 — v1.14 runtime hot-swap.
     assert report.gate3_hot_swap.passed, (
-        f"Gate 3 (hot-swap) must pass; {report.gate3_hot_swap.metrics}"
+        f"Gate 3 runtime hot-swap failed: {report.gate3_hot_swap.metrics}; "
+        f"reason: {report.gate3_hot_swap.reason}"
     )
+    assert report.gate3_hot_swap.metrics["failure_mode"] == "passed"
+    assert report.gate3_hot_swap.metrics["real_ok"] == 1.0
+    assert report.gate3_hot_swap.metrics["stub_ok"] == 1.0
 
     # Diagnostics printed for the Phase 2 MVP completion report.
     g1 = "✓" if report.gate1_skill.passed else "✗"

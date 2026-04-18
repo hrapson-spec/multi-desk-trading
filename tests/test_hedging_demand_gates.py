@@ -28,11 +28,13 @@ import numpy as np
 import pytest
 
 from contracts.target_variables import VIX_30D_FORWARD
-from contracts.v1 import Print
+from contracts.v1 import Print, Provenance, RegimeLabel
+from controller import seed_cold_start
 from desks.base import DeskProtocol, StubDesk
 from desks.hedging_demand import ClassicalHedgingDemandModel, HedgingDemandDesk
-from eval import GateRunner
+from eval import GateRunner, build_hot_swap_callables
 from eval.data import random_walk_price_baseline
+from persistence import connect, init_db
 from sim_equity_vrp import EquityObservationChannels, EquityVolMarket
 
 N_DAYS = 1200
@@ -227,10 +229,12 @@ _PINNED_G2_TEST_CORR = 0.0000
 _PIN_TOLERANCE = 0.005  # loose enough to absorb float noise, tight enough to catch drift
 
 
-def test_hedging_demand_classical_three_gates_on_mvp_market():
-    """Runs all 3 gates. Gate 3 strict-asserted (DeskProtocol
-    conformance per D9). Gates 1 + 2 pinned to recorded values with
-    m-1 tolerance — regression signal on silent drift."""
+def test_hedging_demand_classical_three_gates_on_mvp_market(tmp_path):
+    """Runs all 3 gates. Gate 3 now uses the v1.14 runtime-harness
+    from eval.build_hot_swap_callables — actual Controller.decide()
+    execution with Decision validity + combined_signal delta +
+    contributing_ids membership assertions. Gates 1+2 pinned to
+    recorded values with m-1 tolerance."""
     drive = _fit_and_drive()
     rw_baseline = random_walk_price_baseline(
         prices=drive["channels"].market_price,
@@ -243,6 +247,43 @@ def test_hedging_demand_classical_three_gates_on_mvp_market():
         drive["outcomes"][:half],
         drive["outcomes"][half:],
     )
+
+    # --- v1.14: real Gate 3 harness via build_hot_swap_callables --------
+    # Seed a DB and Controller state so the helper can run decide() end-to-end.
+    conn = connect(tmp_path / "gate3_hedging.duckdb")
+    init_db(conn)
+    seed_cold_start(
+        conn,
+        desks=[("hedging_demand", VIX_30D_FORWARD)],
+        regime_ids=["regime_boot"],
+        boot_ts=NOW - timedelta(hours=1),
+    )
+    # Pick a non-stale forecast from the fitted drive. HedgingDemandDesk
+    # emits staleness=False when conn is not passed (clean mode).
+    real_forecast = next(f for f in drive["forecasts"] if not f.staleness)
+    regime_label = RegimeLabel(
+        classification_ts_utc=NOW,
+        regime_id="regime_boot",
+        regime_probabilities={"regime_boot": 1.0},
+        transition_probabilities={"regime_boot": 1.0},
+        classifier_provenance=Provenance(
+            desk_name="regime_classifier",
+            model_name="stub",
+            model_version="0.0.0",
+            input_snapshot_hash="0" * 64,
+            spec_hash="0" * 64,
+            code_commit="0" * 40,
+        ),
+    )
+    real_fn, stub_fn = build_hot_swap_callables(
+        conn=conn,
+        real_desk=HedgingDemandDesk(),  # attributes only
+        real_forecast=real_forecast,
+        regime_label=regime_label,
+        recent_forecasts_other={},
+        now_utc=NOW,
+    )
+
     runner = GateRunner(desk_name="hedging_demand")
     report = runner.run(
         desk_forecasts=drive["forecasts"],
@@ -250,14 +291,20 @@ def test_hedging_demand_classical_three_gates_on_mvp_market():
         baseline_fn=rw_baseline,
         directional_split=directional_split,
         expected_sign="positive",
-        run_controller_fn=lambda: True,
-        run_controller_with_stub_fn=lambda: True,
+        run_controller_fn=real_fn,
+        run_controller_with_stub_fn=stub_fn,
     )
 
-    # Gate 3 — DeskProtocol conformance (honest claim per D9).
+    # Gate 3 — v1.14 runtime hot-swap (Controller.decide() exercised
+    # end-to-end with Decision validity + combined_signal delta +
+    # contributing_ids membership assertions via build_hot_swap_callables).
     assert report.gate3_hot_swap.passed, (
-        f"Gate 3 (DeskProtocol conformance) failed: {report.gate3_hot_swap.metrics}"
+        f"Gate 3 runtime hot-swap failed: {report.gate3_hot_swap.metrics}; "
+        f"reason: {report.gate3_hot_swap.reason}"
     )
+    assert report.gate3_hot_swap.metrics["failure_mode"] == "passed"
+    assert report.gate3_hot_swap.metrics["real_ok"] == 1.0
+    assert report.gate3_hot_swap.metrics["stub_ok"] == 1.0
 
     # Gates 1 + 2 pinned metrics (m-1).
     g1_rel_impr = report.gate1_skill.metrics.get("relative_improvement", 0.0)

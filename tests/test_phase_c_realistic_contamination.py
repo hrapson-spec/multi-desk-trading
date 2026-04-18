@@ -20,12 +20,15 @@ import numpy as np
 import pytest
 
 from contracts.target_variables import WTI_FRONT_MONTH_CLOSE
-from contracts.v1 import Forecast, Print
+from contracts.v1 import Forecast, Print, Provenance, RegimeLabel
+from controller import seed_cold_start
 from desks.demand import ClassicalDemandModel, DemandDesk
 from desks.geopolitics import ClassicalGeopoliticsModel, GeopoliticsDesk
 from desks.macro import ClassicalMacroModel, MacroDesk
 from desks.storage_curve import ClassicalStorageCurveModel, StorageCurveDesk
 from desks.supply import ClassicalSupplyModel, SupplyDesk
+from eval import build_hot_swap_callables
+from persistence import connect, init_db
 from sim.latent_state import LatentMarket, phase_a_config
 from sim.observations import ObservationChannels, ObservationConfig
 
@@ -166,7 +169,7 @@ def test_phase_c_storage_curve_still_emits_live_forecasts(phase_c_setup):
     assert stubs / total < 0.1, f"storage_curve staleness rate too high: {stubs}/{total}"
 
 
-def test_phase_c_non_storage_desks_report_gate_outcomes(phase_c_setup):
+def test_phase_c_non_storage_desks_report_gate_outcomes(phase_c_setup, tmp_path):
     """Per-desk gate pass-rate check under realistic contamination. At
     minimum, Gate 3 (hot-swap) still passes for every desk — any
     non-stub desk with a valid Forecast boundary satisfies hot-swap.
@@ -182,8 +185,10 @@ def test_phase_c_non_storage_desks_report_gate_outcomes(phase_c_setup):
     emission_indices = list(range(HELD_OUT_START, N_DAYS - HORIZON))
     rw = random_walk_price_baseline(prices=market_price, emission_indices=emission_indices)
 
+    phase_c_now = datetime(2026, 1, 1, tzinfo=UTC)
     for name in DESK_NAMES_ORDERED:
         drive = per_desk[name]
+        desk_instance = phase_c_setup["desks"][name]
         # Synthetic scores/outcomes (derived from forecast drift vs current price)
         scores = []
         outcomes = []
@@ -197,6 +202,42 @@ def test_phase_c_non_storage_desks_report_gate_outcomes(phase_c_setup):
             scores.append(pred_log_ret)
             outcomes.append(realised_log_ret)
         half = len(scores) // 2
+
+        # v1.14: Gate 3 harness.
+        conn = connect(tmp_path / f"gate3_phase_c_{name}.duckdb")
+        init_db(conn)
+        seed_cold_start(
+            conn,
+            desks=[(name, desk_instance.target_variable)],
+            regime_ids=["regime_boot"],
+            boot_ts=phase_c_now - timedelta(hours=1),
+        )
+        real_forecast = next(
+            (f for f in drive["forecasts"] if not f.staleness),
+            drive["forecasts"][0],
+        )
+        regime_label = RegimeLabel(
+            classification_ts_utc=phase_c_now,
+            regime_id="regime_boot",
+            regime_probabilities={"regime_boot": 1.0},
+            transition_probabilities={"regime_boot": 1.0},
+            classifier_provenance=Provenance(
+                desk_name="regime_classifier",
+                model_name="stub",
+                model_version="0.0.0",
+                input_snapshot_hash="0" * 64,
+                spec_hash="0" * 64,
+                code_commit="0" * 40,
+            ),
+        )
+        real_fn, stub_fn = build_hot_swap_callables(
+            conn=conn,
+            real_desk=desk_instance,
+            real_forecast=real_forecast,
+            regime_label=regime_label,
+            recent_forecasts_other={},
+            now_utc=phase_c_now,
+        )
         try:
             runner = GateRunner(desk_name=name)
             report = runner.run(
@@ -210,8 +251,8 @@ def test_phase_c_non_storage_desks_report_gate_outcomes(phase_c_setup):
                     outcomes[half:],
                 ),
                 expected_sign="positive",
-                run_controller_fn=lambda: True,
-                run_controller_with_stub_fn=lambda: True,
+                run_controller_fn=real_fn,
+                run_controller_with_stub_fn=stub_fn,
             )
             results[name] = (
                 report.gate1_skill.passed,

@@ -24,7 +24,7 @@ import pytest
 
 from attribution import compute_shapley_signal_space
 from contracts.target_variables import WTI_FRONT_MONTH_CLOSE
-from contracts.v1 import Forecast, Print
+from contracts.v1 import Forecast, Print, Provenance, RegimeLabel
 from controller import Controller, seed_cold_start
 from desks.demand import ClassicalDemandModel, DemandDesk
 from desks.geopolitics import ClassicalGeopoliticsModel, GeopoliticsDesk
@@ -32,7 +32,7 @@ from desks.macro import ClassicalMacroModel, MacroDesk
 from desks.regime_classifier import GroundTruthRegimeClassifier
 from desks.storage_curve import ClassicalStorageCurveModel, StorageCurveDesk
 from desks.supply import ClassicalSupplyModel, SupplyDesk
-from eval import GateRunner
+from eval import GateRunner, build_hot_swap_callables
 from eval.data import random_walk_price_baseline
 from persistence.db import connect, init_db
 from research_loop import propose_validate_and_promote
@@ -191,12 +191,55 @@ def _run_gates_for_desk(
     drive: dict,
     channels: ObservationChannels,
     market_price: np.ndarray,
+    desk_instance,
+    tmp_path,
 ) -> tuple[bool, bool, bool, dict]:
-    """Return (gate1, gate2, gate3 pass bits, metrics dict)."""
+    """Return (gate1, gate2, gate3 pass bits, metrics dict).
+
+    v1.14 Gate 3: uses eval.build_hot_swap_callables. Requires a fresh
+    tmp_path-derived DB per invocation. desk_instance passes the desk
+    whose attributes (name, target_variable, event_id, horizon_days)
+    parametrise the hot-swap helper."""
     rw_baseline: Callable[[int, list[Print]], float] = random_walk_price_baseline(
         prices=market_price, emission_indices=drive["emission_indices"]
     )
     dev_s, test_s, dev_o, test_o = _make_sign_split(drive["scores"], drive["outcomes"])
+
+    # v1.14 Gate 3 harness setup.
+    conn = connect(tmp_path / f"gate3_phase_a_{name}.duckdb")
+    init_db(conn)
+    seed_cold_start(
+        conn,
+        desks=[(name, desk_instance.target_variable)],
+        regime_ids=["regime_boot"],
+        boot_ts=NOW - timedelta(hours=1),
+    )
+    real_forecast = next(
+        (f for f in drive["forecasts"] if not f.staleness),
+        drive["forecasts"][0],
+    )
+    regime_label = RegimeLabel(
+        classification_ts_utc=NOW,
+        regime_id="regime_boot",
+        regime_probabilities={"regime_boot": 1.0},
+        transition_probabilities={"regime_boot": 1.0},
+        classifier_provenance=Provenance(
+            desk_name="regime_classifier",
+            model_name="stub",
+            model_version="0.0.0",
+            input_snapshot_hash="0" * 64,
+            spec_hash="0" * 64,
+            code_commit="0" * 40,
+        ),
+    )
+    real_fn, stub_fn = build_hot_swap_callables(
+        conn=conn,
+        real_desk=desk_instance,
+        real_forecast=real_forecast,
+        regime_label=regime_label,
+        recent_forecasts_other={},
+        now_utc=NOW,
+    )
 
     runner = GateRunner(desk_name=name)
     report = runner.run(
@@ -205,8 +248,8 @@ def _run_gates_for_desk(
         baseline_fn=rw_baseline,
         directional_split=(dev_s, test_s, dev_o, test_o),
         expected_sign="positive",
-        run_controller_fn=lambda: True,
-        run_controller_with_stub_fn=lambda: True,
+        run_controller_fn=real_fn,
+        run_controller_with_stub_fn=stub_fn,
     )
     return (
         report.gate1_skill.passed,
@@ -219,7 +262,7 @@ def _run_gates_for_desk(
     )
 
 
-def test_phase_a_storage_curve_passes_all_three_gates(phase_a_setup):
+def test_phase_a_storage_curve_passes_all_three_gates(phase_a_setup, tmp_path):
     """StorageCurveDesk (seeing market_price directly) is the load-bearing
     proof-of-architecture case: it MUST pass all 3 gates or the pipeline
     is broken. Other desks' partial failures under Phase A are treated as
@@ -227,13 +270,16 @@ def test_phase_a_storage_curve_passes_all_three_gates(phase_a_setup):
     drive = phase_a_setup["per_desk"]["storage_curve"]
     channels = phase_a_setup["channels"]
     market_price = phase_a_setup["market_price"]
-    g1, g2, g3, metrics = _run_gates_for_desk("storage_curve", drive, channels, market_price)
+    desk_instance = phase_a_setup["desks"]["storage_curve"]
+    g1, g2, g3, metrics = _run_gates_for_desk(
+        "storage_curve", drive, channels, market_price, desk_instance, tmp_path
+    )
     assert g1, f"storage_curve Gate 1: {metrics['g1']}"
     assert g2, f"storage_curve Gate 2: {metrics['g2']}"
     assert g3
 
 
-def test_phase_a_gate_pass_rate_across_five_desks(phase_a_setup):
+def test_phase_a_gate_pass_rate_across_five_desks(phase_a_setup, tmp_path):
     """Aggregate pass rate across the 5 desks. Pre-registered threshold:
     ≥ 3 of 5 desks pass each gate. Per-desk failures are reported as
     structured output for the capability-claim debit log (plan §A).
@@ -248,7 +294,10 @@ def test_phase_a_gate_pass_rate_across_five_desks(phase_a_setup):
     results: dict[str, dict] = {}
     for name in DESK_NAMES_ORDERED:
         drive = phase_a_setup["per_desk"][name]
-        g1, g2, g3, metrics = _run_gates_for_desk(name, drive, channels, market_price)
+        desk_instance = phase_a_setup["desks"][name]
+        g1, g2, g3, metrics = _run_gates_for_desk(
+            name, drive, channels, market_price, desk_instance, tmp_path
+        )
         results[name] = {"g1": g1, "g2": g2, "g3": g3, "metrics": metrics}
 
     g1_count = sum(r["g1"] for r in results.values())

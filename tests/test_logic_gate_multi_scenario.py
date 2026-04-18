@@ -30,14 +30,16 @@ import numpy as np
 import pytest
 
 from contracts.target_variables import WTI_FRONT_MONTH_CLOSE
-from contracts.v1 import Forecast, Print
+from contracts.v1 import Forecast, Print, Provenance, RegimeLabel
+from controller import seed_cold_start
 from desks.demand import ClassicalDemandModel, DemandDesk
 from desks.geopolitics import ClassicalGeopoliticsModel, GeopoliticsDesk
 from desks.macro import ClassicalMacroModel, MacroDesk
 from desks.storage_curve import ClassicalStorageCurveModel, StorageCurveDesk
 from desks.supply import ClassicalSupplyModel, SupplyDesk
-from eval import GateRunner
+from eval import GateRunner, build_hot_swap_callables
 from eval.data import random_walk_price_baseline
+from persistence import connect, init_db
 from sim.latent_state import LatentMarket, phase_a_config
 from sim.observations import ObservationChannels
 
@@ -144,6 +146,7 @@ def _fit_and_drive(seed: int) -> dict[str, Any]:
         "channels": channels,
         "market_price": market_price,
         "per_desk": per_desk_drive,
+        "desks": desks,
     }
 
 
@@ -152,7 +155,13 @@ def _run_gates_for_desk(
     drive: dict,
     channels: ObservationChannels,
     market_price: np.ndarray,
+    desk_instance: Any,
+    tmp_path: Any,
+    seed_tag: str,
 ) -> tuple[bool, bool, bool]:
+    """v1.14: Gate 3 uses eval.build_hot_swap_callables. Per-invocation
+    DB namespace includes seed_tag so the 10-seed × 5-desk matrix
+    doesn't collide on tmp_path DBs."""
     rw_baseline: Callable[[int, list[Print]], float] = random_walk_price_baseline(
         prices=market_price, emission_indices=drive["emission_indices"]
     )
@@ -165,6 +174,43 @@ def _run_gates_for_desk(
         outcomes[:half],
         outcomes[half:],
     )
+
+    # v1.14: Gate 3 harness setup.
+    conn = connect(tmp_path / f"gate3_logic_{seed_tag}_{name}.duckdb")
+    init_db(conn)
+    seed_cold_start(
+        conn,
+        desks=[(name, desk_instance.target_variable)],
+        regime_ids=["regime_boot"],
+        boot_ts=NOW - timedelta(hours=1),
+    )
+    real_forecast = next(
+        (f for f in drive["forecasts"] if not f.staleness),
+        drive["forecasts"][0],
+    )
+    regime_label = RegimeLabel(
+        classification_ts_utc=NOW,
+        regime_id="regime_boot",
+        regime_probabilities={"regime_boot": 1.0},
+        transition_probabilities={"regime_boot": 1.0},
+        classifier_provenance=Provenance(
+            desk_name="regime_classifier",
+            model_name="stub",
+            model_version="0.0.0",
+            input_snapshot_hash="0" * 64,
+            spec_hash="0" * 64,
+            code_commit="0" * 40,
+        ),
+    )
+    real_fn, stub_fn = build_hot_swap_callables(
+        conn=conn,
+        real_desk=desk_instance,
+        real_forecast=real_forecast,
+        regime_label=regime_label,
+        recent_forecasts_other={},
+        now_utc=NOW,
+    )
+
     runner = GateRunner(desk_name=name)
     report = runner.run(
         desk_forecasts=drive["forecasts"],
@@ -172,8 +218,8 @@ def _run_gates_for_desk(
         baseline_fn=rw_baseline,
         directional_split=directional_split,
         expected_sign="positive",
-        run_controller_fn=lambda: True,
-        run_controller_with_stub_fn=lambda: True,
+        run_controller_fn=real_fn,
+        run_controller_with_stub_fn=stub_fn,
     )
     return (
         report.gate1_skill.passed,
@@ -182,14 +228,25 @@ def _run_gates_for_desk(
     )
 
 
-def _scenario_passes(setup: dict) -> tuple[bool, dict[str, tuple[bool, bool, bool]]]:
+def _scenario_passes(
+    setup: dict, *, tmp_path: Any, seed_tag: str
+) -> tuple[bool, dict[str, tuple[bool, bool, bool]]]:
     """One scenario's pass/fail per the §12.2 Logic-gate contract
     (operationalised): storage_curve 3/3 required, ≥3/5 on Gates 1
     and 2, 5/5 on Gate 3."""
     results: dict[str, tuple[bool, bool, bool]] = {}
     for name in DESK_NAMES_ORDERED:
         drive = setup["per_desk"][name]
-        results[name] = _run_gates_for_desk(name, drive, setup["channels"], setup["market_price"])
+        desk_instance = setup["desks"][name]
+        results[name] = _run_gates_for_desk(
+            name,
+            drive,
+            setup["channels"],
+            setup["market_price"],
+            desk_instance,
+            tmp_path,
+            seed_tag,
+        )
 
     sc_g1, sc_g2, sc_g3 = results["storage_curve"]
     g1_count = sum(r[0] for r in results.values())
@@ -200,7 +257,7 @@ def _scenario_passes(setup: dict) -> tuple[bool, dict[str, tuple[bool, bool, boo
     return passes, results
 
 
-def test_logic_gate_multi_scenario():
+def test_logic_gate_multi_scenario(tmp_path):
     """§12.2 item 2 (v1.11 reality-calibrated): N_scenarios=10 across
     independent seeds.
 
@@ -227,7 +284,7 @@ def test_logic_gate_multi_scenario():
     per_scenario_results: list[tuple[int, bool, dict]] = []
     for seed in SEEDS:
         setup = _fit_and_drive(seed)
-        passes, per_desk = _scenario_passes(setup)
+        passes, per_desk = _scenario_passes(setup, tmp_path=tmp_path, seed_tag=str(seed))
         per_scenario_results.append((seed, passes, per_desk))
 
     pass_count = sum(1 for _, p, _ in per_scenario_results if p)
@@ -256,7 +313,7 @@ def test_logic_gate_multi_scenario():
     )
 
 
-def test_logic_gate_hot_swap_always_passes():
+def test_logic_gate_hot_swap_always_passes(tmp_path):
     """Gate 3 (hot-swap) is the portability invariant — it MUST pass
     5/5 on every scenario, or the architectural claim breaks. Unlike
     Gate 1 (skill) and Gate 2 (sign preservation) which depend on
@@ -267,11 +324,15 @@ def test_logic_gate_hot_swap_always_passes():
         setup = _fit_and_drive(seed)
         per_desk_g3: dict[str, bool] = {}
         for name in DESK_NAMES_ORDERED:
+            desk_instance = setup["desks"][name]
             _, _, g3 = _run_gates_for_desk(
                 name,
                 setup["per_desk"][name],
                 setup["channels"],
                 setup["market_price"],
+                desk_instance,
+                tmp_path,
+                str(seed),
             )
             per_desk_g3[name] = g3
         if not all(per_desk_g3.values()):
@@ -282,7 +343,7 @@ def test_logic_gate_hot_swap_always_passes():
     )
 
 
-def test_logic_gate_storage_curve_always_passes():
+def test_logic_gate_storage_curve_always_passes(tmp_path):
     """Load-bearing invariant: storage_curve MUST pass all three
     gates on every scenario (§12.2 non-negotiable). storage_curve
     sees market_price directly, so any failure is an infrastructure
@@ -295,6 +356,9 @@ def test_logic_gate_storage_curve_always_passes():
             setup["per_desk"]["storage_curve"],
             setup["channels"],
             setup["market_price"],
+            setup["desks"]["storage_curve"],
+            tmp_path,
+            str(seed),
         )
         if not all(sc_gates):
             failures.append((seed, sc_gates))
@@ -304,7 +368,7 @@ def test_logic_gate_storage_curve_always_passes():
 
 
 @pytest.mark.parametrize("seed", [SEEDS[0], SEEDS[5]])
-def test_logic_gate_single_scenario_smoke(seed: int):
+def test_logic_gate_single_scenario_smoke(seed: int, tmp_path):
     """Fast smoke test — runs just 2 of the 10 seeds. Useful as a
     quick signal during development without paying the full 10-seed
     cost. The authoritative Phase 1 check is
@@ -315,6 +379,9 @@ def test_logic_gate_single_scenario_smoke(seed: int):
         setup["per_desk"]["storage_curve"],
         setup["channels"],
         setup["market_price"],
+        setup["desks"]["storage_curve"],
+        tmp_path,
+        str(seed),
     )
     assert sc_g1 and sc_g2 and sc_g3, (
         f"storage_curve failed gates on seed={seed}: g1={sc_g1} g2={sc_g2} g3={sc_g3}"
