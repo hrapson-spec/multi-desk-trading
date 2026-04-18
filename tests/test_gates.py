@@ -102,14 +102,24 @@ def test_gate2_rejects_expected_sign_mismatch_on_dev():
 
 
 def test_gate3_both_paths_pass():
+    """Shell unit test: both closures return True → gate passes with
+    failure_mode='passed'. Legitimately uses `lambda: True` because
+    this tests the SHELL's pass-through behaviour, not integration.
+    Integration tests use eval.build_hot_swap_callables (spec v1.14)."""
     result = gate_hot_swap(
         run_controller_fn=lambda: True,
         run_controller_with_stub_fn=lambda: True,
     )
     assert result.passed, result.reason
+    assert result.metrics["real_ok"] == 1.0
+    assert result.metrics["stub_ok"] == 1.0
+    assert result.metrics["failure_mode"] == "passed"
 
 
 def test_gate3_real_desk_raises():
+    """Shell unit test: real-side closure raises RuntimeError →
+    failure_mode='controller_exception'."""
+
     def _raise():
         raise RuntimeError("real desk broke Controller")
 
@@ -119,9 +129,13 @@ def test_gate3_real_desk_raises():
     )
     assert not result.passed
     assert "real desk broke Controller" in result.reason
+    assert result.metrics["failure_mode"] == "controller_exception"
 
 
 def test_gate3_stub_swap_breaks():
+    """Shell unit test: stub-side closure raises RuntimeError →
+    failure_mode='controller_exception'."""
+
     def _raise():
         raise RuntimeError("stub broke Controller")
 
@@ -131,6 +145,35 @@ def test_gate3_stub_swap_breaks():
     )
     assert not result.passed
     assert "stub broke Controller" in result.reason
+    assert result.metrics["failure_mode"] == "controller_exception"
+
+
+def test_gate3_assertion_in_closure_fails():
+    """Shell unit test (M-1): closure raises AssertionError (the path
+    build_hot_swap_callables uses for post-exercise invariant violations)
+    → failure_mode='assertion_failure'. Distinguishes harness-assertion
+    failures from genuine Controller integration bugs."""
+
+    def _assert_fail():
+        raise AssertionError("combined_signal delta mismatch: got X expected Y")
+
+    # Real side asserts.
+    result = gate_hot_swap(
+        run_controller_fn=_assert_fail,
+        run_controller_with_stub_fn=lambda: True,
+    )
+    assert not result.passed
+    assert result.metrics["failure_mode"] == "assertion_failure"
+    assert "Real-desk closure assertion failed" in result.reason
+
+    # Stub side asserts.
+    result = gate_hot_swap(
+        run_controller_fn=lambda: True,
+        run_controller_with_stub_fn=_assert_fail,
+    )
+    assert not result.passed
+    assert result.metrics["failure_mode"] == "assertion_failure"
+    assert "Stub-swap closure assertion failed" in result.reason
 
 
 def test_gate_report_all_passed_aggregates():
