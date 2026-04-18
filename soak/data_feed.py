@@ -49,7 +49,7 @@ class _RegimeClassifierProtocol(Protocol):
     """Structural interface the soak feed needs from any classifier.
 
     Keeps soak/ free of any `desks.*` import (§8.4 portability — Phase 2
-    redeployment uses equity-VRP desks). Any class with a matching
+    redeployment replaces the desks wholesale). Any class with a matching
     `regime_label_at` signature satisfies this.
     """
 
