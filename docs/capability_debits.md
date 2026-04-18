@@ -163,38 +163,59 @@ via `k_regime`, but the post-aggregation attribution path does not.
 **Pinned by.** Spec §9.2 (Shapley definition); no test encodes the
 gap yet — D8 is the ticket to encode + fix.
 
-### D9. Gate 3 is DeskProtocol conformance, not runtime controller hot-swap
+### D9. Gate 3 runtime hot-swap harness — CLOSED (2026-04-18, v1.14, with scope caveat)
 
-**Claim relaxed.** The existing gate harness
-(`tests/test_dealer_inventory_gates.py::_fit_and_drive`,
-`tests/test_hedging_demand_gates.py::_fit_and_drive`) passes
+**Closure evidence.** `eval/hot_swap.py::build_hot_swap_callables()`
+shipped at tag `gate3-runtime-harness-v1.14`. Replaces the
 `run_controller_fn=lambda: True, run_controller_with_stub_fn=lambda: True`
-to `GateRunner.run`, making `gate3_hot_swap.passed` trivially True.
-The dedicated Gate 3 tests verify DeskProtocol conformance +
-attribute parity.
+tautology at 7 integration-level callsites with a real
+`Controller.decide()` + `StubDesk` swap. Closure assertions verify
+(a) Decision validity, (b) `combined_signal` delta matches
+`−weight × point_estimate` under the stale-real/stale-stub interaction
+branches, (c) honest `contributing_ids` membership. The 4 shell-unit
+tests in `tests/test_gates.py` keep their `lambda: True` literals
+because they legitimately test `gate_hot_swap`'s pass-through
+contract — not the integration path.
 
-**Scope.** "Gate 3 strict" as originally phrased implies a runtime
-hot-swap proof (Controller emits a valid Decision with the real
-desk replaced by a StubDesk, end-to-end). The shipped tests do NOT
-verify this — they verify architectural conformance only. Both are
-valuable but distinct; the spec language is being recalibrated.
+**Load-bearing side-effect.** The closed-loop exercise surfaced a
+real Controller bug at `controller/decision.py:96-104`: a retired
+desk's (weight=0) forecast_id was appended to `contributing_ids`
+after the staleness check, leaving retired desks visible in Decision
+output while contributing 0 to `combined_signal`. Fix: `if w == 0.0:
+continue` guard. Regression test at
+`tests/test_controller_retire_exclusion.py`.
 
-**Mitigation.** Ship a proper runtime Gate 3 harness before Desk 3
-(target 2026-05-16):
-- Replace the lambda stubs with a seeded `Controller.decide()` run.
-- Emit a Decision with the real desk.
-- Swap the desk to a `StubDesk` with matching attributes.
-- Re-run `decide()`; assert Decision validity + expected-structural-
-  change (combined_signal drops to expected stub value).
-- Apply this harness to dealer_inventory + hedging_demand + future
-  desks retroactively.
+**Scope caveat.** D9 closed for the 7 migrated callsites:
+- `tests/test_phase_a_clean_observations.py`
+- `tests/test_phase_b_controlled_leakage.py`
+- `tests/test_phase_c_realistic_contamination.py`
+- `tests/test_logic_gate_multi_scenario.py`
+- `tests/test_storage_curve_gates.py`
+- `tests/test_dealer_inventory_gates.py`
+- `tests/test_hedging_demand_gates.py`
 
-**Pinned by.** `docs/architecture_spec_v1.md` v1.13 §15 derivation
-trace note; test files' comments flag the known-weakness locations.
+Any future Gate 3 test wiring `lambda: True` in its
+`run_controller_fn=` argument is expected to use
+`build_hot_swap_callables` instead. The scope caveat preserves
+symmetry: pre-v1.14 Gate 3 evidence reads as conformance-only;
+post-v1.14 Gate 3 evidence reads as runtime hot-swap.
+
+**Additional artefacts.** `failure_mode` enum field
+(`"passed" | "controller_exception" | "assertion_failure"`) in
+`gate_hot_swap.metrics`; same-target two-desk case at
+`tests/test_hot_swap_two_desk.py` pinning the D8 production scenario
+(dealer_inventory ⊕ hedging_demand both → `VIX_30D_FORWARD`).
+
+**Pinned by.** Spec §0 v1.14 changelog; §15 derivation trace row
+tagged `gate3-runtime-harness-v1.14`; phase1 / phase2_mvp completion
+manifest annotations; RAID log I-09 closure row.
 
 ## Closed debits (historical)
 
 - **D5 (Phase 2 month-5 checkpoint)** — closed 2026-04-18 by MVP ship.
+- **D9 (Gate 3 runtime hot-swap harness)** — closed 2026-04-18 at tag
+  `gate3-runtime-harness-v1.14` with scope caveat (7 migrated
+  integration callsites named above).
 
 ## Budget assessment
 
@@ -206,10 +227,10 @@ none invalidates the Phase 1 or Phase 2 architectural claim:
 - D3: HDP-HMM is a non-parametric upgrade to an already-working fixed-K classifier.
 - D4: cold-start bridge that self-heals as Shapley data accumulates.
 - D5: CLOSED by Phase 2 MVP ship.
-- D7: equity-VRP model weakness mirror of D1, now covering both dealer_inventory + hedging_demand. Gate 3 passes as DeskProtocol conformance (see D9); Gates 1+2 are scale-out work.
+- D7: equity-VRP model weakness mirror of D1, now covering both dealer_inventory + hedging_demand. Gate 3 passes as runtime hot-swap from v1.14 onward (D9 closed); Gates 1+2 remain scale-out work.
 - D8: same-target aggregation normalization — v1.13 opened, blocks Shapley attribution claims across same-target desks.
-- D9: Gate 3 is currently DeskProtocol conformance not runtime hot-swap — v1.13 opened, scheduled for fix before Desk 3 (2026-05-16).
+- D9: CLOSED 2026-04-18 at tag `gate3-runtime-harness-v1.14` with scope caveat — 7 migrated callsites now carry runtime hot-swap evidence; pre-v1.14 Gate 3 passes are attribute-conformance only.
 
 **Phase 1 §12.2 item 6 satisfied. Phase 2 architectural claim
 verified through Desk 2 (D7 model-quality, D8 same-target
-attribution, D9 Gate 3 scope — all scoped + mitigated).**
+attribution — both scoped + mitigated). D9 closed 2026-04-18.**

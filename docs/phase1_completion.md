@@ -32,6 +32,16 @@ Verified by:
 - **Capability claim (v1.11 recalibrated)**: per-scenario ≥3/5 on
   Gates 1 and 2 aggregate; across scenarios ≥ 5/10 seeds hit the full
   threshold. See `capability_debits.md` D1 for scope.
+- **v1.14 retroactive strengthening (2026-04-18)**: the Gate 3 passes
+  recorded in this manifest at Phase 1 exit (v1.11) reflected the
+  weaker **attribute-conformance** contract — the shipped integration
+  callsites wired `run_controller_fn=lambda: True`. At v1.14 all 7
+  integration callsites were migrated to `eval.hot_swap.build_hot_swap_callables`,
+  which exercises `Controller.decide()` with a real-desk / stub-desk
+  swap and asserts the expected `combined_signal` delta. The manifest's
+  Gate 3 evidence is therefore strengthened retroactively: the same
+  10/10 seed pass rate now reflects runtime hot-swap, not conformance
+  only. See spec §0 v1.14 entry + `capability_debits.md` D9 (closed).
 
 ### ✓ Item 3 — Reliability gate, ≥ 4 hours wall-clock
 

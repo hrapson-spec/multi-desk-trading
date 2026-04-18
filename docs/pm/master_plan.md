@@ -3,7 +3,7 @@
 **Project**: multi-desk-trading architecture  
 **Owner**: Henri Rapson (sole operator)  
 **Started**: 2026-04-17  
-**Current spec version**: v1.13  
+**Current spec version**: v1.14  
 **Last updated**: 2026-04-18
 
 ## 1. Purpose
@@ -45,6 +45,7 @@ Three phases with discrete gates. Spec §12 is authoritative; this section is th
 | 2026-04-17 | **Phase 1 complete** | `phase1-complete-v1.11` | §12.2 all six criteria met |
 | 2026-04-18 | **Phase 2 MVP complete** | `phase2-mvp-v1.12` | Architectural portability claim VERIFIED |
 | 2026-04-18 | Phase 2 Desk 2 `hedging_demand` | `phase2-desk2-hedging-demand-v1.13` | Post-design-review ship; D7 expanded, D8+D9 opened |
+| 2026-04-18 | **D9 Gate 3 runtime harness closed** | `gate3-runtime-harness-v1.14` | `eval/hot_swap.py` + 7 migrated callsites + Controller retire-exclusion fix (B-4). Desk 3 unblocked. |
 
 ### In flight / immediate next
 
@@ -60,8 +61,8 @@ Targets based on Phase 2 deadline of 2026-07-17 (three months from Phase 1 exit)
 | Date (target) | Milestone | Scope |
 |---|---|---|
 | 2026-05-02 | ~~Phase 2 desk 2: `hedging_demand`~~ | **Shipped early 2026-04-18 post-design-review** |
-| before 2026-05-16 | Gate 3 runtime-harness upgrade (D9) | Replace `lambda: True` stubs with a seeded Controller.decide() run; apply retroactively to dealer_inventory + hedging_demand. MUST ship before Desk 3. |
-| 2026-05-16 | Phase 2 desk 3: `term_structure` | Implied-realized term spread; mirror of oil `demand` desk |
+| ~~before 2026-05-16~~ | ~~Gate 3 runtime-harness upgrade (D9)~~ | **Shipped 2026-04-18 at tag `gate3-runtime-harness-v1.14`**. `eval/hot_swap.py::build_hot_swap_callables`; 7 migrated callsites; Controller retire-exclusion fix (B-4). |
+| 2026-05-16 | Phase 2 desk 3: `term_structure` | Implied-realized term spread; mirror of oil `demand` desk. **D9 no longer a blocker — runtime harness now reusable.** |
 | 2026-06-06 | Phase 2 desk 4: `earnings_calendar` | Event-driven vol expansion; mirror of oil `geopolitics` |
 | 2026-06-20 | Phase 2 desk 5: `macro_regime` | Equity vol-regime (quiet/stress/recovery) desk; mirror of oil `macro` |
 | 2026-06-27 | Phase 2 Logic gate on equity-VRP | 10-seed multi-scenario parallel to oil Logic gate |
@@ -113,7 +114,7 @@ Solo operator — no meetings. PM artefacts update on major milestones (tag a ne
 
 ## 8. Related artefacts
 
-- `docs/architecture_spec_v1.md` — authoritative spec (v1.12).
+- `docs/architecture_spec_v1.md` — authoritative spec (v1.14).
 - `docs/phase1_completion.md` — Phase 1 evidence manifest.
 - `docs/phase2_mvp_completion.md` — Phase 2 MVP evidence manifest.
 - `docs/capability_debits.md` — consolidated debit log.

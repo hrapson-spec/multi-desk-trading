@@ -30,7 +30,7 @@ Evidence: git diff audit + parametrized portability tests + end-to-end Gate 3 pa
 
 | Criterion | Evidence |
 |---|---|
-| 1 equity-VRP desk passes Gate 3 (hot-swap, strict) | `tests/test_dealer_inventory_gates.py::test_dealer_inventory_passes_hot_swap` + `test_dealer_inventory_gate3_always_passes_strict` |
+| 1 equity-VRP desk passes Gate 3 (hot-swap, strict) | `tests/test_dealer_inventory_gates.py::test_dealer_inventory_passes_hot_swap` + `test_dealer_inventory_gate3_always_passes_strict`. **v1.14 annotation (2026-04-18):** the Gate 3 pass recorded here at v1.12 MVP ship reflected **attribute-conformance only** — the shipped callsite wired `run_controller_fn=lambda: True`. At v1.14 the dealer_inventory Gate 3 callsite was migrated to `eval.hot_swap.build_hot_swap_callables`, which runs `Controller.decide()` with a real `DealerInventoryDesk` and a `StubDesk` swap and asserts the `combined_signal` delta. The MVP's architectural claim is therefore retroactively strengthened: Gate 3 is now runtime hot-swap, not conformance only. See spec §0 v1.14 + `capability_debits.md` D9 (closed). |
 | Oil portability test still green | `tests/test_phase2_portability_contract.py` — 12/12 passing |
 | Equity-VRP portability test green | `tests/test_phase2_equity_vrp_portability.py` — 12/12 passing |
 | Full test suite green | 377 passed + 1 skipped |
