@@ -31,3 +31,15 @@ data_sources:
     description: "OPEC ministerial meeting / production-quota announcement"
     tolerance_minutes: 120
     consumed_by: [geopolitics, supply]
+
+  # -- Phase 2 equity-VRP feeds (v1.13) -------------------------------
+
+  - feed_name: cboe_open_interest
+    description: "CBOE options open interest (put/call OI snapshots)"
+    tolerance_minutes: 240
+    consumed_by: [hedging_demand]
+
+  - feed_name: option_volume
+    description: "Options daily volume (put/call totals)"
+    tolerance_minutes: 240
+    consumed_by: [hedging_demand]
