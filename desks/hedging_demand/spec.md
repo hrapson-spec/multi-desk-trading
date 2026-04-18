@@ -73,7 +73,7 @@ Fit target: log-return of `vol_level` (= `market_price`) over `horizon_days = 3`
 
 ## Gates
 
-- **Gate 3 — DeskProtocol conformance + attribute parity** (strict). Must pass. Portability invariant per §8.4. (Note: the existing gate harness uses `run_controller_fn=lambda: True`, making the runtime hot-swap claim weaker than the spec language implies; see capability-debit D9 for the baseline fix commitment.)
+- **Gate 3 — runtime hot-swap** (strict). Must pass. Portability invariant per §8.4. Evidenced by `tests/test_hedging_demand_gates.py::test_hedging_demand_classical_three_gates_on_mvp_market` via `eval.hot_swap.build_hot_swap_callables` (Controller.decide() exercised end-to-end with Decision validity + combined_signal delta + contributing_ids membership assertions). D9 closed 2026-04-18 at tag `gate3-runtime-harness-v1.14`.
 - **Gate 1 — skill** (capability claim). Ridge should beat the vol-random-walk baseline on log-return of vol. May fail on the minimal MVP market; that failure expands capability-debit D7.
 - **Gate 2 — sign preservation** (capability claim). Positive-sign convention dev → test. Dynamic-sign derivation means correlations on dev vs test should align in magnitude.
 

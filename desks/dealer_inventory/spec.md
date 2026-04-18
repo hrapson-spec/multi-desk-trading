@@ -30,7 +30,7 @@ Phase 2 MVP capability-claim debit (parallel to oil D1): ridge-on-5-features is 
 
 ## Gates
 
-- **Gate 3 (hot-swap)**: strict — `StubDesk` must satisfy `DeskProtocol` for `name="dealer_inventory"`. Portability invariant.
+- **Gate 3 (runtime hot-swap)**: strict — Controller.decide() must run to completion with either `DealerInventoryDesk` or a `StubDesk`-swap. Portability invariant. Evidenced by `tests/test_dealer_inventory_gates.py::test_dealer_inventory_classical_passes_three_gates_on_mvp_market` via `eval.hot_swap.build_hot_swap_callables`. Attribute-conformance as `StubDesk` → `DeskProtocol` remains a necessary precondition (`test_dealer_inventory_gate3_always_passes_strict`). D9 closed 2026-04-18 at tag `gate3-runtime-harness-v1.14`.
 - **Gate 1 (skill)**: capability claim — ridge must beat the vol-random-walk baseline on the held-out split.
 - **Gate 2 (sign preservation)**: capability claim — positive-sign convention dev → test.
 

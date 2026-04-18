@@ -17,8 +17,9 @@ depth. Per spec.md.
 
 Capability-claim debit mirror of oil's D1 and equity-VRP's D7: this
 is a deliberately modest model. Architecture verification is Gate 3
-(DeskProtocol conformance); Gates 1+2 are scale-out capability
-claims that may fail on the synthetic MVP market.
+(runtime hot-swap via eval.hot_swap.build_hot_swap_callables since
+v1.14); Gates 1+2 are scale-out capability claims that may fail on
+the synthetic MVP market.
 """
 
 from __future__ import annotations

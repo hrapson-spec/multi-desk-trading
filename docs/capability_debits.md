@@ -117,9 +117,10 @@ module docstrings.
 
 **Claim relaxed.** Phase 2 equity-VRP desks so far
 (`dealer_inventory` MVP, `hedging_demand` v1.13) pass Gate 3
-(portability invariant — as DeskProtocol conformance per D9) but
-fail Gate 1 (skill) and Gate 2 (sign preservation) on the minimal
-synthetic equity-vol market.
+(portability invariant — runtime hot-swap via
+`eval.hot_swap.build_hot_swap_callables` since v1.14; see D9 closure
+below) but fail Gate 1 (skill) and Gate 2 (sign preservation) on the
+minimal synthetic equity-vol market.
 
 Observed at tag `phase2-mvp-v1.12`:
 - dealer_inventory G1 relative_improvement ≈ −0.5%, G2 dev/test_corr ≈ 0.
@@ -129,8 +130,9 @@ Observed at tag `phase2-desk2-hedging-demand-v1.13`:
 
 **Scope.** Architectural claim is verified regardless: both desks
 compose with the bus, Controller, grading harness, and attribution
-layer end-to-end. Gate 3 passes as DeskProtocol conformance (see D9);
-portability tests pass.
+layer end-to-end. Gate 3 passes as runtime hot-swap (`Controller.decide()`
+exercised end-to-end; D9 closed 2026-04-18 at tag
+`gate3-runtime-harness-v1.14`); portability tests pass.
 
 **Mitigation.** Phase 2 scale-out: the remaining three desks
 (`term_structure`, `earnings_calendar`, `macro_regime`) + a richer
