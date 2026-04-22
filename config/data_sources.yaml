@@ -57,4 +57,9 @@ data_sources:
   - feed_name: vix_eod
     description: "VIX end-of-day settlement + intraday printed quotes"
     tolerance_minutes: 120
-    consumed_by: [surface_positioning_feedback]
+    consumed_by: [surface_positioning_feedback, earnings_calendar]
+
+  - feed_name: earnings_calendar_feed
+    description: "Scheduled index-component earnings releases (synthetic placeholder until real feed wires in Phase 3)"
+    tolerance_minutes: 240
+    consumed_by: [earnings_calendar]
