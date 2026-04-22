@@ -25,6 +25,7 @@ from __future__ import annotations
 # Storage & Curve desk (desk 3) — populated as the desk comes online.
 # First registered target; all others added as desks are deepened per §12.1.
 WTI_FRONT_MONTH_CLOSE = "wti_front_month_close"
+WTI_FRONT_1W_LOG_RETURN = "wti_front_1w_log_return"
 
 
 # -----------------------------------------------------------------------------
@@ -36,6 +37,9 @@ WTI_FRONT_MONTH_CLOSE = "wti_front_month_close"
 
 VIX_30D_FORWARD = "vix_30d_forward"
 SPX_30D_IMPLIED_VOL = "spx_30d_implied_vol"
+# v1.16 addition: signed 3-day delta. Shared decision-space unit for the equity
+# family so controller/decision.py:94-112 can raw-sum across equity desks.
+VIX_30D_FORWARD_3D_DELTA = "vix_30d_forward_3d_delta"
 
 
 # -----------------------------------------------------------------------------
@@ -45,8 +49,10 @@ SPX_30D_IMPLIED_VOL = "spx_30d_implied_vol"
 KNOWN_TARGETS: frozenset[str] = frozenset(
     {
         WTI_FRONT_MONTH_CLOSE,
+        WTI_FRONT_1W_LOG_RETURN,
         VIX_30D_FORWARD,
         SPX_30D_IMPLIED_VOL,
+        VIX_30D_FORWARD_3D_DELTA,
     }
 )
 
