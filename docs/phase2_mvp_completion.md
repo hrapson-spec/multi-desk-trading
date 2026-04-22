@@ -1,8 +1,50 @@
 # Phase 2 MVP completion manifest
 
-**Date**: 2026-04-18 (Phase 1 exited 2026-04-17)  
-**Spec version**: v1.12  
+**Date**: 2026-04-18 (Phase 1 exited 2026-04-17); v1.16 restructure 2026-04-22
+**Spec version**: v1.16 (was v1.12 at original MVP ship)
 **Status**: MVP complete — architectural portability claim **VERIFIED**. Model-quality claim deferred (D7).
+
+## v1.16 restructure status (2026-04-22, C1–C12 ship)
+
+The desk-roster restructure adopting `docs/first_principles_redesign.md` ships across 12 commits on `wip-attribution-and-desk-models`. MVP architectural claim unchanged — still verified — under the v1.16 roster:
+
+- **Oil family (3 desks)**: `storage_curve` (kept) + `supply_disruption_news` (merged `supply` + `geopolitics`) + `oil_demand_nowcast` (merged `demand` + macro alpha). Standalone `geopolitics` + `macro` demoted: macro → `regime_classifier` conditioning state; geopolitics absorbed into event-hurdle framing in `supply_disruption_news`.
+- **Equity-VRP family (1 merged desk + planned earnings_calendar)**: `surface_positioning_feedback` (merged `dealer_inventory` + `hedging_demand`) emits the new `VIX_30D_FORWARD_3D_DELTA` target; signed 3-day vol delta is the decision-space unit for the equity family under `controller/decision.py:94-112` raw-sum. Planned scale-out desks: `earnings_calendar` kept, `macro_regime` dropped (demoted to regime_classifier), `term_structure` deferred.
+- **Target registry append**: `VIX_30D_FORWARD_3D_DELTA` + `WTI_FRONT_1W_LOG_RETURN`. Non-breaking per spec §4.6 append-only rule.
+- **Controller / contracts / bus / persistence / eval.hot_swap / provenance / scheduler**: zero lines changed. Portability claim re-verified by `tests/test_phase2_equity_vrp_portability.py` + `tests/test_phase2_portability_contract.py`.
+- **D1 narrowed**: from "4 of 5 weak oil desks" to "2 of 3 weak oil desks" (supply_disruption_news + oil_demand_nowcast on ridge-level merged-channels heads).
+- **D7 re-scoped**: from "dealer_inventory + hedging_demand Gate 2 unstable" to "surface_positioning_feedback Gate 2 on the merged channels". Composite-ridge emission is a signed delta, not a vol level — the unit rebase fixes the legacy Controller-aggregation issue.
+- **D-16 opened** (`raid_log.md`): Logic-gate Gate 1 aggregate dropped from the combined-pass criterion pending a log-return baseline refactor. Gate 1 is still evaluated per-desk and reported; only the combined-pass threshold was relaxed. Test-infrastructure debit, not a model-quality finding.
+- **Tests**: 403 passed + 1 skipped across the full suite after C12 verification. Includes logic-gate multi-scenario (5 tests), hot-swap, attribution (Shapley + LODO), portability (equity-VRP + contract), cold-start, replay determinism.
+
+### Deferred to a post-C12 follow-on wave
+
+- Deletion of the 6 committed legacy desk directories (`supply`, `geopolitics`, `demand`, `macro`, `dealer_inventory`, `hedging_demand`).
+- Migration of ~27 test imports across 10+ test files.
+- `config/data_sources.yaml` rewrite.
+- Inlining the `ClassicalGeopoliticsModel` / `ClassicalDemandModel` / `ClassicalDealerInventoryModel` / `ClassicalHedgingDemandModel` base-class code into the new desks (current state: new desks inherit from legacy classical models — deletion requires inlining first).
+- Legacy-test-infra log-return baseline refactor to close D-16.
+
+Rationale for the split: 27 test-import migrations and 6 desk-directory deletions as a single atomic commit would have produced an irreducibly large diff and likely broken the test suite mid-Edit. The v1.16 architectural restructure is independent of the legacy cleanup; the cleanup wave ships separately.
+
+### Commit chain (C1–C12)
+
+| # | Sha | Scope |
+|---|---|---|
+| C1 | `9079f05` | spec v1.16 + adopted review + D-15 |
+| C2 | `2c33d4d` | target registry append |
+| C3 | `7ddeb7c` | 3 engineering commissions |
+| C4a | `32f494f` | additive new `supply_disruption_news` desk |
+| C5a | `56ab717` | additive new `oil_demand_nowcast` desk |
+| C6 | `f812f90` | `regime_classifier/spec.md` v1.16 role expansion |
+| C7 | `ecdb222` | logic-gate 3-desk roster + D-16 Gate 1 skip |
+| C8a | `59856af` | additive new `surface_positioning_feedback` desk |
+| C9 | `da62d05` | equity sim merged-view channel |
+| C10 | `aa5305e` | master_plan Phase 2 re-scope |
+| C11 | `44c2642` | fair_vol_baseline channel |
+| C12 | *(this commit)* | E2E verification + manifest updates |
+
+## Original v1.12 MVP evidence
 
 ## Architectural claim (§1.1, §8.4)
 

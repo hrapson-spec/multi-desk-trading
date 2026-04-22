@@ -10,15 +10,30 @@ is in-budget if it is bounded, explicitly mitigated, and does not break
 the architectural claim. A debit that invalidates portability,
 controller correctness, or the frozen contract surface is not in-budget.
 
-## Active debits (2026-04-18 current worktree)
+## Active debits (2026-04-22 worktree — v1.16 restructure)
 
-### D1. Phase A model weakness (non-storage_curve desks)
+### D1. Phase A model weakness — v1.16 narrowed scope
 
-**Claim relaxed.** The four non-storage Phase A desks still use simple
-classical ridge specialists over compact summary-feature surfaces. Their
-skill remains seed-dependent. Across 10 seeds in the multi-scenario
-Logic-gate sweep, **6/10** seeds now pass the ≥3/5 Gate 1 + Gate 2
-aggregate.
+**v1.16 scope narrowing (2026-04-22).** Roster shrinks from 5 oil desks to 3
+(`storage_curve`, `supply_disruption_news`, `oil_demand_nowcast`). D1 now
+covers only the two non-storage merged desks. Composite and inherited
+classical heads are ridge-level; the full event-hurdle / mixed-frequency
+nowcast rebuilds are §7.3 escalation items under the commissions at
+`docs/pm/supply_disruption_news_engineering_commission.md` and
+`docs/pm/oil_demand_nowcast_engineering_commission.md`.
+
+Gate 2 (sign preservation) is the active capability gate under v1.16;
+per-seed results show Gate 2 aggregate holds at 2-3/3 across the 10-seed
+Logic-gate sweep, and the combined-pass threshold is ≥ 5/10 seeds. Gate 1
+aggregate is tracked separately under D-16 (test-infrastructure debit).
+
+### D1-historical. Phase A model weakness (v1.11–v1.15 context, superseded)
+
+**Pre-v1.16 claim (preserved for audit trail).** The four non-storage
+Phase A desks still use simple classical ridge specialists over compact
+summary-feature surfaces. Their skill remains seed-dependent. Across
+10 seeds in the multi-scenario Logic-gate sweep, **6/10** seeds pass
+the ≥3/5 Gate 1 + Gate 2 aggregate.
 
 **Storage_curve (the load-bearing desk) still passes 3/3 on all 10
 seeds; Gate 3 (hot-swap) still passes 5/5 on all 10 seeds.** Those are
@@ -37,11 +52,28 @@ geopolitics / macro.
 **Pinned by.** `tests/test_logic_gate_multi_scenario.py` and spec v1.11
 (historical) plus v1.15 changelog note (current narrowing to 6/10).
 
-### D7. Phase 2 equity-VRP model quality (Gate 2 sign preservation remains open)
+### D7. Phase 2 equity-VRP model quality — v1.16 re-scoped
 
-**Claim relaxed.** Both shipped equity-VRP desks
-(`dealer_inventory`, `hedging_demand`) pass Gate 3 runtime hot-swap and
-now clear Gate 1 on the pinned MVP slice, but **Gate 2 remains
+**v1.16 re-scoping (2026-04-22).** `dealer_inventory` + `hedging_demand`
+merged into `surface_positioning_feedback` per the adopted pasted review
+in `docs/first_principles_redesign.md`. Emission retargeted to
+`VIX_30D_FORWARD_3D_DELTA` (signed 3-day delta) so the equity family is
+unit-consistent under `controller/decision.py:94-112` raw-sum.
+Directional score is now the fitted delta head (replaces the legacy
+dealer_inventory heuristic `flow_last + 0.25 * vega_normalized`). D7 now
+covers Gate 2 on the merged-channels composite ridge; full monotone-GAM /
+GBDT rebuild is the §7.3 escalation under the commission at
+`docs/pm/surface_positioning_feedback_engineering_commission.md`.
+
+`fair_vol_baseline` channel added at v1.16 C11 supports the
+`next_session_rv_surprise` internal training signal; the composite ridge
+does not yet consume it (Phase 2 scope).
+
+### D7-historical. v1.13–v1.15 context (superseded)
+
+**Pre-v1.16 claim (preserved for audit trail).** Both shipped equity-VRP
+desks (`dealer_inventory`, `hedging_demand`) pass Gate 3 runtime hot-swap
+and now clear Gate 1 on the pinned MVP slice, but **Gate 2 remains
 unstable** on the minimal synthetic equity-vol market.
 
 Current pinned regression values:
@@ -69,9 +101,42 @@ layer, and Gate 3 runtime harness end-to-end.
 - Use the same §7.3 escalation ladder if Gate 2 remains unstable.
 
 **Pinned by.**
-- `tests/test_dealer_inventory_gates.py`
-- `tests/test_hedging_demand_gates.py`
-- `docs/phase2_mvp_completion.md` (historical manifest + current note)
+- `tests/test_dealer_inventory_gates.py` (historical — v1.15-era)
+- `tests/test_hedging_demand_gates.py` (historical — v1.15-era)
+- `docs/phase2_mvp_completion.md` (historical manifest + v1.16 current status section)
+- v1.16 state: `tests/test_surface_positioning_feedback_gates.py` **pending C12 follow-on wave** (see manifest §"Deferred to a post-C12 follow-on wave"). Until then Gate 2 on the composite ridge is measured via the logic-gate multi-scenario sweep; dedicated pinned regression values are re-recorded when the composite desk has its own gate file.
+
+### D-16. Logic-gate Gate 1 baseline-unit mismatch (v1.16 test-infrastructure)
+
+**Opened 2026-04-22** at C7 ship; recorded in `docs/pm/raid_log.md` as decision D-16.
+
+The v1.16 merged oil desks (`supply_disruption_news`, `oil_demand_nowcast`)
+emit `WTI_FRONT_1W_LOG_RETURN`. The current `eval.data.random_walk_price_baseline`
+and the Print generator in `tests/test_logic_gate_multi_scenario.py` both
+operate in price-level units (designed for the pre-v1.16 5-desk era when
+oil desks emitted `WTI_FRONT_MONTH_CLOSE`). Gate 1 compares the desk's
+point_estimate to the baseline's prediction — scale-incompatible when one
+is a log-return and the other is a price. Gate 1 always fails for the
+merged desks under the current test infrastructure.
+
+**Scope.** Test-infrastructure debit, not a model-quality finding. Gate 2
+(sign preservation) is unaffected — `_fit_and_drive` already converts
+scores and outcomes to log-return space before splitting.
+
+**Workaround (C7 ship).** `_scenario_passes` drops the Gate 1 aggregate
+requirement from the combined-pass criterion. Gate 1 is still evaluated
+per-desk and reported in diagnostics; only the aggregate threshold was
+relaxed. Strict invariants (storage_curve 3/3 + Gate 3 3/3) and Gate 2
+aggregate ≥ 2/3 remain load-bearing.
+
+**Mitigation path.** Rebuild `eval.data.random_walk_price_baseline` and
+the Print-generation path around log-return grading; scoped to the
+post-C12 follow-on wave that also migrates ~27 test imports and deletes
+the 6 committed legacy desk directories.
+
+**Pinned by.**
+- `tests/test_logic_gate_multi_scenario.py::_scenario_passes` docstring
+- `docs/pm/raid_log.md::D-16`
 
 ## Closed debits (historical)
 

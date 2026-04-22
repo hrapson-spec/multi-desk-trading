@@ -78,19 +78,22 @@ class SupplyDisruptionNewsDesk(StubDesk):
         if self.model is None:
             return self._build_stub_forecast(now_utc)
         obs = channels.by_desk["geopolitics"].components
-        balance = obs.get("balance_state", obs["event_intensity_raw"])
-        score = self.model.predict_return(
+        pred = self.model.predict(
             obs["event_indicator"],
             obs["event_intensity"],
             obs["event_intensity_raw"],
             channels.market_price,
             i,
-            balance_state=balance,
         )
-        if score is None:
+        if pred is None:
             return self._build_stub_forecast(now_utc)
+        # ClassicalGeopoliticsModel.predict returns (price_level, log_return).
+        # The v1.16 emission target is WTI_FRONT_1W_LOG_RETURN, so the
+        # controller-facing point_estimate is the log-return head.
+        _point_price, log_return = pred
+        score = float(log_return)
         stale = conn is not None and self._staleness_from_feeds(conn)
-        spread = max(0.01, 2.5 * abs(float(score)))
+        spread = max(0.01, 2.5 * abs(score))
         return Forecast(
             forecast_id=str(uuid.uuid4()),
             emission_ts_utc=now_utc,
@@ -99,15 +102,15 @@ class SupplyDisruptionNewsDesk(StubDesk):
                 event_id=self.event_id,
                 expected_ts_utc=now_utc + timedelta(days=self.horizon_days),
             ),
-            point_estimate=float(score),
+            point_estimate=score,
             uncertainty=UncertaintyInterval(
                 level=0.8,
-                lower=float(score) - spread,
-                upper=float(score) + spread,
+                lower=score - spread,
+                upper=score + spread,
             ),
             directional_claim=DirectionalClaim(
                 variable=self.target_variable,
-                sign=_derive_sign(float(score)),
+                sign=_derive_sign(score),
             ),
             staleness=stale,
             confidence=0.65,
@@ -118,12 +121,13 @@ class SupplyDisruptionNewsDesk(StubDesk):
         if self.model is None:
             return None
         obs = channels.by_desk["geopolitics"].components
-        balance = obs.get("balance_state", obs["event_intensity_raw"])
-        return self.model.predict_return(
+        pred = self.model.predict(
             obs["event_indicator"],
             obs["event_intensity"],
             obs["event_intensity_raw"],
             channels.market_price,
             i,
-            balance_state=balance,
         )
+        if pred is None:
+            return None
+        return float(pred[1])  # log-return head
