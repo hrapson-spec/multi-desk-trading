@@ -68,6 +68,15 @@ class EarningsCalendarDesk(StubDesk):
             code_commit="0" * 40,
         )
 
+    def _read_earnings_channels(
+        self, channels: EquityObservationChannels
+    ) -> tuple:
+        obs = channels.by_desk["earnings_calendar"].components
+        return (
+            obs["earnings_event_indicator"],
+            obs["earnings_cluster_size"],
+        )
+
     def forecast_from_observation(
         self,
         channels: EquityObservationChannels,
@@ -78,7 +87,8 @@ class EarningsCalendarDesk(StubDesk):
     ) -> Forecast:
         if self.model is None:
             return self._build_stub_forecast(now_utc)
-        pred = self.model.predict(channels.market_price, i)
+        indicator, cluster_size = self._read_earnings_channels(channels)
+        pred = self.model.predict(indicator, cluster_size, channels.market_price, i)
         if pred is None:
             return self._build_stub_forecast(now_utc)
         point, score = pred
@@ -114,7 +124,8 @@ class EarningsCalendarDesk(StubDesk):
     ) -> float | None:
         if self.model is None:
             return None
-        pred = self.model.predict(channels.market_price, i)
+        indicator, cluster_size = self._read_earnings_channels(channels)
+        pred = self.model.predict(indicator, cluster_size, channels.market_price, i)
         if pred is None:
             return None
         return float(pred[1])

@@ -143,9 +143,15 @@ the 6 committed legacy desk directories.
 - `tests/test_logic_gate_multi_scenario.py::_scenario_passes` docstring
 - `docs/pm/raid_log.md::D-16`
 
-### D-17. earnings_calendar Gate 1/2 weak — pending earnings-event channel
+### D-17. earnings_calendar Gate 1/2 weak — pending earnings-event channel — CLOSED 2026-04-22
 
-**Opened 2026-04-22** at W10 ship. The `earnings_calendar` desk ships as a structurally-complete skeleton that satisfies DeskProtocol, Gate 3 hot-swap, and raw-sum composition with `surface_positioning_feedback`. Its ridge classical head reads only vol-level proxies because the sim has no earnings-event channel (per-ticker scheduled release dates, cluster size, sector weight). Gate 1/2 skill is expected weak until the full earnings-event mechanism lands.
+**Opened 2026-04-22** at W10 ship; **closed 2026-04-22** at X1 ship.
+
+**Closure evidence.** X1 added `earnings_event_indicator` and `earnings_cluster_size` channels to `sim_equity_vrp/latent_state.py`, generated from an isolated `seed+4` RNG stream with a forward correlation to `vol_shocks_unscaled` at a 2-step lead. `ClassicalEarningsCalendarModel` rebuilt around a 5-feature ridge (cluster_size, event_today, event_density, current_vol, vol_zscore). Gate 1 skill measured at **14.66% relative improvement vs `zero_return_baseline`** on the seed-7 held-out probe (desk RMSE 2.57 vs baseline 3.01; test `test_earnings_calendar_gate1_skill_on_new_channel`). Forward-correlation evidence: `earnings_cluster_size[t]` vs `vol_level[t+3]` Pearson r = 0.15 on a 1500-day seed-42 path.
+
+**D12 preservation.** The new channel is generated AFTER all pre-X1 sim draws. Mutating `earnings_vol_corr` to 0.9 and `earnings_cluster_window` to 20 leaves `vol_level`, `dealer_flow`, `vega_exposure`, `spot_log_price`, `hedging_demand`, `put_skew_proxy` byte-identical (test `test_earnings_rng_isolated_from_existing_streams`). Six pinned D12 SHA-256 hashes unchanged.
+
+**Retained for audit trail (opening context):**
 
 **Scope.** Follow-on wave per commission §5 at `docs/pm/earnings_calendar_engineering_commission.md`. Requires:
 - earnings-event channel in `sim_equity_vrp/` (scheduled release dates, clusters, sector weights)

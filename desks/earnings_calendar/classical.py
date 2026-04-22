@@ -1,13 +1,24 @@
-"""Classical model for the earnings_calendar desk (v1.16 W10 skeleton).
+"""Classical model for the earnings_calendar desk (v1.16 X1).
 
-Skeleton ridge on vol-surface proxies. The sim has no earnings-event
-channel yet, so the head cannot access true earnings-proximity or
-cluster features — it falls back to a vol-of-vol proxy computed from
-the merged surface_positioning_feedback channels. Expected Gate 1/2
-performance is weak until the earnings channel lands.
+Reads the `earnings_event_indicator` + `earnings_cluster_size` channels
+from `sim_equity_vrp.observations.EquityObservationChannels.by_desk
+["earnings_calendar"]`. Ridge on 5 features → fitted vol-delta
+prediction.
 
-Follow-on scope (commission §5): structured event schema +
-class-conditional impact model + state-conditioning.
+Feature vector at time t:
+  - earnings_cluster_size[t]   : count of events in the trailing
+    cluster_window days (primary mechanism feature)
+  - earnings_event_indicator[t]: 0/1 today-is-event flag
+  - event_density              : trailing-`lookback` mean of the indicator
+  - current_vol                : market_price[t-1]
+  - vol_zscore                 : (current_vol - trailing_mean) / trailing_std
+
+Mechanism: the sim generates earnings with a forward-correlation to
+vol_shocks at t+2 (lead=2), so earnings_cluster_size[t] has a real,
+learnable predictive relationship with vol_level[t+3] (horizon_days=3).
+
+Previous v1.16 W10 skeleton read only vol-level proxies — no alpha by
+design. D-17 closed at X1.
 """
 
 from __future__ import annotations
@@ -26,16 +37,7 @@ ALPHA_DEFAULT = 1e-3
 
 @dataclass
 class ClassicalEarningsCalendarModel:
-    """Skeleton ridge(vol-volatility proxy) → direct vol-delta.
-
-    Features:
-      - current vol (proxy for ATM level prior to the earnings-window)
-      - trailing vol-of-vol (proxy for existing clustering / instability)
-      - vol z-score vs trailing mean (proxy for stress regime)
-
-    Intended to be replaced by a structured event-schema model once the
-    sim adds an earnings channel.
-    """
+    """Ridge(earnings + vol features) → direct vol-delta."""
 
     lookback: int = LOOKBACK_DEFAULT
     horizon_days: int = HORIZON_DEFAULT
@@ -45,27 +47,58 @@ class ClassicalEarningsCalendarModel:
     intercept_: float | None = field(default=None, init=False)
     n_train_: int = field(default=0, init=False)
 
-    def _features(self, market_price: np.ndarray, i: int) -> np.ndarray | None:
+    def _features(
+        self,
+        earnings_event_indicator: np.ndarray,
+        earnings_cluster_size: np.ndarray,
+        market_price: np.ndarray,
+        i: int,
+    ) -> np.ndarray | None:
         if i < self.lookback + 2:
             return None
         vol_window = market_price[i - self.lookback : i]
+        ind_window = earnings_event_indicator[i - self.lookback : i]
         if np.any(~np.isfinite(vol_window)):
             return None
         current_vol = max(float(vol_window[-1]), 1.0)
         vol_mean = float(vol_window.mean())
         vol_std = float(vol_window.std())
         vol_zscore = (current_vol - vol_mean) / vol_std if vol_std > 1e-6 else 0.0
-        return np.array([current_vol, vol_std, vol_zscore])
+        cluster_size = float(earnings_cluster_size[i])
+        event_today = float(earnings_event_indicator[i])
+        event_density = float(ind_window.mean())
+        return np.array(
+            [
+                cluster_size,
+                event_today,
+                event_density,
+                current_vol,
+                vol_zscore,
+            ]
+        )
 
-    def fit(self, market_price: np.ndarray) -> None:
-        if len(market_price) < self.lookback + self.horizon_days + 5:
+    def fit(
+        self,
+        earnings_event_indicator: np.ndarray,
+        earnings_cluster_size: np.ndarray,
+        market_price: np.ndarray,
+    ) -> None:
+        if not (
+            len(earnings_event_indicator)
+            == len(earnings_cluster_size)
+            == len(market_price)
+        ):
             raise ValueError(
-                f"need ≥{self.lookback + self.horizon_days + 5} prices; got {len(market_price)}"
+                "inputs must share length; got "
+                f"{len(earnings_event_indicator)}, "
+                f"{len(earnings_cluster_size)}, {len(market_price)}"
             )
         features_list: list[np.ndarray] = []
         y_list: list[float] = []
         for i in range(1, len(market_price) - self.horizon_days):
-            f = self._features(market_price, i)
+            f = self._features(
+                earnings_event_indicator, earnings_cluster_size, market_price, i
+            )
             if f is None:
                 continue
             future_vol = float(market_price[i + self.horizon_days])
@@ -75,7 +108,9 @@ class ClassicalEarningsCalendarModel:
             features_list.append(f)
             y_list.append(float(future_vol - current_vol))
         if len(features_list) < 5:
-            raise ValueError(f"insufficient training rows: got {len(features_list)}; need ≥5")
+            raise ValueError(
+                f"insufficient training rows: got {len(features_list)}; need ≥5"
+            )
 
         feature_mat = np.asarray(features_list, dtype=float)
         target = np.asarray(y_list, dtype=float)
@@ -86,18 +121,22 @@ class ClassicalEarningsCalendarModel:
 
     def predict(
         self,
+        earnings_event_indicator: np.ndarray,
+        earnings_cluster_size: np.ndarray,
         market_price: np.ndarray,
         i: int,
     ) -> tuple[float, float] | None:
         """Returns (point_delta, directional_score) or None.
 
-        point_delta is the fitted vol-delta prediction (signed, matches
-        VIX_30D_FORWARD_3D_DELTA unit). directional_score equals
-        point_delta — fitted-head driven, not a handcrafted heuristic.
+        point_delta is the fitted vol-delta (signed, matches the
+        VIX_30D_FORWARD_3D_DELTA emission unit). directional_score
+        equals point_delta — fitted-head driven, not a heuristic.
         """
         if self.coef_ is None or self.intercept_ is None:
             raise RuntimeError("model not fitted; call .fit() first")
-        f = self._features(market_price, i)
+        f = self._features(
+            earnings_event_indicator, earnings_cluster_size, market_price, i
+        )
         if f is None:
             return None
         delta_pred = float(f @ self.coef_ + self.intercept_)

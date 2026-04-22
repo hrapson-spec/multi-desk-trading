@@ -17,12 +17,18 @@ Desk-to-channel map (equity-VRP):
   | dealer_inventory (legacy)     | dealer_flow, vega_exposure                   |
   | hedging_demand (legacy)       | hedging_demand_level, put_skew_proxy         |
   | surface_positioning_feedback  | all four components (v1.16 merged view)      |
+  | earnings_calendar             | earnings_event_indicator, earnings_cluster_size (v1.16 X1) |
 
 v1.16 (C9): `by_desk["surface_positioning_feedback"]` is added alongside the
 legacy `dealer_inventory` and `hedging_demand` keys. Component arrays are
 shared views of the same underlying numpy buffers — no duplication in
 memory, and the legacy keys continue to expose their original subset until
 C12 removes them together with the legacy desk directories.
+
+v1.16 (X1): `by_desk["earnings_calendar"]` exposes the earnings-event
+channel generated in `latent_state.py` with a forward-correlation to
+`vol_shocks_unscaled` at a 2-step lead. Observation noise is not added —
+the indicator is binary and the cluster size is a count.
 """
 
 from __future__ import annotations
@@ -40,6 +46,7 @@ DESK_NAMES: tuple[str, ...] = (
     "dealer_inventory",
     "hedging_demand",
     "surface_positioning_feedback",
+    "earnings_calendar",
 )
 
 
@@ -150,6 +157,17 @@ class EquityObservationChannels:
                     "vega_exposure": vega_obs,
                     "hedging_demand_level": hd_obs,
                     "put_skew_proxy": skew_obs,
+                },
+                stale_mask=stale_mask_zero,
+            ),
+            # v1.16 X1: earnings-calendar desk. Exposes the two arrays
+            # generated in latent_state.py (earnings_event_indicator and
+            # earnings_cluster_size). No observation noise — indicators
+            # are binary, cluster size is a count.
+            "earnings_calendar": EquityDeskObservation(
+                components={
+                    "earnings_event_indicator": latent.earnings_event_indicator,
+                    "earnings_cluster_size": latent.earnings_cluster_size,
                 },
                 stale_mask=stale_mask_zero,
             ),

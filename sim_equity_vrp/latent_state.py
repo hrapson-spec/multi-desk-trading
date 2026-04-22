@@ -72,6 +72,17 @@ class EquityVolMarketConfig:
     # IV-pressure signal, whereas dealer flow is a derived secondary signal.
     hd_vol_corr: float = 0.55
     hd_init_value: float = 0.0
+    # v1.16 (X1) — earnings-event channel. Events at time t are correlated
+    # with vol_shocks_unscaled at t + earnings_vol_lead, so the observable
+    # earnings cluster size at t predicts vol_level[t + earnings_vol_lead + 1].
+    # Default lead=2 → earnings predict vol 3 days out, matching the
+    # earnings_calendar desk horizon.
+    earnings_vol_corr: float = 0.45
+    earnings_vol_lead: int = 2
+    # Threshold on the unit-variance earnings score. 1.2 → P(event) ≈ 11.5%.
+    earnings_event_threshold: float = 1.2
+    # Rolling cluster-size window (looks backward only — observation-safe).
+    earnings_cluster_window: int = 5
 
 
 def phase2_mvp_config() -> EquityVolMarketConfig:
@@ -83,7 +94,7 @@ def phase2_mvp_config() -> EquityVolMarketConfig:
 
 @dataclass(frozen=True)
 class EquityVolPath:
-    """Realised 4-factor latent state + regime sequence (v1.13)."""
+    """Realised 4-factor latent state + v1.13 hd channels + v1.16 earnings channel."""
 
     n_days: int
     vol_level: np.ndarray  # shape (n_days,)
@@ -93,6 +104,16 @@ class EquityVolPath:
     hedging_demand: np.ndarray  # shape (n_days,) — v1.13
     put_skew_proxy: np.ndarray  # shape (n_days,) — derived from hedging_demand × vol, v1.13
     regimes: VolRegimeSequence
+    # v1.16 (X1) — earnings event channel, generated AFTER all existing
+    # draws so D12 golden hashes on the arrays above stay byte-identical.
+    # Isolated RNG stream at seed+4 (main=seed, regimes=seed+1, hd_latent=seed+2,
+    # hd_obs=seed+3, earnings=seed+4).
+    earnings_event_indicator: np.ndarray = field(
+        default_factory=lambda: np.zeros(0, dtype=np.int8)
+    )
+    earnings_cluster_size: np.ndarray = field(
+        default_factory=lambda: np.zeros(0, dtype=np.int16)
+    )
 
 
 @dataclass
@@ -176,6 +197,43 @@ class EquityVolMarket:
         # construction (unlike real-world put skew which is strictly ≥ 0).
         put_skew_proxy = hedging_demand * vol
 
+        # --- v1.16 (X1): earnings-event channel ---
+        # Generated AFTER all existing draws so vol_level / dealer_flow /
+        # vega_exposure / spot_log_price / hedging_demand / put_skew_proxy
+        # bytes are unchanged (D12 golden fixtures preserved). Isolated
+        # RNG stream at seed+4 does not interfere with the main, +1, +2,
+        # +3 streams.
+        #
+        # Forward correlation: earnings_score[t] correlates with
+        # vol_shocks_unscaled[t + lead]. Since vol_shocks_unscaled[k] drives
+        # vol_level[k+1], observing earnings[t] gives a leading signal on
+        # vol_level[t + lead + 1]. Default lead=2 → earnings[t] predicts
+        # vol_level[t+3], matching the earnings_calendar desk horizon.
+        earnings_rng = np.random.default_rng((self.seed + 4) & 0xFFFFFFFF)
+        earnings_noise = earnings_rng.standard_normal(self.n_days)
+        lead = cfg.earnings_vol_lead
+        r_e = cfg.earnings_vol_corr
+        earnings_score = np.empty(self.n_days, dtype=np.float64)
+        if self.n_days > lead:
+            # For t in [0, n_days - lead), use vol_shocks_unscaled[t + lead].
+            earnings_score[:-lead] = (
+                r_e * vol_shocks_unscaled[lead:]
+                + np.sqrt(1.0 - r_e * r_e) * earnings_noise[:-lead]
+            )
+            # Tail fallback: no future vol available → pure noise.
+            earnings_score[-lead:] = earnings_noise[-lead:]
+        else:
+            earnings_score = earnings_noise
+
+        earnings_event_indicator = (earnings_score > cfg.earnings_event_threshold).astype(
+            np.int8
+        )
+        window = cfg.earnings_cluster_window
+        earnings_cluster_size = np.zeros(self.n_days, dtype=np.int16)
+        for t in range(self.n_days):
+            lo = max(0, t - window + 1)
+            earnings_cluster_size[t] = int(earnings_event_indicator[lo : t + 1].sum())
+
         return EquityVolPath(
             n_days=self.n_days,
             vol_level=vol,
@@ -185,4 +243,6 @@ class EquityVolMarket:
             hedging_demand=hedging_demand,
             put_skew_proxy=put_skew_proxy,
             regimes=regimes,
+            earnings_event_indicator=earnings_event_indicator,
+            earnings_cluster_size=earnings_cluster_size,
         )
