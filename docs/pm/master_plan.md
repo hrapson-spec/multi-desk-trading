@@ -3,8 +3,8 @@
 **Project**: multi-desk-trading architecture  
 **Owner**: Henri Rapson (sole operator)  
 **Started**: 2026-04-17  
-**Current spec version**: v1.15
-**Last updated**: 2026-04-18
+**Current spec version**: v1.16
+**Last updated**: 2026-04-22
 
 ## 1. Purpose
 
@@ -54,22 +54,26 @@ Three phases with discrete gates. Spec §12 is authoritative; this section is th
 | 2026-04-18 → ~04-25 | Run 4h Reliability gate soak | Pending (operator-side) | Requires 4 hours of laptop uptime |
 | 2026-04-18 | Establish PM artefacts (this doc + RAID + problem log) | In progress | — |
 
-### Forward — Phase 2 scale-out
+### Forward — Phase 2 scale-out (v1.16 re-scoped)
 
-Targets based on Phase 2 deadline of 2026-07-17 (three months from Phase 1 exit). Each scale-out desk mirrors the `dealer_inventory` MVP pattern.
+Targets based on Phase 2 deadline of 2026-07-17. The v1.16 desk-roster restructure (see `docs/first_principles_redesign.md`, D-15 in `raid_log.md`) shrinks both sides of the roster: oil 5 → 3 desks, equity-VRP 2 → 1 merged desk. Phase 2 scale-out work is re-scoped accordingly.
 
 | Date (target) | Milestone | Scope |
 |---|---|---|
-| 2026-05-02 | ~~Phase 2 desk 2: `hedging_demand`~~ | **Shipped early 2026-04-18 post-design-review** |
+| 2026-05-02 | ~~Phase 2 desk 2: `hedging_demand`~~ | **Shipped early 2026-04-18 post-design-review** (merged into `surface_positioning_feedback` at v1.16; see C8). |
 | ~~before 2026-05-16~~ | ~~Gate 3 runtime-harness upgrade (D9)~~ | **Shipped 2026-04-18 at tag `gate3-runtime-harness-v1.14`**. `eval/hot_swap.py::build_hot_swap_callables`; 7 migrated callsites; Controller retire-exclusion fix (B-4). |
-| 2026-05-16 | Phase 2 desk 3: `term_structure` | Implied-realized term spread; mirror of oil `demand` desk. **D9 no longer a blocker — runtime harness now reusable.** |
-| 2026-06-06 | Phase 2 desk 4: `earnings_calendar` | Event-driven vol expansion; mirror of oil `geopolitics` |
-| 2026-06-20 | Phase 2 desk 5: `macro_regime` | Equity vol-regime (quiet/stress/recovery) desk; mirror of oil `macro` |
-| 2026-06-27 | Phase 2 Logic gate on equity-VRP | 10-seed multi-scenario parallel to oil Logic gate |
-| 2026-07-04 | **Phase 2 complete** | `phase2-complete-v2.0` tag; 2-week buffer before deadline |
-| 2026-07-17 | Phase 2 deadline (spec §12.2) | Hard deadline; slippage is capability-claim debit |
+| 2026-04-22 | **v1.16 roster restructure — C1 … C6 shipped** | Spec v1.15 → v1.16 + adopted review + target-registry append + 3 commissions + 2 new oil desks (`supply_disruption_news`, `oil_demand_nowcast`) + regime_classifier role expansion. Legacy desk deletions batched to C12 cleanup. |
+| ~~2026-05-16~~ | ~~Phase 2 desk 3: `term_structure`~~ | **DEFERRED** pending review-consistency re-check (pasted review silent). Decision D-15. |
+| 2026-05-02 | Phase 2 restructure C7: logic-gate threshold recalibration | `test_logic_gate_multi_scenario.py` 3-desk oil roster; ≥3/5 → ≥2/3 aggregate; strict invariants preserved. |
+| 2026-05-09 | Phase 2 restructure C8+C9: equity rename + merge + sim-side channel collapse | `dealer_inventory` + `hedging_demand` → `surface_positioning_feedback`; `VIX_30D_FORWARD_3D_DELTA` emission; D12/D13 golden re-records. |
+| 2026-05-23 | Phase 2 desk 4: `earnings_calendar` | Event-driven vol expansion; equity-side event desk; emits `VIX_30D_FORWARD_3D_DELTA`. (Brought forward from 2026-06-06 since `hedging_demand` merge frees capacity.) |
+| 2026-06-06 | Phase 2 restructure C11: `fair_vol_baseline` channel | Decision-time forward-vol baseline in `sim_equity_vrp`; enables `next_session_rv_surprise` internal label for `surface_positioning_feedback`. |
+| ~~2026-06-20~~ | ~~Phase 2 desk 5: `macro_regime`~~ | **DROPPED** — demoted to regime-conditioning state via `regime_classifier` (see C6). Decision D-15. |
+| 2026-06-27 | Phase 2 Logic gate on v1.16 equity-VRP roster | 10-seed multi-scenario on the merged `surface_positioning_feedback` + `earnings_calendar` roster. Done-criterion rebased: **2 equity desks pass Gate 3; ≥ 1/2 passes Gates 1+2 aggregate** (scaled from the 5-desk 3/5 rule). |
+| 2026-07-04 | **Phase 2 complete (C12 E2E verification)** | `phase2-complete-v2.0` tag; 2-week buffer before deadline. Includes legacy-desk deletion (4 oil + 1 equity), test migration (10+ files), and capability-debits / phase2_mvp_completion re-signing. |
+| 2026-07-17 | Phase 2 deadline (spec §12.2) | Hard deadline; slippage is capability-claim debit. |
 
-Spec §14.6 budget realism applies: add 1-2 weeks per desk if escalation past ridge is needed (BVAR / PyMC). Realistic Phase 2 completion may slip to 2026-07-31.
+Spec §14.6 budget realism applies: add 1-2 weeks per desk if escalation past ridge is needed (BVAR / PyMC). Realistic Phase 2 completion may slip to 2026-07-31. D-15 (roster restructure) adds pressure to R-01 (deadline risk) — if ridge-level heads under-perform on the restructured roster, §7.3 escalation consumes buffer fast.
 
 ### Forward — Phase 3 (not yet scoped)
 
