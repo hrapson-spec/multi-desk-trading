@@ -1,9 +1,19 @@
 # Regime Classifier — Spec
 
-**Phase**: 1 (final-step deepen).
+**Phase**: 1 (final-step deepen) + v1.16 role expansion.
 **Status**: Shipped with two paths:
 - `GroundTruthRegimeClassifier` for isolation testing.
 - `HMMRegimeClassifier` for data-driven regime inference.
+
+**v1.16 role expansion.** The legacy `macro` desk is removed as a standalone
+alpha desk per `docs/first_principles_redesign.md`. Macro-beta transmission is
+now carried by the regime-conditioning state this classifier emits. No new
+inputs are added at the code level — the HMM still fits on market-price
+log-returns. The spec change here records that the Controller's regime-
+conditional weight matrix (§8.2) is the channel through which macro state
+now influences decisions, rather than a separate `macro` desk forecast.
+`regime_id` values and the `RegimeLabel` contract are unchanged; the
+domain-blind portability property (§14.7) is preserved.
 
 ## 1. Output
 
@@ -37,8 +47,14 @@ the unconditional weight matrix; must still function (Gate 3 hot-swap).
 
 ## 6. Inputs
 
-Desk output Forecasts (point estimates + uncertainties) from the other five
-desks, plus the Macro desk's macro-regime Forecast. **No raw domain data.**
+Desk output Forecasts (point estimates + uncertainties) from the other
+forecast-emitting desks. **No raw domain data.**
+
+Under the v1.16 roster, the oil-side inputs are the 3 desks (`storage_curve`,
+`supply_disruption_news`, `oil_demand_nowcast`) and the equity-side inputs are
+`surface_positioning_feedback` plus the planned `earnings_calendar`. The
+legacy reference to the `macro` desk's "macro-regime Forecast" is dropped —
+macro-regime is an output *of* this classifier, not an input.
 
 This is the domain-blindness property that makes the classifier redeploy to
 equity VRP unchanged.
