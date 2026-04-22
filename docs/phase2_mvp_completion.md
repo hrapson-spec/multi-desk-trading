@@ -28,10 +28,14 @@ The desk-roster restructure adopting `docs/first_principles_redesign.md` ships a
 
 Rationale for the split (historical): 27 test-import migrations and 6 desk-directory deletions as a single atomic commit would have produced an irreducibly large diff and likely broken the test suite mid-Edit. The v1.16 architectural restructure shipped at C1–C12; the cleanup wave shipped at W2–W10. Both waves are now complete.
 
-### Remaining test-coverage debits (W11 open)
+### Remaining test-coverage debits (post-Z)
 
-- **D-17** (opened at W10): `earnings_calendar` Gate 1/2 skill is weak by design — the sim has no earnings-event channel. Follow-on scope per commission at `docs/pm/earnings_calendar_engineering_commission.md` §5.
-- **Test-coverage gap** (opened at W6): `test_phase_a_clean_observations`, `test_phase_b_controlled_leakage`, `test_phase_c_realistic_contamination`, `test_dealer_inventory_gates`, `test_hedging_demand_gates`, `test_classical_specialists`, `test_hot_swap_two_desk` retired during cleanup; v1.16 roster is covered by `test_logic_gate_multi_scenario` + `test_phase1_round_trips` + `test_staleness_propagation` + `test_earnings_calendar_skeleton` + `test_sim_equity_vrp` + portability tests. Restoration of per-phase (clean/leakage/contamination) mode coverage and Controller-decide-level two-desk hot-swap is a separate follow-on wave.
+- **D-17 CLOSED at X1 (`5217ce4`)**: earnings-event channel shipped; Gate 1 skill 14.66% rel improvement on seed-7 probe. Historical entry retained in this manifest for audit trail.
+- **Test-coverage gap from W6 — partially closed at Y1/Y2/Y3**: `test_phase_a_clean_observations` (Y1 `8f2b21c`), `test_phase_b_controlled_leakage` (Y2 `311c124`), `test_phase_c_realistic_contamination` (Y3 `9f8520e`) restored for the v1.16 3-desk oil roster with per-desk baseline + Print dispatch. Still open: `test_dealer_inventory_gates` + `test_hedging_demand_gates` (retired — covered indirectly by `test_surface_positioning_feedback_gates` does-not-exist; Gate 3 hot-swap of the merged desk is covered by the logic-gate multi-scenario), `test_classical_specialists` (retired — per-classical-head unit tests not replaced), `test_hot_swap_two_desk` (retired — same-target two-desk scenario now covered indirectly by the earnings_calendar + surface_positioning_feedback composition test at `tests/test_earnings_calendar.py::test_earnings_calendar_composes_with_surface_positioning`). Residual per-classical-head unit-test gap noted; not blocking Phase 2 done-criterion.
+
+### Roadmap post-Z
+
+- **D-18 (`62821c6+`)**: `term_structure` formally dropped from the Phase 2 equity-VRP roadmap. Equity family closes at 2 desks: `surface_positioning_feedback` + `earnings_calendar`. Phase 2 done-criterion ("2 equity desks pass Gate 3; ≥ 1/2 pass Gates 1+2 aggregate") exceeded — both equity desks pass Gate 3, surface_positioning_feedback + earnings_calendar both have measured Gate 1 skill on their respective probes.
 
 ### Commit chain (C1–C12 + W1–W11)
 
