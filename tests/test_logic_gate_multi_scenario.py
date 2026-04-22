@@ -36,7 +36,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from contracts.target_variables import WTI_FRONT_MONTH_CLOSE
+from contracts.target_variables import WTI_FRONT_1W_LOG_RETURN, WTI_FRONT_MONTH_CLOSE
 from contracts.v1 import Forecast, Print, Provenance, RegimeLabel
 from controller import seed_cold_start
 from desks.oil_demand_nowcast import ClassicalOilDemandNowcastModel, OilDemandNowcastDesk
@@ -46,7 +46,7 @@ from desks.supply_disruption_news import (
     SupplyDisruptionNewsDesk,
 )
 from eval import GateRunner, build_hot_swap_callables
-from eval.data import random_walk_price_baseline
+from eval.data import random_walk_price_baseline, zero_return_baseline
 from persistence import connect, init_db
 from sim.latent_state import LatentMarket, phase_a_config
 from sim.observations import ObservationChannels
@@ -131,12 +131,25 @@ def _fit_and_drive(seed: int) -> dict[str, Any]:
             else:
                 score = desk.directional_score(channels, i)
             forecasts.append(f)
+            # v1.16 D-16 closure (W9): per-desk Print target + value.
+            # storage_curve emits WTI_FRONT_MONTH_CLOSE → Print value is
+            # the realised price. supply_disruption_news + oil_demand_nowcast
+            # emit WTI_FRONT_1W_LOG_RETURN → Print value is the realised
+            # log-return over HORIZON days. Keeps Gate 1's desk-vs-baseline
+            # comparison unit-consistent.
+            desk_target = desk.target_variable
+            if desk_target == WTI_FRONT_MONTH_CLOSE:
+                print_value = float(market_price[i + HORIZON])
+            else:  # WTI_FRONT_1W_LOG_RETURN
+                print_value = float(
+                    np.log(market_price[i + HORIZON]) - np.log(market_price[i - 1])
+                )
             prints.append(
                 Print(
                     print_id=f"{name}-{seed}-{i:04d}",
                     realised_ts_utc=realised_ts,
-                    target_variable=WTI_FRONT_MONTH_CLOSE,
-                    value=float(market_price[i + HORIZON]),
+                    target_variable=desk_target,
+                    value=print_value,
                 )
             )
             emission_indices.append(i)
@@ -171,11 +184,23 @@ def _run_gates_for_desk(
     seed_tag: str,
 ) -> tuple[bool, bool, bool]:
     """v1.14: Gate 3 uses eval.build_hot_swap_callables. Per-invocation
-    DB namespace includes seed_tag so the 10-seed × 5-desk matrix
-    doesn't collide on tmp_path DBs."""
-    rw_baseline: Callable[[int, list[Print]], float] = random_walk_price_baseline(
-        prices=market_price, emission_indices=drive["emission_indices"]
-    )
+    DB namespace includes seed_tag so the 10-seed × 3-desk matrix
+    doesn't collide on tmp_path DBs.
+
+    v1.16 D-16 closure (W9): baseline_fn is per-desk. Price-level
+    emission (storage_curve → WTI_FRONT_MONTH_CLOSE) uses the classical
+    random-walk price baseline; log-return emission (new desks →
+    WTI_FRONT_1W_LOG_RETURN) uses the zero-return baseline (the random-
+    walk analog for returns). Both baselines are unit-consistent with
+    their paired desk so Gate 1's desk-vs-baseline comparison is
+    apples-to-apples."""
+    desk_target = desk_instance.target_variable
+    if desk_target == WTI_FRONT_MONTH_CLOSE:
+        rw_baseline: Callable[[int, list[Print]], float] = random_walk_price_baseline(
+            prices=market_price, emission_indices=drive["emission_indices"]
+        )
+    else:  # WTI_FRONT_1W_LOG_RETURN
+        rw_baseline = zero_return_baseline()
     scores = drive["scores"]
     outcomes = drive["outcomes"]
     half = len(scores) // 2
@@ -244,18 +269,14 @@ def _scenario_passes(
 ) -> tuple[bool, dict[str, tuple[bool, bool, bool]]]:
     """One scenario's pass/fail per the §12.2 Logic-gate contract
     (v1.16 rebased on the 3-desk oil roster): storage_curve 3/3
-    required, Gate 2 aggregate ≥ 2/3, Gate 3 3/3.
+    required, Gate 1 aggregate ≥ 2/3, Gate 2 aggregate ≥ 2/3, Gate 3 3/3.
 
-    **Gate 1 aggregate NOT currently checked (D-16 decision — see raid_log.md; capability-debit entry added at C12).**
-    Gate 1 (skill vs baseline) is scale-sensitive: the `random_walk_price_baseline`
-    produces price-level predictions that are comparable to `storage_curve`'s
-    WTI_FRONT_MONTH_CLOSE emission but incomparable to the merged desks'
-    WTI_FRONT_1W_LOG_RETURN emission. A proper log-return baseline + Print
-    reconfiguration is a C12-scoped test-infrastructure refactor; until
-    then, Gate 1 is still evaluated per-desk (reported in diagnostics) but
-    does not gate the combined pass/fail. Gate 2 (sign preservation)
-    captures the real capability claim — it operates on scores/outcomes
-    that are both in log-return space already (see `_fit_and_drive`).
+    **v1.16 W9: Gate 1 aggregate restored** following the D-16 closure.
+    `_run_gates_for_desk` now picks a baseline function that matches the
+    desk's emitted target (price-level baseline for WTI_FRONT_MONTH_CLOSE;
+    zero-return baseline for WTI_FRONT_1W_LOG_RETURN), so Gate 1's
+    desk-vs-baseline comparison is unit-consistent. D-16 is closed in
+    raid_log.md and capability_debits.md.
 
     Strict invariants preserved: storage_curve 3/3 + Gate 3 all-desks."""
     results: dict[str, tuple[bool, bool, bool]] = {}
@@ -273,11 +294,18 @@ def _scenario_passes(
         )
 
     sc_g1, sc_g2, sc_g3 = results["storage_curve"]
+    g1_count = sum(r[0] for r in results.values())
     g2_count = sum(r[1] for r in results.values())
     g3_count = sum(r[2] for r in results.values())
 
-    # Gate 1 aggregate intentionally omitted — see docstring (D16 debit).
-    passes = sc_g1 and sc_g2 and sc_g3 and g2_count >= 2 and g3_count == 3
+    passes = (
+        sc_g1
+        and sc_g2
+        and sc_g3
+        and g1_count >= 2
+        and g2_count >= 2
+        and g3_count == 3
+    )
     return passes, results
 
 
@@ -289,15 +317,14 @@ def test_logic_gate_multi_scenario(tmp_path):
       - storage_curve passes all 3 gates (infrastructure MUST work).
       - Gate 3 (hot-swap) passes for all 3 desks (portability invariant).
 
-    Per-scenario capability claim (v1.16 rebased):
-      - Gate 2 (sign preservation) aggregate ≥ 2/3 — the real capability
-        claim. Gate 2 works in log-return space (scores vs outcomes, both
-        log-returns), so it is unaffected by the target-variable migration.
-      - Gate 1 (skill vs baseline) is reported per-desk but NOT currently
-        gated — test-infrastructure debit D16 (see _scenario_passes
-        docstring). The price-based random_walk baseline is incompatible
-        with log-return desk emissions; log-return baseline + Print
-        reconfiguration is a C12-scoped refactor.
+    Per-scenario capability claim (v1.16 rebased, W9-restored):
+      - Gate 1 (skill vs baseline) aggregate ≥ 2/3 — per-desk baseline
+        matches the desk's emitted target (price-level for
+        WTI_FRONT_MONTH_CLOSE, zero-return for WTI_FRONT_1W_LOG_RETURN).
+        D-16 closed.
+      - Gate 2 (sign preservation) aggregate ≥ 2/3. Works in log-return
+        space (scores vs outcomes, both log-returns); unaffected by the
+        target-variable migration.
 
     Across scenarios:
       - Strict invariants hold on 10/10 seeds.

@@ -106,9 +106,14 @@ layer, and Gate 3 runtime harness end-to-end.
 - `docs/phase2_mvp_completion.md` (historical manifest + v1.16 current status section)
 - v1.16 state: `tests/test_surface_positioning_feedback_gates.py` **pending C12 follow-on wave** (see manifest §"Deferred to a post-C12 follow-on wave"). Until then Gate 2 on the composite ridge is measured via the logic-gate multi-scenario sweep; dedicated pinned regression values are re-recorded when the composite desk has its own gate file.
 
-### D-16. Logic-gate Gate 1 baseline-unit mismatch (v1.16 test-infrastructure)
+### D-16. Logic-gate Gate 1 baseline-unit mismatch (v1.16 test-infrastructure) — CLOSED 2026-04-22
 
-**Opened 2026-04-22** at C7 ship; recorded in `docs/pm/raid_log.md` as decision D-16.
+**Opened 2026-04-22** at C7 ship; **closed 2026-04-22** at W9 ship; recorded in `docs/pm/raid_log.md` as decision D-16.
+
+**Closure evidence.** `eval.data.zero_return_baseline` added as the random-walk analog for log-return targets. `tests/test_logic_gate_multi_scenario.py::_run_gates_for_desk` now picks the baseline per desk (`random_walk_price_baseline` for WTI_FRONT_MONTH_CLOSE, `zero_return_baseline` for WTI_FRONT_1W_LOG_RETURN). `_fit_and_drive` generates per-desk Prints keyed off the desk's emitted target (price value or log-return value). Gate 1 aggregate ≥ 2/3 restored in `_scenario_passes`. Post-closure: 6/10 seeds pass the full per-scenario threshold; per-seed Gate 1 counts 2-3/3. Confirms the original ship-time diagnosis that D-16 was a test-infrastructure debit, not a model-quality finding.
+
+**Retained for audit trail:**
+
 
 The v1.16 merged oil desks (`supply_disruption_news`, `oil_demand_nowcast`)
 emit `WTI_FRONT_1W_LOG_RETURN`. The current `eval.data.random_walk_price_baseline`
