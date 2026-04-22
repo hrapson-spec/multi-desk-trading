@@ -143,6 +143,22 @@ the 6 committed legacy desk directories.
 - `tests/test_logic_gate_multi_scenario.py::_scenario_passes` docstring
 - `docs/pm/raid_log.md::D-16`
 
+### D-17. earnings_calendar Gate 1/2 weak — pending earnings-event channel
+
+**Opened 2026-04-22** at W10 ship. The `earnings_calendar` desk ships as a structurally-complete skeleton that satisfies DeskProtocol, Gate 3 hot-swap, and raw-sum composition with `surface_positioning_feedback`. Its ridge classical head reads only vol-level proxies because the sim has no earnings-event channel (per-ticker scheduled release dates, cluster size, sector weight). Gate 1/2 skill is expected weak until the full earnings-event mechanism lands.
+
+**Scope.** Follow-on wave per commission §5 at `docs/pm/earnings_calendar_engineering_commission.md`. Requires:
+- earnings-event channel in `sim_equity_vrp/` (scheduled release dates, clusters, sector weights)
+- structured event-schema model (class + state conditioning)
+- calibrated impact distribution
+
+**Mitigation.** Phase 2 done-criterion ("2 equity desks pass Gate 3; ≥ 1/2 pass Gates 1+2 aggregate") is still met because `surface_positioning_feedback` is the load-bearing equity desk for Gate 1/2 under v1.16; `earnings_calendar` carries the architectural two-desk + same-target invariant. D-17 is in-budget per the §12.2 capability-claim policy.
+
+**Pinned by.**
+- `tests/test_earnings_calendar_skeleton.py` (Gate 3 + compositional invariants pass)
+- `desks/earnings_calendar/spec.md` (documents the skeleton scope)
+- `docs/pm/earnings_calendar_engineering_commission.md` (§5 follow-on scope)
+
 ## Closed debits (historical)
 
 ### D2. Weight promotion v0.2 Shapley-monotone — CLOSED (2026-04-18)

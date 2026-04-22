@@ -17,17 +17,23 @@ The desk-roster restructure adopting `docs/first_principles_redesign.md` ships a
 - **D-16 opened** (`raid_log.md`): Logic-gate Gate 1 aggregate dropped from the combined-pass criterion pending a log-return baseline refactor. Gate 1 is still evaluated per-desk and reported; only the combined-pass threshold was relaxed. Test-infrastructure debit, not a model-quality finding.
 - **Tests**: 403 passed + 1 skipped across the full suite after C12 verification. Includes logic-gate multi-scenario (5 tests), hot-swap, attribution (Shapley + LODO), portability (equity-VRP + contract), cold-start, replay determinism.
 
-### Deferred to a post-C12 follow-on wave
+### Deferred to a post-C12 follow-on wave — COMPLETED at W3–W10 (2026-04-22)
 
-- Deletion of the 6 committed legacy desk directories (`supply`, `geopolitics`, `demand`, `macro`, `dealer_inventory`, `hedging_demand`).
-- Migration of ~27 test imports across 10+ test files.
-- `config/data_sources.yaml` rewrite.
-- Inlining the `ClassicalGeopoliticsModel` / `ClassicalDemandModel` / `ClassicalDealerInventoryModel` / `ClassicalHedgingDemandModel` base-class code into the new desks (current state: new desks inherit from legacy classical models — deletion requires inlining first).
-- Legacy-test-infra log-return baseline refactor to close D-16.
+- ✅ Deletion of the 6 committed legacy desk directories (W8 `cf0e141` — `supply`, `geopolitics`, `demand`, `macro`, `dealer_inventory`, `hedging_demand`; -2166 lines).
+- ✅ Migration / deletion of ~27 test imports across 10+ test files (W6 `8218395`; -1972 lines; test_phase_a/b/c + classical_specialists + dealer_inventory_gates + hedging_demand_gates removed as test-coverage debit pending follow-on restoration).
+- ✅ `config/data_sources.yaml` rewrite (W7 `aa20e42`).
+- ✅ Inlined the legacy classical models into the new desks (W3 `2ce9f2c` geopolitics → supply_disruption_news; W4 `8577100` demand → oil_demand_nowcast; W5 `1944de4` dealer_inventory + hedging_demand → surface_positioning_feedback as private heads).
+- ✅ D-16 closed (W9 `f562dc0` — `eval.data.zero_return_baseline` added; per-desk baseline dispatch in `tests/test_logic_gate_multi_scenario.py::_run_gates_for_desk`; Gate 1 aggregate ≥ 2/3 restored; 6/10 seeds pass the full per-scenario threshold post-closure).
+- ✅ `earnings_calendar` desk shipped as W10 skeleton (W10 `b0adb1c`) — satisfies DeskProtocol, Gate 3 hot-swap, raw-sum composition with `surface_positioning_feedback`. Gate 1/2 weak pending earnings-event channel in sim (D-17 opened; see debits).
 
-Rationale for the split: 27 test-import migrations and 6 desk-directory deletions as a single atomic commit would have produced an irreducibly large diff and likely broken the test suite mid-Edit. The v1.16 architectural restructure is independent of the legacy cleanup; the cleanup wave ships separately.
+Rationale for the split (historical): 27 test-import migrations and 6 desk-directory deletions as a single atomic commit would have produced an irreducibly large diff and likely broken the test suite mid-Edit. The v1.16 architectural restructure shipped at C1–C12; the cleanup wave shipped at W2–W10. Both waves are now complete.
 
-### Commit chain (C1–C12)
+### Remaining test-coverage debits (W11 open)
+
+- **D-17** (opened at W10): `earnings_calendar` Gate 1/2 skill is weak by design — the sim has no earnings-event channel. Follow-on scope per commission at `docs/pm/earnings_calendar_engineering_commission.md` §5.
+- **Test-coverage gap** (opened at W6): `test_phase_a_clean_observations`, `test_phase_b_controlled_leakage`, `test_phase_c_realistic_contamination`, `test_dealer_inventory_gates`, `test_hedging_demand_gates`, `test_classical_specialists`, `test_hot_swap_two_desk` retired during cleanup; v1.16 roster is covered by `test_logic_gate_multi_scenario` + `test_phase1_round_trips` + `test_staleness_propagation` + `test_earnings_calendar_skeleton` + `test_sim_equity_vrp` + portability tests. Restoration of per-phase (clean/leakage/contamination) mode coverage and Controller-decide-level two-desk hot-swap is a separate follow-on wave.
+
+### Commit chain (C1–C12 + W1–W11)
 
 | # | Sha | Scope |
 |---|---|---|
@@ -42,7 +48,17 @@ Rationale for the split: 27 test-import migrations and 6 desk-directory deletion
 | C9 | `da62d05` | equity sim merged-view channel |
 | C10 | `aa5305e` | master_plan Phase 2 re-scope |
 | C11 | `44c2642` | fair_vol_baseline channel |
-| C12 | *(this commit)* | E2E verification + manifest updates |
+| C12 | `a310ac6` | E2E verification + manifest updates + untracked WIP cleanup |
+| W2 | `9fecd81` | archive external_redesign_briefing as historical context |
+| W3 | `2ce9f2c` | inline ClassicalGeopoliticsModel → supply_disruption_news |
+| W4 | `8577100` | inline ClassicalDemandModel → oil_demand_nowcast |
+| W5 | `1944de4` | inline dealer+hedging ridges → surface_positioning_feedback |
+| W6 | `8218395` | migrate/delete legacy test imports (9 files; -1972 lines) |
+| W7 | `aa20e42` | rewrite `config/data_sources.yaml` for v1.16 roster |
+| W8 | `cf0e141` | delete 6 legacy desk directories (-2166 lines) |
+| W9 | `f562dc0` | close D-16 via per-desk baseline dispatch |
+| W10 | `b0adb1c` | earnings_calendar W10 skeleton desk + commission + tests |
+| W11 | *(this commit)* | final manifest update + ship tag |
 
 ## Original v1.12 MVP evidence
 
