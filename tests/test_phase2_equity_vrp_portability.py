@@ -138,28 +138,28 @@ def test_contracts_package_neutral_except_target_variables():
     )
 
 
-def test_hedging_demand_routed_on_feed_failure():
-    """v1.13 routing regression: when the scheduler emits a
-    data_ingestion_failure for either of hedging_demand's feeds
-    (`cboe_open_interest`, `option_volume`), the outbound payload's
-    `affected_desks` must include `"hedging_demand"`. Proves the
-    config/data_sources.yaml registration wires correctly through the
-    scheduler → handler flow — otherwise the desk's staleness hooks
-    are decorative."""
+def test_surface_positioning_feedback_routed_on_feed_failure():
+    """v1.16 routing regression (was v1.13 hedging_demand): when the
+    scheduler emits a data_ingestion_failure for surface_positioning_feedback's
+    feeds (`cboe_open_interest`, `option_volume`, `vix_eod`), the outbound
+    payload's `affected_desks` must include `"surface_positioning_feedback"`.
+    Proves the config/data_sources.yaml registration wires correctly
+    through the scheduler → handler flow — otherwise the desk's
+    staleness hooks are decorative."""
     from datetime import UTC, datetime
 
     from scheduler import Scheduler
 
     sched = Scheduler.from_config()
     ts = datetime(2026, 4, 18, 14, 0, 0, tzinfo=UTC)
-    for feed in ("cboe_open_interest", "option_volume"):
+    for feed in ("cboe_open_interest", "option_volume", "vix_eod"):
         event = sched.emit_ingestion_failure(feed, ts, ts)
         affected = event.payload["affected_desks"]
         assert isinstance(affected, list)
-        assert "hedging_demand" in affected, (
+        assert "surface_positioning_feedback" in affected, (
             f"feed={feed!r}: scheduler payload affected_desks does not route to "
-            f"hedging_demand; got {affected}. Did config/data_sources.yaml "
-            f"get the consumed_by entry?"
+            f"surface_positioning_feedback; got {affected}. Did "
+            f"config/data_sources.yaml get the consumed_by entry?"
         )
 
 
