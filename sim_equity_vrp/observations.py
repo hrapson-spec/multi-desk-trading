@@ -54,13 +54,22 @@ class EquityDeskObservation:
 
 @dataclass(frozen=True)
 class EquityObservationConfig:
-    """Per-desk measurement noise std (clean mode)."""
+    """Per-desk measurement noise std (clean mode) + v1.16 fair_vol_baseline knobs."""
 
     dealer_flow_noise_std: float = 0.05
     vega_exposure_noise_std: float = 0.5
     # v1.13 — hedging_demand desk channels.
     hedging_demand_noise_std: float = 0.05
     put_skew_proxy_noise_std: float = 0.1
+    # v1.16 (C11) — decision-time forward-vol baseline used by
+    # surface_positioning_feedback to compute next_session_rv_surprise
+    # as an INTERNAL auxiliary label (never emitted to Controller).
+    #   fair_vol_baseline[t] = vol_level[t-lag-lookback : t-lag].mean()
+    # This guarantees a strict function of vol_level[<t] — decision-time safe.
+    # For t < lag + lookback the baseline falls back to the OU mean
+    # (vol_mean_baseline) from EquityVolMarketConfig.
+    fair_vol_baseline_lookback: int = 20
+    fair_vol_baseline_lag: int = 1
 
 
 @dataclass(frozen=True)
@@ -71,11 +80,20 @@ class EquityObservationChannels:
     surfaces vol_level — the classical model predicts next-period vol
     from dealer_flow + vega_exposure, so vol is the "price" series
     baselines compare against.
+
+    v1.16 (C11) — `fair_vol_baseline` is a decision-time-safe forward-vol
+    reference (trailing-k-day mean of vol_level with explicit lag).
+    Used by `surface_positioning_feedback` to compute the internal
+    auxiliary label `next_session_rv_surprise` = realised - fair_vol_baseline.
+    NEVER emitted to the Controller — internal training signal only.
     """
 
     latent_path: EquityVolPath
     mode: EquityMode
     market_price: np.ndarray  # shape (n_days,) — vol_level proxy for baselines
+    fair_vol_baseline: np.ndarray = field(
+        default_factory=lambda: np.zeros(0, dtype=np.float64)
+    )
     by_desk: dict[str, EquityDeskObservation] = field(default_factory=dict)
 
     @classmethod
@@ -138,9 +156,22 @@ class EquityObservationChannels:
         }
         # market_price := observed vol level (the thing we're predicting).
         # No noise on the realised price: Prints are ground-truth.
+        market_price = latent.vol_level.copy()
+        # v1.16 (C11) fair_vol_baseline: trailing-k-day mean of vol_level
+        # with explicit `fair_vol_baseline_lag`-day lag. Decision-time safe
+        # by construction — fair_vol_baseline[t] is a strict function of
+        # vol_level[< t] (lag >= 1). Warm-up indices (t < lag + lookback)
+        # default to the OU baseline mean from EquityVolMarketConfig.
+        lookback = cfg.fair_vol_baseline_lookback
+        lag = cfg.fair_vol_baseline_lag
+        fair_vol_baseline = np.full(n, latent.vol_level[0], dtype=np.float64)
+        warmup = lag + lookback
+        for t in range(warmup, n):
+            fair_vol_baseline[t] = float(market_price[t - lag - lookback : t - lag].mean())
         return cls(
             latent_path=latent,
             mode=mode,
-            market_price=latent.vol_level.copy(),
+            market_price=market_price,
+            fair_vol_baseline=fair_vol_baseline,
             by_desk=by_desk,
         )

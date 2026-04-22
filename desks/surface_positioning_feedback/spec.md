@@ -36,13 +36,19 @@ Does NOT own:
   `point_estimate`'s sign). Replaces the legacy `dealer_inventory`
   heuristic `flow_last + 0.25 * vega_normalized`.
 
-## Internal auxiliary label (planned, C11)
+## Internal auxiliary label
 
 - `next_session_rv_surprise` = realised_next_session_rv − fair_vol_baseline[t]
-  - Depends on a decision-time-safe `fair_vol_baseline` channel added to
-    `EquityObservationChannels` at C11 (trailing k-day mean of vol_level
-    with explicit k-day lag).
+  - `fair_vol_baseline` channel is available on `EquityObservationChannels`
+    as of C11 (added 2026-04-22). Default: trailing-20-day mean of
+    `vol_level` with 1-day lag so `fair_vol_baseline[t]` is a strict
+    function of `vol_level[< t]`. Warm-up indices default to the OU
+    baseline mean. Decision-time safety proven in
+    `tests/test_sim_equity_vrp.py::test_fair_vol_baseline_is_strict_function_of_past_vol_level`.
 - Not emitted to Controller — internal training signal only.
+- The Phase 2 composite-ridge classical does NOT yet consume this
+  channel; the full event-hurdle / monotone-GAM rebuild (§7.3 escalation
+  under debit D7) will use it as the supervised training y-target.
 
 ## Primary feeds (via `config/data_sources.yaml`)
 
