@@ -12,9 +12,17 @@ desk sees its own latent channel plus iid Gaussian noise.
 
 Desk-to-channel map (equity-VRP):
 
-  | Desk              | Primary signals                          |
-  |-------------------|------------------------------------------|
-  | dealer_inventory  | dealer_flow, vega_exposure               |
+  | Desk                          | Primary signals                              |
+  |-------------------------------|----------------------------------------------|
+  | dealer_inventory (legacy)     | dealer_flow, vega_exposure                   |
+  | hedging_demand (legacy)       | hedging_demand_level, put_skew_proxy         |
+  | surface_positioning_feedback  | all four components (v1.16 merged view)      |
+
+v1.16 (C9): `by_desk["surface_positioning_feedback"]` is added alongside the
+legacy `dealer_inventory` and `hedging_demand` keys. Component arrays are
+shared views of the same underlying numpy buffers — no duplication in
+memory, and the legacy keys continue to expose their original subset until
+C12 removes them together with the legacy desk directories.
 """
 
 from __future__ import annotations
@@ -28,7 +36,11 @@ from .latent_state import EquityVolPath
 
 EquityMode = Literal["clean"]
 
-DESK_NAMES: tuple[str, ...] = ("dealer_inventory", "hedging_demand")
+DESK_NAMES: tuple[str, ...] = (
+    "dealer_inventory",
+    "hedging_demand",
+    "surface_positioning_feedback",
+)
 
 
 @dataclass(frozen=True)
@@ -92,20 +104,36 @@ class EquityObservationChannels:
         hd_rng = np.random.default_rng((seed + 3) & 0xFFFFFFFF)
         hd_obs = latent.hedging_demand + hd_rng.standard_normal(n) * cfg.hedging_demand_noise_std
         skew_obs = latent.put_skew_proxy + hd_rng.standard_normal(n) * cfg.put_skew_proxy_noise_std
+        stale_mask_zero = np.zeros(n, dtype=bool)
         by_desk = {
             "dealer_inventory": EquityDeskObservation(
                 components={
                     "dealer_flow": flow_obs,
                     "vega_exposure": vega_obs,
                 },
-                stale_mask=np.zeros(n, dtype=bool),
+                stale_mask=stale_mask_zero,
             ),
             "hedging_demand": EquityDeskObservation(
                 components={
                     "hedging_demand_level": hd_obs,
                     "put_skew_proxy": skew_obs,
                 },
-                stale_mask=np.zeros(n, dtype=bool),
+                stale_mask=stale_mask_zero,
+            ),
+            # v1.16 C9: merged-view desk. Exposes all four components under
+            # one key so `SurfacePositioningFeedbackDesk` does not need to
+            # read two different keys. Arrays are shared views (not copies)
+            # of the same numpy buffers used by the legacy keys — zero
+            # duplication, and D12 golden fixtures hold because the legacy
+            # keys' component arrays are byte-identical to before.
+            "surface_positioning_feedback": EquityDeskObservation(
+                components={
+                    "dealer_flow": flow_obs,
+                    "vega_exposure": vega_obs,
+                    "hedging_demand_level": hd_obs,
+                    "put_skew_proxy": skew_obs,
+                },
+                stale_mask=stale_mask_zero,
             ),
         }
         # market_price := observed vol level (the thing we're predicting).
