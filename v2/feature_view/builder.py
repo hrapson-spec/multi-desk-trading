@@ -63,6 +63,7 @@ def build_feature_view(
     missingness: dict[str, bool] = {}
     stale_flags: dict[str, str] = {}
     manifest_ids: dict[str, str | None] = {}
+    forward_fill_used: dict[str, bool] = {}
 
     # Hash inputs: the set of (feature_name, source, series, transform,
     # transform_params, vintage_checksum, eligible, quality_multiplier)
@@ -82,6 +83,7 @@ def build_feature_view(
             missingness[spec.name] = True
             stale_flags[spec.name] = "missing"
             manifest_ids[spec.name] = None
+            forward_fill_used[spec.name] = False
             hash_payload.append(
                 {
                     "feature": spec.name,
@@ -98,6 +100,10 @@ def build_feature_view(
         missingness[spec.name] = False
         stale_flags[spec.name] = read.data_quality.freshness_state
         manifest_ids[spec.name] = read.manifest.manifest_id
+        # Forward-fill tracking: v2.0 builds do not forward-fill (identity
+        # transform only). A future transform that fills gaps must set
+        # forward_fill_used=True via the TransformFn contract.
+        forward_fill_used[spec.name] = False
 
         elig = SourceEligibility(
             source=spec.source,
@@ -145,5 +151,6 @@ def build_feature_view(
         missingness=missingness,
         stale_flags=stale_flags,
         manifest_ids=manifest_ids,
+        forward_fill_used=forward_fill_used,
         view_hash=view_hash,
     )

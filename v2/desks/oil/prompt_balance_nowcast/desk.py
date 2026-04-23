@@ -1,19 +1,12 @@
 """prompt_balance_nowcast — v2.0 first desk.
 
-This module ships a **scaffold** implementation: a shell that reads the
-correct PIT-safe feature view and emits a valid ForecastV2 under the
-real v2 contract, but whose quantile output is a fixed-variance
-zero-mean Gaussian (the Layer-3 baseline B0, EWMA-vol reference).
+Scaffold implementation: a shell that reads the correct PIT-safe feature
+view and emits a valid ForecastV2 under contract v2.0.1. The quantile
+output is a fixed-variance zero-mean Gaussian (the Layer-3 baseline B0,
+EWMA-vol reference). Replacement by the genuine dynamic-factor nowcast
+is the S1→S2 promotion payload.
 
-Replacing this with the genuine dynamic-factor nowcast is the payload
-of the S1→S2 promotion. The prereg for that promotion specifies:
-    model_class: dynamic_factor_nowcast_v1
-    hyperparameters: {...}
-    training_window: (decided by Layer-1 PIT audit)
-
-This file deliberately avoids inventing the real model. Having a
-scaffold that satisfies the contract end-to-end lets B5 build the
-evaluation stack without the model having to land first.
+See spec.md for the Layer-2 mechanism memo and pre-registered claims.
 """
 
 from __future__ import annotations
@@ -24,21 +17,20 @@ from math import prod
 from scipy.stats import norm
 
 from v2.contracts.decision_unit import FIXED_QUANTILE_LEVELS, DecisionUnit
-from v2.contracts.forecast_v2 import ForecastV2
+from v2.contracts.forecast_v2 import CalibrationMetadata, ForecastV2
 from v2.desks.base import ConcreteDeskV2
 from v2.feature_view.spec import FeatureSpec
 from v2.feature_view.view import FeatureView
 
-# Default 5-day log-return dispersion used by the scaffold. This is a
-# placeholder that matches the order of magnitude of realised WTI
-# 5-day log-return vol; the real desk will replace this with a
-# predictive sigma derived from the nowcast state.
 _SCAFFOLD_SIGMA_5D = 0.04
-
-# Default 1-business-day TTL on each forecast (decision contract §4).
-# The scaffold and the real desk share this default; tightening the
-# TTL is a prereg choice.
 _SCAFFOLD_TTL = timedelta(days=1)
+_SCAFFOLD_CALIBRATION = CalibrationMetadata(
+    method="rolling_pinball_ratio",
+    baseline_id="B0_ewma_gaussian",
+    rolling_window_n=0,
+    sample_count=0,
+    segment=None,
+)
 
 
 class PromptBalanceNowcastDesk(ConcreteDeskV2):
@@ -47,11 +39,6 @@ class PromptBalanceNowcastDesk(ConcreteDeskV2):
     distribution_version = "0.0.1-scaffold"
 
     def feature_specs(self) -> list[FeatureSpec]:
-        """Declared input set for this desk.
-
-        When the real model lands, this list is frozen by the prereg
-        and any addition/removal is a typed contract deviation.
-        """
         return [
             FeatureSpec(name="eia_crude_stocks", source="eia_wpsr", series="crude_stocks"),
             FeatureSpec(name="eia_gasoline_stocks", source="eia_wpsr", series="gasoline_stocks"),
@@ -75,22 +62,41 @@ class PromptBalanceNowcastDesk(ConcreteDeskV2):
         *,
         prereg_hash: str,
         code_commit: str,
+        contract_hash: str = "",
+        release_calendar_version: str = "",
+        emitted_ts: datetime | None = None,
     ) -> ForecastV2:
-        decision_ts = _ensure_utc(view.as_of_ts)
+        decision_ts = view.as_of_ts
+        emitted = emitted_ts if emitted_ts is not None else datetime.now(UTC)
+        if emitted < decision_ts:
+            # The emitter should never time-travel: if a caller passed a
+            # stale ts, clamp forward. The validator still enforces
+            # emitted_ts >= decision_ts on the final object.
+            emitted = decision_ts
         valid_until = decision_ts + _SCAFFOLD_TTL
 
-        # Abstention: any required feature missing → abstain with a
-        # reason. The synthesiser will cascade this via the any-hard-gate
-        # family rule.
         if view.any_required_missing:
-            missing = [name for name, m in view.missingness.items() if m]
-            return self._abstain(
-                view,
-                decision_ts=decision_ts,
-                valid_until=valid_until,
+            missing = sorted(name for name, m in view.missingness.items() if m)
+            return ForecastV2.build_from_view(
+                view=view,
+                family_id=self.family_id,
+                desk_id=self.desk_id,
+                distribution_version=self.distribution_version,
+                target_variable="WTI_FRONT_1W_LOG_RETURN",
+                target_horizon="5d",
+                decision_unit=DecisionUnit.LOG_RETURN,
+                quantile_vector=tuple(0.0 for _ in FIXED_QUANTILE_LEVELS),
+                calibration_score=0.0,
+                calibration_metadata=_SCAFFOLD_CALIBRATION,
+                data_quality_score=0.0,
+                valid_until_ts=valid_until,
+                emitted_ts=emitted,
+                abstain=True,
+                abstain_reason=f"required feature(s) missing: {missing}",
                 prereg_hash=prereg_hash,
                 code_commit=code_commit,
-                reason=f"required feature(s) missing: {sorted(missing)}",
+                contract_hash=contract_hash,
+                release_calendar_version=release_calendar_version,
             )
 
         # Scaffold: zero-mean Gaussian with a fixed σ — the B0 baseline.
@@ -98,76 +104,30 @@ class PromptBalanceNowcastDesk(ConcreteDeskV2):
         sigma = _SCAFFOLD_SIGMA_5D
         quantile_vector = tuple(mu + sigma * norm.ppf(q) for q in FIXED_QUANTILE_LEVELS)
 
-        # Quality propagation: product of per-source quality multipliers
-        # clipped to [0, 1]. Used as ForecastV2.data_quality_score.
         if view.source_eligibility:
             dq = prod(e.quality_multiplier for e in view.source_eligibility.values())
         else:
             dq = 1.0
         dq = max(0.0, min(1.0, dq))
 
-        # The scaffold cannot calibrate — calibration_score = 0.5 is a
-        # neutral prior until the real desk tracks rolling pinball loss
-        # vs baselines.
-        calibration_score = 0.5
-
-        return ForecastV2(
+        return ForecastV2.build_from_view(
+            view=view,
             family_id=self.family_id,
             desk_id=self.desk_id,
-            decision_ts=decision_ts,
             distribution_version=self.distribution_version,
             target_variable="WTI_FRONT_1W_LOG_RETURN",
             target_horizon="5d",
             decision_unit=DecisionUnit.LOG_RETURN,
-            quantile_levels=FIXED_QUANTILE_LEVELS,
             quantile_vector=quantile_vector,
-            calibration_score=calibration_score,
+            calibration_score=0.5,
+            calibration_metadata=_SCAFFOLD_CALIBRATION,
             data_quality_score=dq,
             valid_until_ts=valid_until,
+            emitted_ts=emitted,
             abstain=False,
             abstain_reason=None,
-            feature_view_hash=view.view_hash,
             prereg_hash=prereg_hash,
             code_commit=code_commit,
-            source_eligibility=view.source_eligibility,
+            contract_hash=contract_hash,
+            release_calendar_version=release_calendar_version,
         )
-
-    def _abstain(
-        self,
-        view: FeatureView,
-        *,
-        decision_ts: datetime,
-        valid_until: datetime,
-        prereg_hash: str,
-        code_commit: str,
-        reason: str,
-    ) -> ForecastV2:
-        return ForecastV2(
-            family_id=self.family_id,
-            desk_id=self.desk_id,
-            decision_ts=decision_ts,
-            distribution_version=self.distribution_version,
-            target_variable="WTI_FRONT_1W_LOG_RETURN",
-            target_horizon="5d",
-            decision_unit=DecisionUnit.LOG_RETURN,
-            quantile_levels=FIXED_QUANTILE_LEVELS,
-            # An abstained forecast still carries a valid-length vector;
-            # monotonicity is not required. Use zeros so downstream code
-            # never panics on NaN arithmetic if it forgets to check abstain.
-            quantile_vector=tuple(0.0 for _ in FIXED_QUANTILE_LEVELS),
-            calibration_score=0.0,
-            data_quality_score=0.0,
-            valid_until_ts=valid_until,
-            abstain=True,
-            abstain_reason=reason,
-            feature_view_hash=view.view_hash,
-            prereg_hash=prereg_hash,
-            code_commit=code_commit,
-            source_eligibility=view.source_eligibility,
-        )
-
-
-def _ensure_utc(ts: datetime) -> datetime:
-    if ts.tzinfo is None:
-        return ts.replace(tzinfo=UTC)
-    return ts.astimezone(UTC)

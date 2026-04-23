@@ -21,6 +21,7 @@ class FeatureView:
     missingness: dict[str, bool]  # feature_name -> True if missing
     stale_flags: dict[str, str]  # feature_name -> freshness_state
     manifest_ids: dict[str, str | None]  # feature_name -> vintage manifest_id used
+    forward_fill_used: dict[str, bool]  # feature_name -> True iff transform forward-filled
     view_hash: str
 
     @property
