@@ -1,0 +1,28 @@
+source: wti_front_month
+description: "WTI front-month futures settlement (CL1) via public feeds (Yahoo/stooq)"
+publisher: "CME Group (via free public redistributor)"
+calendar_version: "1.0.0"
+release_cadence:
+  type: daily
+  weekday: none
+  earliest_release_time_et: "14:30"
+  holiday_rule: skip
+observation_semantics:
+  reporting_period: "settlement_close_of_preceding_trading_day"
+  lag_to_publication_days: 0
+revision_policy: "corrections issued the following morning as a revision_ts"
+pit_eligibility_rule: |
+  Settlement is the official CME close price. Free public feeds publish
+  EOD. Intraday quotes are NOT admissible under this calendar; the
+  ingester rejects any payload whose bar is marked 'live' or 'intraday'.
+source_confidence:
+  baseline: 0.85
+  degradation_conditions:
+    - "exchange holiday (no settlement)"
+    - "redistributor rate-limit or outage"
+    - "roll-state ambiguity near expiry (see roll_rule_v1)"
+data_quality_multipliers:
+  fresh: 1.0
+  stale_1week: 0.70
+  stale_2week: 0.30
+  stale_over_2week: 0.0

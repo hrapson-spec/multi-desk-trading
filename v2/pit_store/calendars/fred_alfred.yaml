@@ -1,0 +1,32 @@
+source: fred_alfred
+description: "ALFRED (Archival FRED) vintage-aware macro series"
+publisher: "Federal Reserve Bank of St. Louis"
+calendar_version: "1.0.0"
+release_cadence:
+  type: irregular
+  weekday: none
+  earliest_release_time_et: "00:00"
+  holiday_rule: none
+observation_semantics:
+  reporting_period: "series-specific"
+  lag_to_publication_days: 0
+revision_policy: |
+  ALFRED records real-time periods and vintage dates for every series.
+  Ingesters must fetch via vintage-aware endpoints (realtime_start /
+  realtime_end query parameters) and record both observation_date and
+  vintage_date on each row.
+pit_eligibility_rule: |
+  Each row is tagged with its vintage_date; the PIT eligibility rule
+  applies over vintage_date rather than release_ts. The ingester's
+  release_ts is the FRED publication timestamp for the specific
+  vintage, which ALFRED exposes as the realtime_start date.
+source_confidence:
+  baseline: 0.98
+  degradation_conditions:
+    - "series discontinuation"
+    - "major benchmark revision"
+data_quality_multipliers:
+  fresh: 1.0
+  stale_1week: 0.95
+  stale_2week: 0.90
+  stale_over_2week: 0.60
