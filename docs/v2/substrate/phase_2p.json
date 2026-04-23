@@ -1,0 +1,545 @@
+{
+  "plan": {
+    "name": "Phase 2P — Performance on Synthetic",
+    "project": "multi-desk-trading",
+    "project_path": "/Users/henrirapson/projects/multi-desk-trading/",
+    "branch": "wip-attribution-and-desk-models",
+    "spec_revision": "v1.17",
+    "spec_breakage": "non-breaking",
+    "spec_breakage_rationale": "No changes to §4 (contracts), §6 (research loop), §7 (per-desk gates), §8 (controller), §9 (attribution), §10 (regime classifier), §11 (LLM routing). Schema appends to §3.2 persistence are additive only. Adds §12.3 Phase 2P done-criterion section.",
+    "status": "planned_not_shipped",
+    "planned_date": "2026-04-23",
+    "supersedes": "Plan-mode diagnostic artefact from the preceding session turn (parked at the same plan-file path).",
+    "commit_count": 19,
+    "estimated_calendar_weeks": "4-6",
+    "realistic_ship_window": "2026-06-15 to 2026-07-31"
+  },
+
+  "context": {
+    "prior_session_state": {
+      "session_commit_count_since_ab82210": 27,
+      "waves_shipped": ["C1-C12", "W2-W11", "X1", "Y1-Y3", "Z"],
+      "v1_16_restructure": "complete; desk roster oil 5→3 + equity 2 shipped (surface_positioning_feedback merged, earnings_calendar added)",
+      "debits_closed_with_evidence": ["D-16", "D-17"],
+      "debits_recorded": ["D-15 (restructure)", "D-18 (term_structure drop)"],
+      "phase_2_equity_vrp_done_criterion": "EXCEEDED"
+    },
+    "diagnostic_findings": {
+      "pnl_sharpe_drawdown_backtest_grep_hits": 1,
+      "pnl_sharpe_drawdown_backtest_grep_interpretation": "Only hit is a docstring on contracts/v1.py:49 Horizon dataclass. Zero P&L accumulation code.",
+      "real_data_http_ingestion_grep_hits": 3,
+      "real_data_http_ingestion_grep_interpretation": "All 3 hits in tests/test_phase2_portability_contract.py are vocabulary-containment strings (negative-assertion). Zero ingestion code.",
+      "main_duckdb_present": false,
+      "main_duckdb_note": "Only soak_phase1.duckdb (4.5 MB, 2026-04-17 dry-run). Tests use tmp_path or :memory:.",
+      "execution_order_routing_grep_hits": 0,
+      "execution_order_routing_grep_interpretation": "Controller.decide emits a position_size float; no downstream consumer exists."
+    },
+    "gap_framing": "The architectural claim (§1.1 zero shared-infra diff under redeployment) is proven. The performance claim has never been measured. Phase 2P fills the measurement gap, then materially improves P&L and Sharpe on the synthetic markets already in the repo. Stays inside spec §1.2 synthetic-only by explicit user direction; real-data wiring parked as Phase 3."
+  },
+
+  "user_selected_scope": {
+    "data_scope": "synthetic_only",
+    "data_scope_rationale": "Stay within spec §1.2. Preserves architectural vs real-data-validation claim separation. Real-data wiring remains Phase 3.",
+    "acceptance_tier": "moderate",
+    "acceptance_tier_rationale": "Matches D1 debit scope (model-quality weak but architecture works). Falsifiable upfront; pre-registered thresholds prevent post-hoc Goodhart."
+  },
+
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "name": "Sharpe (annualised, aggregate)",
+      "threshold": ">= 0.5 on >= 6 of 10 seeds",
+      "measurement_layer": "multi-seed backtest runner (B2)",
+      "load_bearing": true
+    },
+    {
+      "id": "AC2",
+      "name": "Max drawdown",
+      "threshold": "< 20% on >= 6 of 10 seeds",
+      "measurement_layer": "metrics.max_drawdown (A3) on per-seed cumulative P&L",
+      "load_bearing": true
+    },
+    {
+      "id": "AC3",
+      "name": "Positive P&L",
+      "threshold": ">= 7 of 10 seeds end with cumulative P&L > 0",
+      "measurement_layer": "pnl.accumulate_pnl (A1) final value per seed",
+      "load_bearing": true
+    },
+    {
+      "id": "AC4",
+      "name": "Regime-conditional Sharpe differentiation",
+      "threshold": ">= 2 desks show std/mean|Sharpe| >= 0.1 across regimes",
+      "measurement_layer": "per-regime slicing in reports.render_backtest_report (C1)",
+      "load_bearing": true
+    },
+    {
+      "id": "AC5",
+      "name": "Strict invariants",
+      "threshold": "Gate 3 passes 3/3 under backtest; full test suite green; D12 golden fixtures byte-identical",
+      "measurement_layer": "existing test suite + new G1 integration test",
+      "load_bearing": true
+    }
+  ],
+
+  "parts": [
+    {
+      "id": "A",
+      "name": "Measurement infrastructure",
+      "description": "Prerequisite. P&L accumulator + canonical risk/reward metrics + transaction-cost model + schema append.",
+      "commits": [
+        {
+          "id": "A1",
+          "title": "feat(eval): P&L accumulator + PnlEvent",
+          "files": ["eval/pnl.py", "tests/test_pnl.py"],
+          "scope": "PnlEvent dataclass + accumulate_pnl(decisions, prints) pure function. Handles stale desks (weight 0 → zero P&L). Attribution-ready via LODO decomposition.",
+          "reuses": ["attribution.compute_lodo_signal_space"]
+        },
+        {
+          "id": "A2",
+          "title": "feat(eval): linear transaction-cost model",
+          "files": ["eval/transaction_costs.py", "tests/test_transaction_costs.py"],
+          "scope": "Linear commission + slippage. TransactionCostConfig defaults commission_bps=0.5, slippage_bps=1.5. Emits per-decision cost; subtracts from gross P&L.",
+          "reuses": []
+        },
+        {
+          "id": "A3",
+          "title": "feat(eval): Sharpe / Sortino / drawdown / turnover metrics",
+          "files": ["eval/metrics.py", "tests/test_metrics.py"],
+          "scope": "Pure functions over P&L series. sharpe_ratio(returns, periods_per_year=252), sortino_ratio, max_drawdown (depth/start/trough/recovery tuple), calmar_ratio, turnover. Stateless.",
+          "reuses": []
+        },
+        {
+          "id": "A4",
+          "title": "feat(persistence): pnl_events + backtest_runs schema append",
+          "files": ["persistence/schema.sql", "persistence/pnl.py"],
+          "scope": "Append two tables (non-breaking per §4.6): pnl_events (per-decision P&L) + backtest_runs (per-scenario aggregate + code_commit + config snapshot). Matches §3.2 precedent (feed_incidents / feed_latency_state added v1.7).",
+          "reuses": []
+        }
+      ]
+    },
+    {
+      "id": "B",
+      "name": "Backtest harness",
+      "description": "Walk-forward OOS runner + multi-seed sweep + CLI.",
+      "commits": [
+        {
+          "id": "B1",
+          "title": "feat(eval): walk-forward OOS backtest runner",
+          "files": ["eval/backtest.py", "tests/test_backtest.py"],
+          "scope": "run_backtest(latent_path, desks, controller_params, regime_classifier, costs) → BacktestResult. Fits on [0, TRAIN_END), drives Controller over [TRAIN_END, n_days-HORIZON). Pure function modulo tmp DuckDB; replay-deterministic.",
+          "reuses": ["sim.latent_state.LatentMarket.generate", "sim.observations.ObservationChannels.build", "sim_equity_vrp.EquityVolMarket", "persistence.db.connect", "eval.hot_swap.build_hot_swap_callables"]
+        },
+        {
+          "id": "B2",
+          "title": "feat(eval): multi-seed backtest runner + parallelism",
+          "files": ["eval/backtest_runner.py"],
+          "scope": "run_multi_seed(seeds, config) → list[BacktestResult]. Parallelism via multiprocessing.Pool bounded to n_cpus/2 (8GB Mac safety). Aggregates to AggregateReport(n_seeds, sharpe_per_seed, dd_per_seed, pass_mask).",
+          "reuses": []
+        },
+        {
+          "id": "B3",
+          "title": "feat(scripts): run_backtest CLI + artefact emission",
+          "files": ["scripts/run_backtest.py", "tests/test_scripts_backtest.py"],
+          "scope": "CLI entry point. Args: --mode {clean,leakage,realistic} --n-seeds 10 --horizon 3 --commission-bps 0.5 --slippage-bps 1.5 --output-dir artifacts/. Emits JSON artefact + markdown summary.",
+          "reuses": []
+        }
+      ]
+    },
+    {
+      "id": "C",
+      "name": "Reporting + regression pins",
+      "description": "Human-readable backtest reports + golden-fixture pins on per-seed Sharpe/DD.",
+      "commits": [
+        {
+          "id": "C1",
+          "title": "feat(eval): backtest reports (JSON + markdown)",
+          "files": ["eval/reports.py", "tests/test_reports.py"],
+          "scope": "render_backtest_report(aggregate) → dict + markdown renderer. Per-seed table, aggregate percentiles, regime-conditional Sharpe, per-desk P&L contribution. Optional --with-plots lazily imports matplotlib.",
+          "reuses": []
+        },
+        {
+          "id": "C2",
+          "title": "test(eval): regression pins on per-seed Sharpe + DD",
+          "files": ["eval/regression_pins.py", "tests/test_regression_pins.py"],
+          "scope": "Golden-fixture-style pins on per-seed Sharpe + max-drawdown values. Re-record only with explicit justification. Pattern mirrors _GOLDEN_*_SHA256 in test_sim_equity_vrp.py.",
+          "reuses": []
+        }
+      ]
+    },
+    {
+      "id": "D",
+      "name": "P&L attribution",
+      "description": "Extend existing LODO + Shapley attribution from signal/grading space into P&L space.",
+      "commits": [
+        {
+          "id": "D1",
+          "title": "feat(attribution): LODO in P&L space",
+          "files": ["attribution/pnl_lodo.py", "tests/test_pnl_attribution.py"],
+          "scope": "Compare full-roster P&L vs each single-desk-removed P&L; attribute delta to removed desk. Uses eval/hot_swap.py pattern for clean swap.",
+          "reuses": ["eval.hot_swap.build_hot_swap_callables", "attribution.compute_lodo_signal_space"]
+        },
+        {
+          "id": "D2",
+          "title": "feat(attribution): exact Shapley on coalition P&L",
+          "files": ["attribution/pnl_shapley.py", "tests/test_pnl_shapley.py"],
+          "scope": "Exact Shapley over desk coalitions (n ≤ 6 per §9.2 cap; current roster has 5 = 3 oil + 2 equity, under cap). Uses itertools.combinations like existing attribution/shapley.py.",
+          "reuses": ["attribution.compute_shapley_grading_space"]
+        }
+      ]
+    },
+    {
+      "id": "E",
+      "name": "Improvement workstreams",
+      "description": "The meat of the phase — measurement is foundation, these commits actually move the numbers.",
+      "commits": [
+        {
+          "id": "E1",
+          "title": "feat(research_loop): controller parameter tuning",
+          "files": ["research_loop/controller_tuning.py", "tests/test_controller_tuning.py"],
+          "scope": "Grid search over ControllerParams.k_regime ∈ {0.25, 0.5, 1.0, 2.0} × pos_limit_regime ∈ {0.5, 1.0, 2.0} per regime. Selects combo maximising held-out Sharpe subject to max_drawdown < 0.25. Walk-forward OOS validation. Emits promote_controller_params event. Does NOT modify controller/decision.py (frozen).",
+          "reuses": ["research_loop.propose_validate_and_promote"]
+        },
+        {
+          "id": "E2",
+          "title": "feat(desks/supply_disruption_news): BVAR escalation",
+          "files": ["desks/supply_disruption_news/bvar.py", "tests/test_supply_disruption_news_bvar.py"],
+          "scope": "§7.3 escalation 1: Bayesian VAR head (small PyMC model, ≤8 parameters). Selector pattern preserves ridge default; BVAR is opt-in A/B. Acceptance: BVAR Sharpe ≥ ridge Sharpe + 0.1 on ≥6/10 seeds; else log as capability-claim learning and stay on ridge.",
+          "reuses": []
+        },
+        {
+          "id": "E3",
+          "title": "feat(desks/oil_demand_nowcast): Kalman escalation",
+          "files": ["desks/oil_demand_nowcast/kalman.py", "tests/test_oil_demand_nowcast_kalman.py"],
+          "scope": "§7.3 escalation 2: state-space / Kalman filter head. Handles mixed-frequency updates natively. Same A/B pattern + acceptance threshold as E2.",
+          "reuses": []
+        },
+        {
+          "id": "E4",
+          "title": "feat(research_loop): P&L margin promotion path",
+          "files": ["research_loop/pnl_promotion.py", "tests/test_pnl_promotion.py"],
+          "scope": "Extend propose_validate_and_promote with margin_pnl option alongside existing MSE margin. Candidate promoted only if held-out P&L ≥ current + margin_pnl. Used by E1 grid search.",
+          "reuses": ["research_loop.propose_validate_and_promote"]
+        }
+      ]
+    },
+    {
+      "id": "F",
+      "name": "Risk / governance",
+      "description": "Functioning-trading-system touchpoints at stub level for synthetic, with real interfaces.",
+      "commits": [
+        {
+          "id": "F1",
+          "title": "feat(research_loop): kill-switch + daily-loss-limit handler",
+          "files": ["research_loop/kill_switch.py", "tests/test_kill_switch.py", "config/kill_switch_config.yaml"],
+          "scope": "Daily-loss-limit event handler: if current_day_pnl < -daily_loss_threshold, emit kill_switch_tripped event that retires all desks. Resets at next session unless multi-day drawdown threshold also breached. Config-pinned thresholds.",
+          "reuses": []
+        },
+        {
+          "id": "F2",
+          "title": "test(eval): realistic-contamination P&L stress test",
+          "files": ["tests/test_phase_2p_stress.py"],
+          "scope": "Fit desks on clean, drive through realistic mode held-out, verify P&L ≥ 70% of clean-mode P&L (graceful-degradation claim). Mirrors test_phase_b_attribution_degrades_monotonically_vs_clean on P&L instead of Shapley variance.",
+          "reuses": []
+        }
+      ]
+    },
+    {
+      "id": "G",
+      "name": "Integration + acceptance",
+      "description": "End-to-end integration test + phase completion manifest + spec v1.17 §12.3 addition.",
+      "commits": [
+        {
+          "id": "G1",
+          "title": "test(phase_2p): end-to-end 10-seed integration + regression pins",
+          "files": ["tests/test_phase_2p_integration.py"],
+          "scope": "End-to-end: 10-seed backtest across oil (3-desk) + equity-VRP (2-desk); controller tuned per E1; best-of ridge/BVAR/Kalman per desk. Pinned Sharpe + DD + turnover per seed. This test replaces test_logic_gate_multi_scenario as Phase 2P done-criterion artefact.",
+          "reuses": ["eval.backtest.run_backtest", "eval.regression_pins"]
+        },
+        {
+          "id": "G2",
+          "title": "docs(spec,pm): v1.17 §12.3 Phase 2P done-criterion + completion manifest",
+          "files": ["docs/phase_2p_completion.md", "docs/architecture_spec_v1.md", "docs/pm/master_plan.md", "docs/capability_debits.md"],
+          "scope": "Phase 2P completion manifest: achieved metrics vs AC1-AC5, per-desk P&L contributions, regime-conditional differentiation, transaction-cost assumptions, any new capability debits. Spec v1.17 change-log entry + §12.3 Phase 2P done-criterion section. master_plan.md timeline row.",
+          "reuses": []
+        }
+      ]
+    }
+  ],
+
+  "files_to_create": {
+    "eval_code": [
+      "eval/pnl.py",
+      "eval/transaction_costs.py",
+      "eval/metrics.py",
+      "eval/backtest.py",
+      "eval/backtest_runner.py",
+      "eval/reports.py",
+      "eval/regression_pins.py"
+    ],
+    "persistence_code": [
+      "persistence/pnl.py"
+    ],
+    "attribution_code": [
+      "attribution/pnl_lodo.py",
+      "attribution/pnl_shapley.py"
+    ],
+    "research_loop_code": [
+      "research_loop/controller_tuning.py",
+      "research_loop/pnl_promotion.py",
+      "research_loop/kill_switch.py"
+    ],
+    "scripts": [
+      "scripts/run_backtest.py"
+    ],
+    "desks_code_opt_in": [
+      "desks/supply_disruption_news/bvar.py",
+      "desks/oil_demand_nowcast/kalman.py"
+    ],
+    "config": [
+      "config/kill_switch_config.yaml"
+    ],
+    "tests": [
+      "tests/test_pnl.py",
+      "tests/test_transaction_costs.py",
+      "tests/test_metrics.py",
+      "tests/test_backtest.py",
+      "tests/test_scripts_backtest.py",
+      "tests/test_reports.py",
+      "tests/test_regression_pins.py",
+      "tests/test_pnl_attribution.py",
+      "tests/test_pnl_shapley.py",
+      "tests/test_controller_tuning.py",
+      "tests/test_supply_disruption_news_bvar.py",
+      "tests/test_oil_demand_nowcast_kalman.py",
+      "tests/test_pnl_promotion.py",
+      "tests/test_kill_switch.py",
+      "tests/test_phase_2p_stress.py",
+      "tests/test_phase_2p_integration.py"
+    ],
+    "docs": [
+      "docs/pm/phase_2p_engineering_commission.md",
+      "docs/phase_2p_completion.md"
+    ]
+  },
+
+  "files_to_modify_additive_only": [
+    {
+      "path": "persistence/schema.sql",
+      "change": "Append pnl_events + backtest_runs tables. Non-breaking per §4.6."
+    },
+    {
+      "path": "docs/architecture_spec_v1.md",
+      "change": "v1.17 change-log entry + new §12.3 Phase 2P done-criterion section."
+    },
+    {
+      "path": "docs/pm/master_plan.md",
+      "change": "Phase 2P timeline rows."
+    },
+    {
+      "path": "docs/pm/raid_log.md",
+      "change": "D-decision scoping Phase 2P."
+    },
+    {
+      "path": "docs/capability_debits.md",
+      "change": "At G2, open new debits for any unmet AC."
+    }
+  ],
+
+  "files_frozen_do_not_modify": [
+    "contracts/v1.py",
+    "contracts/target_variables.py",
+    "controller/decision.py",
+    "controller/sizing.py",
+    "controller/cold_start.py",
+    "bus/",
+    "eval/hot_swap.py",
+    "provenance/",
+    "scheduler/"
+  ],
+
+  "frozen_exception_note": "Controller parameter TUNING via ControllerParams rows (E1) is permitted under §8.2a — k_regime and pos_limit_regime are runtime-promoted via the controller_params table; no code change to Controller.decide.",
+
+  "existing_functions_to_reuse": [
+    {
+      "path": "eval/hot_swap.py::build_hot_swap_callables",
+      "usage": "Gate 3 runtime harness; reused in B1 to verify each backtest step's decisions compose with hot-swap."
+    },
+    {
+      "path": "attribution/lodo.py::compute_lodo_signal_space",
+      "usage": "Template for D1's P&L-space LODO port."
+    },
+    {
+      "path": "attribution/shapley.py::compute_shapley_grading_space",
+      "usage": "Template for D2's coalition-Shapley port to P&L."
+    },
+    {
+      "path": "research_loop/promotion.py::propose_validate_and_promote",
+      "usage": "Extended in E4 with P&L-margin path (parallel signature; does not replace MSE margin)."
+    },
+    {
+      "path": "sim/latent_state.py::LatentMarket.generate",
+      "usage": "Oil backtest harness consumes unmodified."
+    },
+    {
+      "path": "sim/observations.py::ObservationChannels.build",
+      "usage": "Oil backtest harness; all three modes (clean/leakage/realistic) available."
+    },
+    {
+      "path": "sim_equity_vrp/latent_state.py::EquityVolMarket.generate",
+      "usage": "Equity backtest harness consumes unmodified."
+    },
+    {
+      "path": "sim_equity_vrp/observations.py::EquityObservationChannels.build",
+      "usage": "Equity backtest harness."
+    },
+    {
+      "path": "persistence/db.py::connect, init_db, get_latest_signal_weights, get_latest_controller_params",
+      "usage": "Reused for per-backtest tmp DuckDB setup."
+    },
+    {
+      "path": "contracts/v1.py::Decision, Forecast, Print, RegimeLabel",
+      "usage": "Unchanged; P&L accumulator consumes them."
+    }
+  ],
+
+  "risks": [
+    {
+      "id": "R1",
+      "name": "First-backtest calibration shock",
+      "description": "No prior baseline; first 10-seed run may show dismally low or embarrassingly high Sharpe.",
+      "mitigation": "Run A1-A4 + B1-B3 + G1 first with default config, publish raw numbers, THEN calibrate acceptance thresholds before E1-E4.",
+      "severity": "medium",
+      "probability": "high"
+    },
+    {
+      "id": "R2",
+      "name": "§7.3 escalation compute constraint (E2, E3)",
+      "description": "BVAR + Kalman on PyMC may exceed 8GB peak memory on the target Mac.",
+      "mitigation": "Bounded parameter count (≤8 params), fallback to ridge with explicit debit logging. E2+E3 opt-in; default stays on ridge.",
+      "severity": "medium",
+      "probability": "medium"
+    },
+    {
+      "id": "R3",
+      "name": "Goodhart's Law",
+      "description": "Optimising for pinned Sharpe ≥ 0.5 and DD < 20% risks over-tuning to pinned seeds.",
+      "mitigation": "Walk-forward OOS mandatory in E1-E4; G1 pins multi-seed regression values; E1 uses separate validation split.",
+      "severity": "high",
+      "probability": "high"
+    },
+    {
+      "id": "R4",
+      "name": "Transaction-cost arbitrariness",
+      "description": "Commission 0.5bps + slippage 1.5bps is a judgement call for synthetic research.",
+      "mitigation": "Config-pinned at A2; sensitivity sweep in G1 at costs × 0.5 and × 2.0.",
+      "severity": "low",
+      "probability": "high"
+    },
+    {
+      "id": "R5",
+      "name": "Phase 2 deadline pressure",
+      "description": "Phase 2 hard deadline 2026-07-17 per raid_log R-01. Phase 2P adds ~4-6 weeks.",
+      "mitigation": "Realistic ship 2026-06-15 earliest; slippage to 2026-07-31 a real risk. If deadline fixed, drop E2+E3 (§7.3 escalations) and ship E1+E4+F+G only (~14 commits instead of 19).",
+      "severity": "high",
+      "probability": "medium"
+    },
+    {
+      "id": "R6",
+      "name": "Schema append (A4) regressions",
+      "description": "Adding pnl_events + backtest_runs is non-breaking per §4.6, but test_replay_determinism.py may have row-count assertions.",
+      "mitigation": "Review during A4 PR; keep schema append strictly additive.",
+      "severity": "low",
+      "probability": "low"
+    },
+    {
+      "id": "R7",
+      "name": "Kill-switch semantics (F1)",
+      "description": "Retiring all desks on a single day's loss is aggressive; naive implementation could flap in high-vol regimes.",
+      "mitigation": "Require two consecutive breach days OR cumulative-drawdown trigger; pin thresholds in kill_switch_config.yaml before E1 grid search begins.",
+      "severity": "medium",
+      "probability": "medium"
+    }
+  ],
+
+  "verification": {
+    "done_criterion_location": "spec §12.3 (added in G2 commit)",
+    "must_all_hold_on_final_g1_regression_run": true,
+    "gates": [
+      {
+        "ac_id": "AC1",
+        "check": "Sharpe ≥ 0.5 aggregate on ≥ 6 of 10 seeds"
+      },
+      {
+        "ac_id": "AC2",
+        "check": "Max drawdown < 20% on ≥ 6 of 10 seeds"
+      },
+      {
+        "ac_id": "AC3",
+        "check": "Positive P&L on ≥ 7 of 10 seeds"
+      },
+      {
+        "ac_id": "AC4",
+        "check": "Regime-conditional Sharpe differentiation — ≥ 2 desks with std/mean|Sharpe| ≥ 0.1"
+      },
+      {
+        "ac_id": "AC5",
+        "check": "Gate 3 3/3 under backtest runner; full test suite green; D12 golden fixtures byte-identical"
+      }
+    ],
+    "blocker_on_failure": "Any AC miss without an in-budget capability debit blocks Phase 2P closure."
+  },
+
+  "commit_sequence_summary": [
+    {"order": 1, "id": "A1", "title": "feat(eval): P&L accumulator + PnlEvent"},
+    {"order": 2, "id": "A2", "title": "feat(eval): linear transaction-cost model"},
+    {"order": 3, "id": "A3", "title": "feat(eval): Sharpe / Sortino / drawdown / turnover metrics"},
+    {"order": 4, "id": "A4", "title": "feat(persistence): pnl_events + backtest_runs schema append"},
+    {"order": 5, "id": "B1", "title": "feat(eval): walk-forward OOS backtest runner"},
+    {"order": 6, "id": "B2", "title": "feat(eval): multi-seed backtest runner + parallelism"},
+    {"order": 7, "id": "B3", "title": "feat(scripts): run_backtest CLI + artefact emission"},
+    {"order": 8, "id": "C1", "title": "feat(eval): backtest reports (JSON + markdown)"},
+    {"order": 9, "id": "C2", "title": "test(eval): regression pins on per-seed Sharpe + DD"},
+    {"order": 10, "id": "D1", "title": "feat(attribution): LODO in P&L space"},
+    {"order": 11, "id": "D2", "title": "feat(attribution): exact Shapley on coalition P&L"},
+    {"order": 12, "id": "E1", "title": "feat(research_loop): controller parameter tuning"},
+    {"order": 13, "id": "E2", "title": "feat(desks/supply_disruption_news): BVAR escalation"},
+    {"order": 14, "id": "E3", "title": "feat(desks/oil_demand_nowcast): Kalman escalation"},
+    {"order": 15, "id": "E4", "title": "feat(research_loop): P&L margin promotion path"},
+    {"order": 16, "id": "F1", "title": "feat(research_loop): kill-switch + daily-loss-limit handler"},
+    {"order": 17, "id": "F2", "title": "test(eval): realistic-contamination P&L stress test"},
+    {"order": 18, "id": "G1", "title": "test(phase_2p): end-to-end 10-seed integration + regression pins"},
+    {"order": 19, "id": "G2", "title": "docs(spec,pm): v1.17 §12.3 Phase 2P done-criterion + completion manifest"}
+  ],
+
+  "natural_checkpoints": [
+    {
+      "id": "CP1",
+      "after_commit": "B3",
+      "commit_count": 7,
+      "description": "Measurement infrastructure + backtest harness ship; first unweighted Sharpe readings visible. If wildly off expectations, recalibrate before E1-E4."
+    },
+    {
+      "id": "CP2",
+      "after_commit": "E4",
+      "commit_count": 14,
+      "description": "Controller tuning + P&L-margin promotion ship; best improvement without §7.3 escalation is measured. Decision point on whether to commit compute to E2+E3 escalations."
+    },
+    {
+      "id": "CP3",
+      "after_commit": "G2",
+      "commit_count": 19,
+      "description": "Phase complete; acceptance manifest signed."
+    }
+  ],
+
+  "evaluation_prompt_suggestions": [
+    "Does this plan have a realistic path to demonstrating Sharpe ≥ 0.5 on synthetic markets, given the D1 model-quality debit that currently shows merged desks fail Gate 1 in Phase A clean mode on seed 16?",
+    "Is the §7.3 escalation sequence (ridge → BVAR → Kalman) well-justified by the economic motivations in docs/first_principles_redesign.md, or is it speculative?",
+    "Is the transaction-cost model (0.5bps commission + 1.5bps slippage) defensible for a synthetic research environment, or should it be higher to reflect likely real-world costs at Phase 3?",
+    "Do the pre-registered AC1-AC5 thresholds create meaningful hurdles, or are they too easily satisfied (e.g. Sharpe ≥ 0.5 is a low bar)?",
+    "Is the kill-switch design (F1) adequate for a synthetic environment, or should it be more sophisticated (CVaR-based, multi-horizon)?",
+    "Does the plan appropriately separate architectural invariants (AC5) from performance claims (AC1-AC4)?",
+    "Are there missing workstreams — e.g., alternative data augmentation, ensemble methods, or regime-transition detection improvements?"
+  ]
+}

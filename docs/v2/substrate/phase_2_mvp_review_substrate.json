@@ -1,0 +1,1103 @@
+{
+  "review_context": {
+    "system_name": "multi-desk-trading",
+    "spec_version": "v1.16 (shipped 2026-04-22). v1.17 proposed in the Phase 2P plan but not shipped.",
+    "review_scope": {
+      "in_scope": [
+        "Desk decomposition (v1.16 3-desk oil + 2-desk equity-VRP roster)",
+        "Architectural portability claim (spec §1.1, §8.4)",
+        "Three-hard-gate evaluation framework (skill, sign preservation, hot-swap)",
+        "Capability-debit discipline and ledger (docs/capability_debits.md)",
+        "Replay determinism + provenance pipeline",
+        "Synthetic-market generator design (sim/ oil, sim_equity_vrp/ equity)",
+        "Research-loop weight promotion under margin validation",
+        "Staged observability (clean / leakage / realistic contamination modes)",
+        "Seed-offset RNG convention and its D12 golden-fixture guarantees"
+      ],
+      "out_of_scope": [
+        "P&L / Sharpe / drawdown measurement — no backtest engine; zero code per diagnostic grep",
+        "Real-market data ingestion — no HTTP clients; Phase 3 not scoped",
+        "Execution / order routing — zero code; Controller.decide emits a float with no downstream consumer",
+        "Live capital — explicitly banned per spec §1.2",
+        "Paid data feeds — out of scope per §1.2, §13",
+        "LLM in trading decision path — banned per §13",
+        "Compliance / regulatory audit — provenance layer present but not exercised"
+      ]
+    },
+    "primary_architectural_claim_under_review": "The shared infrastructure — contracts/v1.py, controller/, bus/, persistence/ (excluding append-only schema additions), eval/hot_swap.py, provenance/, scheduler/ — redeploys to an unrelated asset class (equity-VRP via sim_equity_vrp/ + 2 equity desks) with zero git-diff. The architecture is successful if this invariant holds under redeployment.",
+    "secondary_claims_under_review": [
+      "Gate 3 (runtime hot-swap via eval.hot_swap.build_hot_swap_callables) passes 3/3 desks across all test seeds in every phase mode.",
+      "Every Forecast / Print / Grade / Decision / attribution row is replay-byte-identical across runs.",
+      "Capability-debit ledger is bounded and explicit: D1 (model weakness) + D7 (Gate 2 instability) open and in-budget; D-16 CLOSED (log-return baseline); D-17 CLOSED (earnings channel).",
+      "Sim-side D12 golden fixtures preserved byte-identically across six channel additions (v1.13 hedging_demand, C9 merged-view, C11 fair_vol_baseline, X1 earnings).",
+      "Portability verified by zero shared-infra diff between the oil and equity-VRP integration tests (tests/test_phase2_portability_contract.py + test_phase2_equity_vrp_portability.py, 44 passing)."
+    ],
+    "intended_deployment_context": {
+      "environment": "Research prototype. Synthetic markets only. No production deployment exists and none is planned within Phase 2. Phase 3 (live event-scoring) is nominally planned per §12.2 item 5 but is not yet scoped.",
+      "decision_frequency": "One decision per simulated day. Forecast horizon is 3 days for most desks (storage_curve 7d; event-hurdle desks 5-7d). The sim advances in daily steps; there is no intraday structure.",
+      "latency_budget_ms": null,
+      "human_in_the_loop": "Yes. Weight promotions go through propose_validate_and_promote with held-out margin validation; §8.3 requires explicit human rollback on regression. No automated live-run pipeline exists.",
+      "capital_or_risk_context": "None. Spec §1.2 bans live capital explicitly. Controller.decide emits a position_size float; no downstream consumer exists (grep check 4 returned 0 hits for order / broker / execute_trade / fill / slippage).",
+      "asset_classes": [
+        "WTI crude oil (Phase 1 domain instance, price-level target: WTI_FRONT_MONTH_CLOSE; return target: WTI_FRONT_1W_LOG_RETURN)",
+        "VIX-based equity volatility (Phase 2 domain instance, level target: VIX_30D_FORWARD; delta target: VIX_30D_FORWARD_3D_DELTA)"
+      ],
+      "notes": "The phrase 'intended deployment context' is aspirational. The system has never executed a trade, priced a transaction cost, or ingested a real market price. Calling it a 'trading system' conflates two different claims; see final_self_assessment."
+    }
+  },
+
+  "problem_definition": {
+    "business_or_research_goal": "Prove that a multi-desk coordination architecture (contracts, bus, controller, attribution, research loop) is domain-portable — i.e., that swapping the domain from oil to equity volatility requires no change to any shared-infra module. Deliverable is the architecture itself; P&L is diagnostic, not the objective (spec §1.1, §1.3.2).",
+    "decision_problem": "Given per-desk forecasts of a target variable at decision time t, combine them into a single regime-conditional scalar signal (combined_signal = Σ weight × point_estimate over (desk, target) pairs per §8.2) and derive a position size via linear sizing (§8.2a: position = clip(k_regime × combined_signal, ±pos_limit_regime)).",
+    "target_user_or_operator": "Solo researcher / architect. Henri Rapson is the only operator in Phase 1-2; spec §1.2, §14.3 treat bus-factor-1 as an explicit constraint.",
+    "unit_of_decision": "One (regime_id, emission_ts_utc) tuple produces one Decision event with a signed position_size float.",
+    "decision_actions": [
+      "Emit a Decision event to persistence (decisions table) with combined_signal + position_size + contributing_ids provenance.",
+      "Trigger attribution (LODO per decision, Shapley weekly) for audit.",
+      "Feed into the research-loop weight-promotion path under margin validation.",
+      "There is no 'trade placed' action — the action ends at the Decision event."
+    ],
+    "success_metrics": [
+      {
+        "name": "Gate 1 — skill vs pre-registered naive baseline",
+        "definition": "Desk RMSE < baseline RMSE on held-out emission-indexed pairs (eval/gates.py::gate_skill_vs_baseline). Baseline is random_walk_price_baseline for price targets, zero_return_baseline for return targets (post-D-16 closure).",
+        "why_it_matters": "Minimum capability claim. A desk that cannot beat its naive baseline adds no architectural signal.",
+        "threshold_or_target": "Pass on ≥ 2/3 desks aggregate (oil roster) per tests/test_logic_gate_multi_scenario.py; strict ≥ 1 (storage_curve) under single-seed Phase A per tests/test_phase_a_clean_observations.py (reflects D1 debit scope)."
+      },
+      {
+        "name": "Gate 2 — dev-to-test sign preservation",
+        "definition": "Directional sign of desk score is preserved across dev / test split (Spearman ρ_dev and ρ_test both > 0 for expected_sign='positive'; Kronos-RCA style check). eval/gates.py::gate_sign_preservation.",
+        "why_it_matters": "Tests model stability — a desk whose directional claim flips between splits has no learnable signal.",
+        "threshold_or_target": "Pass aggregate ≥ 2/3 desks on the logic-gate multi-scenario run; ≥ 1 (storage_curve) strict per-phase."
+      },
+      {
+        "name": "Gate 3 — runtime hot-swap",
+        "definition": "Replacing a real desk with a generic StubDesk preserves the Controller's Decision flow. eval/hot_swap.py::build_hot_swap_callables runs Controller.decide() with the real desk and a stub variant; asserts Decision validity + expected combined_signal delta + honest contributing_ids membership.",
+        "why_it_matters": "Portability invariant. The architecture's headline claim is interface-contract correctness; Gate 3 is the direct empirical test.",
+        "threshold_or_target": "3/3 strict on every desk, every seed, every observation mode. Any failure is an architecture-level regression, not a capability debit."
+      },
+      {
+        "name": "Capability-debit budget (§12.2 item 6)",
+        "definition": "Open debits must be bounded, explicitly mitigated, and not violate the architectural claim, per docs/capability_debits.md.",
+        "why_it_matters": "Allows phase exit without requiring full model-quality alpha; separates architectural claims from model claims.",
+        "threshold_or_target": "No open debit that invalidates portability or controller correctness. D1 + D7 currently open and in-budget; D-16, D-17 closed with evidence."
+      }
+    ],
+    "non_goals": [
+      "Positive P&L — never measured, no code exists",
+      "Sharpe ≥ N — no Sharpe calculator",
+      "Real-time execution — banned by scope",
+      "Tier-1 accuracy — §1.3.2 capability-before-P&L discipline",
+      "Full HDP-HMM regime classifier — v0.3+, deferred",
+      "CVaR / utility-theoretic sizing — out of scope per §13"
+    ],
+    "hard_constraints": {
+      "shared_infrastructure_frozen": [
+        "contracts/v1.py (Pydantic schemas; append-only field additions only)",
+        "controller/decision.py (raw-sum rule at lines 94-112)",
+        "controller/sizing.py (linear rule per §8.2a)",
+        "controller/cold_start.py (uniform-weight §14.8 seed)",
+        "bus/ (validator + dispatcher)",
+        "persistence/ excluding append-only table additions",
+        "eval/hot_swap.py (v1.14 D9 closure)",
+        "provenance/",
+        "scheduler/"
+      ],
+      "data_constraints": [
+        "Synthetic / research-only per §1.2",
+        "Free public sources only (EIA, OPEC MOMR, JODI, CFTC, GPR, sanctions scrapes) — no paid feeds",
+        "No live capital",
+        "No intraday frequency — daily cadence only"
+      ],
+      "cost_constraints": [
+        "8GB M-series Mac local inference per §1.2",
+        "Tens of dollars/month LLM API budget per §14.4",
+        "Fine-tuning requires borrowed compute (Colab / cloud) per §7.3 ladder"
+      ],
+      "compliance_constraints": [],
+      "other_constraints": [
+        "target_variable registry frozen + append-only (contracts/target_variables.py)",
+        "Bus production-mode rejects Forecasts with code_commit ending -dirty (§4.3)",
+        "Any change to spec §4, §6-§11 requires a v2 bump (§0 change-log rule)"
+      ]
+    }
+  },
+
+  "real_world_validity": {
+    "intended_real_world_mapping": {
+      "what_the_system_is_claiming_to_model": [
+        "A multi-desk trading research architecture capable of composing forecasts across economically-distinct mechanisms (supply/demand/event/positioning) under regime conditioning, and redeploying that composition to a different asset class",
+        "A skill-vs-baseline + sign-preservation + hot-swap evaluation discipline applicable to any forecast-emitting desk",
+        "A replay-deterministic event-sourced persistence pattern suitable for audit",
+        "A capability-debit ledger as a rigorous alternative to hand-wavy readiness claims"
+      ],
+      "what_the_system_is_not_claiming_to_model": [
+        "Real oil or VIX market dynamics (the sim is a deliberately stylised generator, not a market simulator)",
+        "Actual alpha on real feeds (no real feeds wired)",
+        "Transaction-cost-realistic trading (zero cost model)",
+        "Execution microstructure (no order book, no fills, no slippage)",
+        "Regulatory / best-execution obligations",
+        "Client-capacity or prime-broker-capacity constraints"
+      ]
+    },
+    "external_validity_status": {
+      "synthetic_only_components": [
+        "All desks' training data",
+        "All desks' held-out evaluation data",
+        "Oil sim (sim/latent_state.py) 5-factor Schwartz-Smith-ish + Hawkes events + AR(1) desk channels",
+        "Equity sim (sim_equity_vrp/latent_state.py) 4-factor OU vol + flow + hedging_demand + spot_log_price; +earnings at X1",
+        "Regime classifier evidence (both GroundTruth and HMMRegimeClassifier evaluated on synthetic paths)",
+        "All Gate 1 / Gate 2 / Gate 3 evidence"
+      ],
+      "real_data_components": [],
+      "components_with_mixed_evidence": []
+    },
+    "main_reason_external_validity_could_fail": "The synthetic environments are designed to exercise the architecture, not to mirror real market dynamics. Real-world data vintaging (e.g. EIA WPSR revisions), publication-lag correlation with vol, heavy-tailed event clustering, microstructure frictions, and regime-transition path-dependence are all absent or toy in the sim. A desk that passes Gate 1 on the synthetic channel with forward-correlation r=0.45 has no entitlement to pass any gate on noisy, revised, sparse real data. The architectural claim (portability + hot-swap) is orthogonal to this — shared-infra zero-diff is insensitive to whether the underlying desks have real alpha — but the performance claim is completely untested externally."
+  },
+
+  "simulator_or_data_generating_process": {
+    "uses_synthetic_environment": true,
+    "synthetic_environment_name": "Two siblings: sim/ (oil) and sim_equity_vrp/ (equity-VRP). Added at phases-abc-v0.1 and phase2-mvp-v1.12 respectively.",
+    "synthetic_environment_purpose": "To exercise every path through the architecture under controlled conditions — not to produce economically-interpretable forecasts. Phase A is clean observations; Phase B injects leakage; Phase C adds realistic contamination (missingness, stale feeds, regime-dependent chatter).",
+    "generator_design_summary": "Oil: 5-factor latent state (log-price random walk, 4 desk-specific AR(1) drivers correlated with next-step returns), 4 regimes with sticky transitions (regime_config.transition_matrix), 5 observation channels (supply, demand, geopolitics, macro, storage_curve) with per-desk noise / leakage / contamination. Equity-VRP: 4-factor OU vol + dealer_flow AR(1) with flow_vol_corr=0.35 + hedging_demand AR(1) with hd_vol_corr=0.55 + spot log-price RW; regimes quiet/stress/recovery; at X1 an additional earnings-event channel with earnings_vol_corr=0.45 at lead=2.",
+    "state_variables_modelled": [
+      "Oil: market_price (log-price RW driven by regime-conditional drift + per-desk AR(1) shock injections)",
+      "Oil per-desk AR(1) drivers: supply, demand, geopolitics_intensity (from Hawkes event process), macro_xi",
+      "Oil balance_state (derived proxy for prompt tightness; not load-bearing)",
+      "Equity vol_level (OU, mean-reverting to regime-conditional vol_mean_baseline)",
+      "Equity dealer_flow (AR(1), correlated with next-step vol shock)",
+      "Equity hedging_demand (AR(1), correlated with next-step vol shock, stronger correlation than dealer_flow)",
+      "Equity put_skew_proxy = hedging_demand × vol_level (signed; NOT physically realistic)",
+      "Equity earnings_event_indicator + earnings_cluster_size (v1.16 X1; forward-correlated with vol)"
+    ],
+    "observation_channels_modelled": [
+      "Oil clean mode: each desk sees its own latent channel + iid Gaussian noise",
+      "Oil leakage mode: 5×5 diagonal-dominant mixing across desk channels (default 10% off-diagonal)",
+      "Oil realistic mode: leakage + macro chatter during event regimes + per-desk ingest missingness (NaN → staleness=True) + publication lag",
+      "Equity clean mode only — leakage + realistic modes NOT shipped (known gap; tracked as post-v1.16 work)",
+      "Equity fair_vol_baseline channel added C11 as decision-time-safe trailing-k-day vol mean with explicit lag",
+      "Equity earnings_calendar channel added X1 with forward-correlation to vol_shocks_unscaled at lead=2"
+    ],
+    "regimes_modelled": [
+      "Oil: 4 regimes (expansionary, neutral, contractionary, shock) with sticky-transition matrix; per-regime drift + vol scaling",
+      "Equity: regimes (quiet, stress, recovery) with per-regime vol_mean + vol_of_vol scaling factors"
+    ],
+    "decision_time_information_boundary": "Observation channels at index t reflect only latent state at indices < t (with explicit lag convention: latent_shocks_unscaled[t-1] drives vol_level[t]; earnings_score[t] correlates with vol_shocks_unscaled[t+lead] but earnings_event_indicator[t] is observable at t without look-ahead). The fair_vol_baseline channel uses vol_level[t - lag - lookback : t - lag].mean(), strict < t. Verified by tests/test_earnings_calendar.py::test_earnings_channel_correlates_with_future_vol and test_fair_vol_baseline_is_strict_function_of_past_vol_level.",
+    "what_the_simulator_is_expected_to_capture": [
+      "Per-desk signal-to-noise under a known correlation ground truth",
+      "Regime dependence of signal quality",
+      "Clean → leakage → realistic contamination progression — architecture must survive all three",
+      "Staleness propagation through the Forecast.staleness flag into Controller.decide exclusion",
+      "Golden-fixture determinism for D12 audit",
+      "Forward-correlation mechanisms that let desks learn predictive relationships without look-ahead"
+    ],
+    "what_the_simulator_does_not_capture": [
+      "Real market microstructure (order book, quote, best-bid/offer)",
+      "Publication-vintage dynamics (EIA revisions, ALFRED-style backfills) — acknowledged in the spec as Phase 3 work",
+      "Heavy-tailed event clustering — synthetic events are Gaussian-thresholded, real earnings clustering is not",
+      "Transaction costs — zero cost model",
+      "Regime transitions that are path-dependent on traders' actions (feedback loops)",
+      "Cross-asset contagion beyond what the pre-built correlation matrices encode",
+      "Real skew dynamics — put_skew_proxy is signed by construction (can go negative), physical skew is non-negative",
+      "Real earnings cluster structure — simple forward-correlated noise, not ticker-level schedule"
+    ],
+    "known_unrealistic_or_simplifying_assumptions": [
+      "put_skew_proxy = hedging_demand × vol_level (can be negative; real skew ≥ 0). Documented in sim_equity_vrp/latent_state.py lines 17-19.",
+      "Oil events generated via Hawkes intensity (exponential clustering), not real OPEC calendar",
+      "No missing data outside explicitly-injected staleness",
+      "1D price path only — no volume, no OI, no spread",
+      "No transaction cost",
+      "Earnings indicator thresholding is symmetric Gaussian — real earnings quality depends on sector / size / analyst coverage",
+      "Macro is modelled as a single AR(1) xi factor in oil sim (removed as alpha desk in v1.16 but still generated for legacy channel exposure)"
+    ],
+    "simulator_validation_evidence": [
+      {
+        "claim": "dealer_flow AR(1) leads vol by one step (claimed coupling)",
+        "evidence": "tests/test_sim_equity_vrp.py::test_dealer_flow_predicts_vol_change — demonstrates positive correlation between flow[t-1] and vol_change[t]",
+        "strength": "strong (on the synthetic process itself; does not claim real-world dealer behaviour)"
+      },
+      {
+        "claim": "earnings_cluster_size[t] leads vol_level[t+3] under X1 forward-correlation",
+        "evidence": "tests/test_earnings_calendar.py::test_earnings_channel_correlates_with_future_vol — Pearson r = 0.1496 on 1500-day seed=42 path",
+        "strength": "strong on the synthetic process; no external-validity claim"
+      },
+      {
+        "claim": "Seed-offset RNG convention preserves D12 golden fixtures across six channel additions",
+        "evidence": "tests/test_sim_equity_vrp.py::test_dealer_inventory_golden_fixtures_unchanged (6 SHA-256 hashes byte-identical); tests/test_earnings_calendar.py::test_earnings_rng_isolated_from_existing_streams (mutating earnings_vol_corr leaves legacy arrays byte-equal)",
+        "strength": "strong"
+      },
+      {
+        "claim": "Regime differentiation produces Shapley variation across regimes (Phase A)",
+        "evidence": "tests/test_phase_a_clean_observations.py::test_phase_a_regime_conditional_shapley_differs — ≥ 2/3 desks show std/mean|Shapley| ≥ 0.003 across ≥ 3 regimes on seed 16",
+        "strength": "moderate (single seed, synthetic, at the lowered 0.3% threshold)"
+      },
+      {
+        "claim": "Contamination degrades attribution gracefully clean → leakage",
+        "evidence": "tests/test_phase_b_controlled_leakage.py::test_phase_b_attribution_degrades_monotonically_vs_clean — clean cv = 0.74, leakage cv = 0.73 within 20% tolerance",
+        "strength": "weak (single seed; the tolerance band is wide enough that accidental degradation in either direction would pass)"
+      }
+    ],
+    "simulator_notes": "The sim is the central locus of epistemic risk. Every Gate 1 / Gate 2 pass number in this repository is evidence about the sim's internal correlation structure — NOT evidence about real-world skill. A reviewer should treat the sim-validated numbers as necessary-but-not-sufficient for any deployment claim."
+  },
+
+  "data_reality_map": {
+    "global_data_assumptions": [
+      "All data is synthetic and seed-deterministic",
+      "Data arrives on a fixed daily cadence (1 emission per simulated day)",
+      "Observation channels have known-correlation-to-target structure",
+      "No data has been wired through the bus production-mode path",
+      "The release_calendar.yaml + data_sources.yaml register feeds the system WOULD subscribe to if real data were wired; no actual fetchers exist"
+    ],
+    "global_latency_assumptions": [
+      "Sim timestep = simulated 1 day; no intraday latency",
+      "Publication-lag is modelled in realistic mode only (Phase C) as per-desk integer day-count lag",
+      "No modelling of network / API latency"
+    ],
+    "global_point_in_time_safety_assumptions": [
+      "Observation at index t reflects latent state strictly < t (enforced by explicit lead convention in latent_state.py)",
+      "fair_vol_baseline uses strict-lag trailing mean with lag ≥ 1",
+      "Forecasts carry input_snapshot_hash for replay verification",
+      "No ALFRED-style data-vintage model — a key gap for real-data wiring"
+    ],
+    "global_data_quality_risks": [
+      "Real EIA WPSR revisions not modelled; desks that would consume WPSR in Phase 3 have never been stress-tested against revision",
+      "Real OPEC calendar is known in advance; synthetic Hawkes events are Poisson-ish and do not reflect this",
+      "Real earnings clusters follow quarterly cadence; synthetic events are IID-thresholded",
+      "Staleness injection rates are arbitrary (0.01 for storage_curve, 0.05 for other desks in realistic mode); not calibrated against real feed reliability"
+    ],
+    "desk_data_maps": [
+      {
+        "desk_name": "storage_curve",
+        "mechanism_claimed": "Prompt-tightness → next-period WTI_FRONT_MONTH_CLOSE price delta. Ridge on lagged-return features of market_price directly.",
+        "target_variable": "WTI_FRONT_MONTH_CLOSE",
+        "target_horizon": "7 days (forecast horizon; grading uses it)",
+        "observable_inputs": [
+          {
+            "name": "market_price (oil sim)",
+            "source": "sim.latent_state.LatentMarket.market_price",
+            "available_at_decision_time": true,
+            "latency_or_publication_lag": "zero (sim)",
+            "expected_signal_role": "Primary — the desk sees the target's own lagged values directly",
+            "major_limitations": [
+              "In real world, prompt WTI front-month is observable in real time, so this assumption holds",
+              "But the synthetic market_price has injected AR(1) predictability that real markets do not reliably exhibit"
+            ]
+          }
+        ],
+        "unobserved_latent_variables_relied_on": [],
+        "mechanism_to_observable_mapping_quality": {
+          "rating": "strong (in sim)",
+          "reason": "The desk observes its target's own history and exploits injected AR(1) predictability in the sim. Real-world analogue (auto-correlation in front-month oil returns) is known weak and short-lived."
+        },
+        "identifiability_risks": [
+          "The desk has no economic mechanism beyond lagged-return prediction; any real-world deployment would need to either (a) accept this as a calendar-spread mean-reversion claim or (b) add real storage/inventory features (currently absent)"
+        ],
+        "proxy_of_proxy_risks": [
+          "market_price is not a proxy — it IS the target. No chained proxy risk on the input side."
+        ],
+        "desk_notes": "This is the load-bearing desk by design — it passes Gate 1/2/3 strictly on every seed and acts as the baseline 'architecture works' signal. Real-world skill is unclear and not separately measured."
+      },
+      {
+        "desk_name": "supply_disruption_news",
+        "mechanism_claimed": "Event-driven supply-disruption news → transient price repricing. Inherits ClassicalGeopoliticsModel features: rolling event count, rolling intensity mean, current intensity, days-since-last-event over a 20-day lookback. Ridge on 4 features → WTI_FRONT_1W_LOG_RETURN.",
+        "target_variable": "WTI_FRONT_1W_LOG_RETURN",
+        "target_horizon": "7 days (v1.16 rebase; was 3 pre-v1.16)",
+        "observable_inputs": [
+          {
+            "name": "event_indicator (from sim geopolitics channel)",
+            "source": "sim.observations.ObservationChannels.by_desk['geopolitics'].components['event_indicator']",
+            "available_at_decision_time": true,
+            "latency_or_publication_lag": "zero (sim); realistic mode adds injected lag",
+            "expected_signal_role": "Hawkes-process thresholded event arrivals",
+            "major_limitations": [
+              "Real OPEC / sanctions / outage events are not Poisson-distributed and have known clustering that Hawkes mimics only coarsely",
+              "No event-class structure (v1.16 commission §5.1 calls for 5 event classes; ridge head doesn't distinguish)",
+              "No signed-barrel-impact — ridge gets a single scalar intensity, not a directional supply impulse"
+            ]
+          },
+          {
+            "name": "event_intensity (from sim geopolitics channel)",
+            "source": "sim.observations.ObservationChannels.by_desk['geopolitics'].components['event_intensity']",
+            "available_at_decision_time": true,
+            "latency_or_publication_lag": "zero (sim)",
+            "expected_signal_role": "Continuous Hawkes intensity proxy for event pressure",
+            "major_limitations": [
+              "Entirely synthetic; no real event-intensity analogue would be trivially available"
+            ]
+          }
+        ],
+        "unobserved_latent_variables_relied_on": [
+          "The sim's Hawkes intensity process — the ridge head exploits a known AR-like structure in event_intensity that real event intensities may not have"
+        ],
+        "mechanism_to_observable_mapping_quality": {
+          "rating": "weak — the event-hurdle mechanism is claimed but not implemented",
+          "reason": "The classical head is a ridge on 4 summary features, not the activation-probability × conditional-effect hurdle model the commission calls for. The desk's conceptual mechanism (event-hurdle) and its implementation (continuous ridge) are mismatched. D1 debit."
+        },
+        "identifiability_risks": [
+          "Under leakage mode, the event_indicator channel is mixed with supply/demand/macro channels — the desk can no longer cleanly attribute what it's learning",
+          "Under realistic mode with staleness, most forecasts are stub (348/497 stale in phase_c seed 16)",
+          "In real markets, 'event_intensity' has no published counterpart; would need LLM extraction from news text (commission-deferred to Phase 3)"
+        ],
+        "proxy_of_proxy_risks": [
+          "Real 'geopolitical event intensity' would be multi-step-proxied: news text → LLM extraction → structured events → intensity aggregation. Each step has error. Sim channels bypass all of this."
+        ],
+        "desk_notes": "Commission at docs/pm/supply_disruption_news_engineering_commission.md scopes an event-hurdle rebuild (§7.3 escalation). Current ridge implementation is acceptable only as an architectural scaffold."
+      },
+      {
+        "desk_name": "oil_demand_nowcast",
+        "mechanism_claimed": "Mixed-frequency demand nowcast → next-week WTI return. Inherits ClassicalDemandModel: 8-feature ridge (signal_last, signal_prev, window.mean/std, trend, delta, level_last, level_gap) over 10-day lookback → WTI_FRONT_1W_LOG_RETURN.",
+        "target_variable": "WTI_FRONT_1W_LOG_RETURN",
+        "target_horizon": "7 days (v1.16 rebase)",
+        "observable_inputs": [
+          {
+            "name": "demand channel (from sim)",
+            "source": "sim.observations.ObservationChannels.by_desk['demand'].components['demand']",
+            "available_at_decision_time": true,
+            "latency_or_publication_lag": "zero (sim); publication-lag in realistic mode",
+            "expected_signal_role": "AR(1) demand pressure proxy correlated with next-step returns",
+            "major_limitations": [
+              "Demand is modelled as a scalar AR(1), not a mixed-frequency panel (PMIs, refinery runs, cracks, freight)",
+              "Real mixed-frequency nowcast would require vintage-aware handling; the sim has none",
+              "No macro conditioning — macro desk removed in v1.16; macro state now flows through regime_classifier only"
+            ]
+          },
+          {
+            "name": "demand_level channel (from sim)",
+            "source": "sim.observations.ObservationChannels.by_desk['demand'].components['demand_level']",
+            "available_at_decision_time": true,
+            "latency_or_publication_lag": "zero (sim)",
+            "expected_signal_role": "Level component for the level_gap feature",
+            "major_limitations": [
+              "Entirely synthetic; real demand-level proxies (industrial production, refinery throughput) have publication lags of 2-6 weeks"
+            ]
+          }
+        ],
+        "unobserved_latent_variables_relied_on": [
+          "The sim's AR(1) correlation between demand[t-1] and market_price[t] — directly exploited by the trend / delta features"
+        ],
+        "mechanism_to_observable_mapping_quality": {
+          "rating": "weak — 'mixed-frequency nowcast' is the claim but the implementation is single-frequency ridge",
+          "reason": "The commissioned design (mixed-frequency state-space or dynamic-factor nowcast) is a §7.3 escalation. Current ridge is a scaffold."
+        },
+        "identifiability_risks": [
+          "Under leakage / realistic modes, demand channel is mixed with supply / geopolitics / macro; desk cannot separate what's learnable",
+          "Under Phase A seed 16, this desk fails Gate 1 — rel_improvement −0.4% vs zero_return baseline"
+        ],
+        "proxy_of_proxy_risks": [
+          "Real demand nowcast would need (a) industrial production, (b) refinery throughput, (c) PMI, (d) alt-data mobility. Each is a proxy for physical demand; the combined signal is proxy-of-proxy risk. Sim bypasses this."
+        ],
+        "desk_notes": "Commission at docs/pm/oil_demand_nowcast_engineering_commission.md scopes a state-space rebuild. Currently shipped ridge is acceptable as architectural scaffold, not as a real nowcast."
+      },
+      {
+        "desk_name": "surface_positioning_feedback",
+        "mechanism_claimed": "Composite: (i) dealer positioning (flow + vega) drives next-period vol move; (ii) hedging pressure (put-buying) drives skew and vol. Merged W5 into two private inlined heads (_DealerInventoryRidge 10 features on dealer_flow + vega_exposure; _HedgingDemandRidge 10 features on hedging_demand + put_skew_proxy over 15-day lookback). Composite averages the two fitted vol-deltas and emits VIX_30D_FORWARD_3D_DELTA.",
+        "target_variable": "VIX_30D_FORWARD_3D_DELTA",
+        "target_horizon": "3 days",
+        "observable_inputs": [
+          {
+            "name": "dealer_flow + vega_exposure",
+            "source": "sim_equity_vrp.observations.by_desk['surface_positioning_feedback'].components — merged-view shared with by_desk['dealer_inventory']",
+            "available_at_decision_time": true,
+            "latency_or_publication_lag": "zero (sim); real cboe_open_interest published overnight with T+1 lag per OCC",
+            "expected_signal_role": "Dealer positioning proxy — flow is correlated with next-step vol shock via flow_vol_corr=0.35",
+            "major_limitations": [
+              "Not true dealer inventory (dealer books are private); real-world proxies are GEX/VEX/CEX estimates from public OI",
+              "OI is published T+1 from OCC but classical features use same-day (small leakage risk)"
+            ]
+          },
+          {
+            "name": "hedging_demand_level + put_skew_proxy",
+            "source": "sim_equity_vrp.observations.by_desk['surface_positioning_feedback'].components — merged-view shared with by_desk['hedging_demand']",
+            "available_at_decision_time": true,
+            "latency_or_publication_lag": "zero (sim)",
+            "expected_signal_role": "Institutional put-buying pressure → next-period vol; hd_vol_corr=0.55 (stronger than dealer flow)",
+            "major_limitations": [
+              "put_skew_proxy is SIGNED in sim (hd × vol); real skew is non-negative — known simulator bug carried forward",
+              "No signed customer-flow data in sim; pasted review explicitly says 'if no signed flow, do not keep as standalone desk', which is why W5 merged the two into one composite"
+            ]
+          },
+          {
+            "name": "fair_vol_baseline (channel)",
+            "source": "sim_equity_vrp.observations.EquityObservationChannels.fair_vol_baseline — added C11",
+            "available_at_decision_time": true,
+            "latency_or_publication_lag": "decision-time safe by construction (trailing-20d mean with 1-day lag)",
+            "expected_signal_role": "Internal next-session-RV-surprise label — NOT consumed by the current composite ridge; reserved for §7.3 rebuild",
+            "major_limitations": [
+              "Plan has it; current classical head doesn't use it. This is a latent-capability debit D7 area."
+            ]
+          }
+        ],
+        "unobserved_latent_variables_relied_on": [
+          "Dealer true book (assumed inferrable from OI + flow; really isn't)",
+          "Signed customer vs dealer flow (absent; the merge rule is a workaround)"
+        ],
+        "mechanism_to_observable_mapping_quality": {
+          "rating": "weak — 'surface positioning feedback' is broader than what OI + flow can identify",
+          "reason": "The real mechanism requires signed flow (participant-type-resolved). Without it, the composite merges two proxies and hopes the coupled signal approximates dealer hedging pressure. D7 debit open."
+        },
+        "identifiability_risks": [
+          "Two channels both correlated with vol shocks — under the composite averaging, the specific contribution of each is blurred",
+          "Gate 2 sign preservation is unstable on the pinned MVP slice (D7 debit notes dev_rho −0.01, test_rho +0.05 for dealer_inventory pre-merge)",
+          "Real deployment would need access to OCC open-interest, Cboe volume, ideally customer-vs-dealer flow tag — none available in this sim"
+        ],
+        "proxy_of_proxy_risks": [
+          "dealer_flow proxies true dealer book; OI snapshots proxy dealer_flow; sim channel proxies OI. Three-step chain."
+        ],
+        "desk_notes": "Commission at docs/pm/surface_positioning_feedback_engineering_commission.md. The composite ridge was a pragmatic choice at W5; the real rebuild is monotone-GAM / GBDT on surface state per §7.3 ladder."
+      },
+      {
+        "desk_name": "earnings_calendar",
+        "mechanism_claimed": "Earnings cluster density → forward 3-day vol delta. Ridge on 5 features: earnings_cluster_size, today-is-event flag, trailing-10d event density, current vol, vol z-score. Emits VIX_30D_FORWARD_3D_DELTA.",
+        "target_variable": "VIX_30D_FORWARD_3D_DELTA",
+        "target_horizon": "3 days",
+        "observable_inputs": [
+          {
+            "name": "earnings_event_indicator + earnings_cluster_size",
+            "source": "sim_equity_vrp.observations.by_desk['earnings_calendar'].components — added X1",
+            "available_at_decision_time": true,
+            "latency_or_publication_lag": "zero (sim); real earnings calendars are known in advance",
+            "expected_signal_role": "Forward-correlated with vol_shocks_unscaled at lead=2 (earnings_vol_corr=0.45)",
+            "major_limitations": [
+              "Events are IID-Gaussian-thresholded — no real clustering structure (quarterly cadence, sector waves, analyst-coverage tiers)",
+              "No per-ticker identity — just an aggregate indicator",
+              "No event class (earnings surprise vs guidance revision vs M&A)",
+              "No sector weighting — commission §5.1 calls for it but it's not in sim"
+            ]
+          },
+          {
+            "name": "market_price (vol_level)",
+            "source": "sim_equity_vrp.observations.EquityObservationChannels.market_price",
+            "available_at_decision_time": true,
+            "latency_or_publication_lag": "zero",
+            "expected_signal_role": "Current-vol + z-score context features",
+            "major_limitations": []
+          }
+        ],
+        "unobserved_latent_variables_relied_on": [
+          "The sim's explicit forward-correlation construction (earnings[t] correlates with vol_shocks[t+2]). This is the ONLY reason the desk has Gate 1 skill; real earnings → vol dynamics are nowhere near this clean."
+        ],
+        "mechanism_to_observable_mapping_quality": {
+          "rating": "moderate (in sim) / weak (externally)",
+          "reason": "In sim: Pearson r=0.15 on 1500-day path between cluster_size[t] and vol[t+3]. Gate 1 rel_improvement=+14.66% on seed 7. Externally: real earnings-vol dynamics have much weaker predictability and depend on cluster composition (market-cap weighting, sector) that this channel doesn't model."
+        },
+        "identifiability_risks": [
+          "Because the sim injects a clean forward-correlation, the desk's measured skill is an upper bound on what real data could deliver. A reviewer should not read the 14.66% as a forecast of real performance."
+        ],
+        "proxy_of_proxy_risks": [
+          "Real earnings calendar → cluster weight → expected vol impact is a legitimate mechanism but requires market-cap-weighted earnings indexing (absent) and cross-sector regime conditioning (absent)"
+        ],
+        "desk_notes": "X1 shipped 2026-04-22. Gate 3 + composition with surface_positioning_feedback verified. Gate 1 skill on synthetic is genuine given the sim design but gives no entitlement to external-validity claim."
+      },
+      {
+        "desk_name": "regime_classifier",
+        "mechanism_claimed": "4-regime state classification over log-price log-returns via adaptive-K Gaussian HMM (K ∈ [2,6] selected by BIC). Under v1.16, also carries macro-beta transmission (was a separate macro desk pre-v1.16).",
+        "target_variable": null,
+        "target_horizon": null,
+        "observable_inputs": [
+          {
+            "name": "market_price (log-return series)",
+            "source": "sim.latent_state (oil) or sim_equity_vrp.latent_state (equity)",
+            "available_at_decision_time": true,
+            "latency_or_publication_lag": "zero",
+            "expected_signal_role": "Primary input to HMM",
+            "major_limitations": [
+              "HMM over log-returns alone ignores cross-asset signals, macro data, event calendars",
+              "Regime count is BIC-selected over a bounded family; no HDP-HMM / fully Bayesian non-parametric (v0.3+ future work)"
+            ]
+          }
+        ],
+        "unobserved_latent_variables_relied_on": [
+          "The sim has a ground-truth regime label; GroundTruthRegimeClassifier (used in phase_a/b/c tests) returns this directly. HMMRegimeClassifier has to infer it. Tests use one or the other explicitly."
+        ],
+        "mechanism_to_observable_mapping_quality": {
+          "rating": "moderate",
+          "reason": "HMM on log-returns is standard econometrics. In sim the ground truth is recoverable. In real markets, regime classification from price alone is notoriously unstable."
+        },
+        "identifiability_risks": [
+          "If the HMM infers a wrong regime, every downstream weight-promotion decision is wrong. No cross-check against a secondary classifier.",
+          "Ground-truth version is used in some tests — silent substitution could mask HMM weakness"
+        ],
+        "proxy_of_proxy_risks": [],
+        "desk_notes": "Under v1.16 C6, the regime_classifier spec records that it now also carries macro-beta transmission. No code change — the change is semantic, not mechanical. Reviewer should read desks/regime_classifier/spec.md carefully."
+      }
+    ]
+  },
+
+  "desk_architecture": {
+    "desk_roster": [
+      {
+        "desk_name": "storage_curve",
+        "family": "oil",
+        "status": "shipped (unchanged through v1.16)",
+        "why_this_boundary_exists": "Reads the price series directly. Represents calendar-spread / mean-reversion claim — the nearest-to-price desk in the roster.",
+        "why_it_is_not_split_further": "Already minimal — single feature family (lagged returns). No obvious sub-mechanism to isolate without real data.",
+        "why_it_is_not_merged_further": "It's the only desk that uses price auto-structure without an exogenous proxy channel. Merging with anything else would confuse the attribution.",
+        "depends_on_regime_classifier": true,
+        "depends_on_other_desks": [],
+        "emission_type": "Forecast (WTI_FRONT_MONTH_CLOSE, 7-day horizon)",
+        "decision_space_unit": "price level",
+        "baseline_model_family": "Ridge on lagged-return features (10-day lookback)",
+        "current_known_weaknesses": [
+          "Auto-correlation in real WTI returns is known weak and regime-dependent; synthetic AR(1) injection makes this desk artificially strong",
+          "Price-level target makes it mixed-unit with the log-return desks under Controller raw-sum; the phase_a weight-promotion test documents this as a test-harness limitation"
+        ],
+        "strongest_argument_for_this_desk_existing": "It is the load-bearing desk for the architectural claim — passes Gate 1/2/3 strictly on every seed under every mode; any failure here is infrastructure, not model.",
+        "strongest_argument_against_this_desk_existing": "Its economic story is thin. If the auto-correlation were turned off in the sim, the desk would fail immediately."
+      },
+      {
+        "desk_name": "supply_disruption_news",
+        "family": "oil",
+        "status": "shipped; merger of pre-v1.16 supply + geopolitics desks at C4a + W3",
+        "why_this_boundary_exists": "Event-driven news desk absorbs pre-v1.16 supply (fast news component) + geopolitics (event identification). Both desks were structurally event-hurdle; pre-v1.16 split was design-review artefact.",
+        "why_it_is_not_split_further": "Pasted review argued the split was unidentifiable without structured event classes; commission §5.1 keeps the 5 event-class structure inside one desk.",
+        "why_it_is_not_merged_further": "Distinct from oil_demand_nowcast by mechanism — event-hurdle vs mixed-frequency nowcast. Distinct from storage_curve by input channel.",
+        "depends_on_regime_classifier": true,
+        "depends_on_other_desks": [],
+        "emission_type": "Forecast (WTI_FRONT_1W_LOG_RETURN, 7-day horizon)",
+        "decision_space_unit": "log-return",
+        "baseline_model_family": "Ridge on 4 event-summary features (inlined ClassicalGeopoliticsModel)",
+        "current_known_weaknesses": [
+          "D1 debit: ridge on 4 features does not implement the event-hurdle model commission §5.2 calls for",
+          "Under Phase A seed 16 + clean mode, Gate 1 rel_improvement = −12% (fails)",
+          "No event class, no state conditioning, no signed-barrel-impact"
+        ],
+        "strongest_argument_for_this_desk_existing": "Architectural: absorbs the real-world event-news channel without growing the roster size. Under logic-gate multi-scenario it passes Gate 1 on 2-3/3 typical across 10 seeds.",
+        "strongest_argument_against_this_desk_existing": "Under Phase A single-seed the ridge version does not beat the zero-return baseline; the real mechanism (event-hurdle) is deferred to §7.3 escalation and may never ship."
+      },
+      {
+        "desk_name": "oil_demand_nowcast",
+        "family": "oil",
+        "status": "shipped; merger of pre-v1.16 demand + macro alpha at C5a + W4",
+        "why_this_boundary_exists": "Mixed-frequency demand nowcast. Absorbs the economically-thin macro desk's alpha content; macro state now flows through regime_classifier.",
+        "why_it_is_not_split_further": "No obvious lower-level mechanism to isolate within the current sim. Real rebuild (mixed-frequency state-space) would keep the desk as a single mechanism.",
+        "why_it_is_not_merged_further": "Distinct from supply_disruption_news by mechanism (continuous nowcast vs event-hurdle).",
+        "depends_on_regime_classifier": true,
+        "depends_on_other_desks": [],
+        "emission_type": "Forecast (WTI_FRONT_1W_LOG_RETURN, 7-day horizon)",
+        "decision_space_unit": "log-return",
+        "baseline_model_family": "Ridge on 8 demand-trend features over 10-day lookback (inlined ClassicalDemandModel)",
+        "current_known_weaknesses": [
+          "D1 debit: single-frequency ridge, not mixed-frequency state-space",
+          "Under Phase A seed 16 Gate 1 fails",
+          "Macro conditioning is indirect via regime_classifier weight selection, not a per-Forecast feature"
+        ],
+        "strongest_argument_for_this_desk_existing": "Architectural: covers the demand channel that otherwise has no desk. Merged desk has clear economic story.",
+        "strongest_argument_against_this_desk_existing": "Current ridge does not exhibit demand-nowcast structure; it exploits AR(1) correlation in the sim like any other desk. Real rebuild is deferred."
+      },
+      {
+        "desk_name": "surface_positioning_feedback",
+        "family": "equity-vrp",
+        "status": "shipped; merger of pre-v1.16 dealer_inventory + hedging_demand at C8a + W5",
+        "why_this_boundary_exists": "Pasted review: 'if no signed customer flow, do not keep customer_flow_pressure as standalone'. Merge handles the identifiability argument.",
+        "why_it_is_not_split_further": "Under public-data constraint (no signed flow), the two sub-mechanisms cannot be separately identified. Future split back into dealer_inventory_pressure + customer_flow_pressure is conditional on Phase 3 flow data.",
+        "why_it_is_not_merged_further": "Distinct from earnings_calendar by mechanism (continuous vol-surface state vs sparse event cluster).",
+        "depends_on_regime_classifier": true,
+        "depends_on_other_desks": [],
+        "emission_type": "Forecast (VIX_30D_FORWARD_3D_DELTA, 3-day horizon)",
+        "decision_space_unit": "signed vol delta",
+        "baseline_model_family": "Composite ridge: averaging of _DealerInventoryRidge (10 features) + _HedgingDemandRidge (10 features)",
+        "current_known_weaknesses": [
+          "D7 debit (re-scoped at v1.16 to this merged desk): Gate 2 sign preservation unstable",
+          "Composite averaging is a pragmatic 0.5/0.5 weighted sum — not a principled joint model",
+          "put_skew_proxy semantic bug (signed skew) carried through; the model uses it unchanged"
+        ],
+        "strongest_argument_for_this_desk_existing": "Under sim Phase A it carries Gate 1+2 weight on the equity family; composition with earnings_calendar under same-target aggregation is architecturally clean.",
+        "strongest_argument_against_this_desk_existing": "The two inlined heads were designed for separate targets (VIX_30D_FORWARD level each); under v1.16 unification to the delta target and the averaging composite, neither sub-model was re-validated. The combined model is underspecified."
+      },
+      {
+        "desk_name": "earnings_calendar",
+        "family": "equity-vrp",
+        "status": "shipped at W10 (skeleton) + X1 (channel + real mechanism)",
+        "why_this_boundary_exists": "Pasted review: 'Keep upcoming earnings_calendar separate; otherwise it will contaminate hedging_demand'. Event-driven vol expansion is mechanically distinct from continuous surface positioning.",
+        "why_it_is_not_split_further": "Event class / sector / cluster-size sub-mechanisms are commission-deferred — currently a single scalar cluster_size feature.",
+        "why_it_is_not_merged_further": "Merging with surface_positioning_feedback would re-introduce the contamination the pasted review explicitly warned against.",
+        "depends_on_regime_classifier": true,
+        "depends_on_other_desks": [],
+        "emission_type": "Forecast (VIX_30D_FORWARD_3D_DELTA, 3-day horizon)",
+        "decision_space_unit": "signed vol delta",
+        "baseline_model_family": "Ridge on 5 features (cluster_size, event_today, event_density, current_vol, vol_zscore)",
+        "current_known_weaknesses": [
+          "No event-class structure; commission §5.1 calls for 5 classes, current implementation is binary",
+          "Earnings events are Gaussian-thresholded in sim, not real-calendar-driven",
+          "Gate 1 skill of +14.66% is SIM-ONLY — the sim injects the forward-correlation by construction"
+        ],
+        "strongest_argument_for_this_desk_existing": "Pasted review explicitly keeps it separate; architectural requirement for a second equity desk to exercise same-target composition under Controller raw-sum; Gate 1 skill demonstrated on seed-7 probe.",
+        "strongest_argument_against_this_desk_existing": "Without the sim's injected forward-correlation, the desk has no mechanism. Real earnings cluster size → vol dynamics are not cleanly learnable from a 5-feature ridge."
+      },
+      {
+        "desk_name": "regime_classifier",
+        "family": "shared (oil + equity-VRP)",
+        "status": "shipped; v1.13 HMMRegimeClassifier with adaptive K (BIC-selected K ∈ [2,6]); v1.16 role-expansion to carry macro-beta transmission (C6)",
+        "why_this_boundary_exists": "Required by the Controller for regime-conditional weight selection (§8). Cross-cutting, not a forecast-emitting desk.",
+        "why_it_is_not_split_further": "HMM is a single-model component; splitting (e.g. separate regime classifier per family) would complicate the Controller's regime dispatch.",
+        "why_it_is_not_merged_further": "Distinct protocol (ClassifierProtocol, not DeskProtocol). Merge with any forecast desk would violate the boundary.",
+        "depends_on_regime_classifier": false,
+        "depends_on_other_desks": [],
+        "emission_type": "RegimeLabel (not Forecast)",
+        "decision_space_unit": "regime_id string + regime_probabilities dict",
+        "baseline_model_family": "Gaussian HMM over log-returns, K selected by BIC",
+        "current_known_weaknesses": [
+          "Log-return-only input; no macro or cross-asset features",
+          "Regime inference is notoriously unstable in real markets; HDP-HMM is a v0.3+ deferred item",
+          "Under v1.16, this module bears more load because macro is routed through it — no additional inputs were added"
+        ],
+        "strongest_argument_for_this_desk_existing": "Architecturally required; without regime conditioning the Controller's weight matrix degenerates to unconditional.",
+        "strongest_argument_against_this_desk_existing": "The macro-role expansion at v1.16 C6 is spec-only; no mechanism was added. If macro state genuinely matters for decisions, the current classifier doesn't actually model it."
+      }
+    ],
+    "regime_classifier": {
+      "exists": true,
+      "role": "Emits RegimeLabel events used by Controller.decide to select the weight row; also now bears macro-beta transmission under v1.16 C6 spec expansion.",
+      "inputs": [
+        "Market price log-returns (oil) or vol_level log-returns (equity)"
+      ],
+      "outputs": [
+        "RegimeLabel event with regime_id + regime_probabilities + transition_probabilities"
+      ],
+      "what_other_components_condition_on_it": [
+        "Controller.decide uses regime_id to look up the weight row",
+        "Research-loop weight promotion is regime-scoped",
+        "LODO + Shapley attribution can be regime-sliced"
+      ],
+      "main_leakage_or_coupling_risks": [
+        "Tests use GroundTruthRegimeClassifier instead of HMMRegimeClassifier in some paths — the test harness has perfect regime knowledge that production would not",
+        "HMM is trained on the full history; in a live pipeline it would have to retrain or operate in an online-Bayes mode that is not implemented",
+        "Macro-role expansion (v1.16 C6) is spec-only; any real deployment that required macro conditioning would reveal the gap"
+      ],
+      "why_this_is_not_hidden_shared_state": "The RegimeLabel event is explicit on the bus; Controller reads it as a first-class input. No desk directly consumes the classifier's internals. Portability test passes with the classifier in place."
+    }
+  },
+
+  "evaluation_framework": {
+    "gate_definitions": [
+      {
+        "gate_name": "Gate 1 — skill vs pre-registered naive baseline",
+        "what_it_is_supposed_to_measure": "Whether a desk's point-estimate beats a naive-baseline point-estimate on held-out data (RMSE comparison).",
+        "formal_pass_condition": "desk_rmse < baseline_rmse. Per-desk baseline dispatch: price-level target → random_walk_price_baseline (prior-day price); log-return target → zero_return_baseline (always 0).",
+        "why_this_gate_matters": "Minimum capability claim. A desk that can't beat a trivial baseline adds no signal to the ensemble.",
+        "what_this_gate_does_not_prove": "Gate 1 passing does NOT prove (a) real-world alpha, (b) Sharpe, (c) robustness across distributions, (d) practical utility after transaction costs. It is a necessary-but-not-sufficient skill check on a known-synthetic process."
+      },
+      {
+        "gate_name": "Gate 2 — dev-to-test sign preservation",
+        "what_it_is_supposed_to_measure": "Whether the desk's directional score correlates with outcomes in the same direction on two held-out splits (dev + test).",
+        "formal_pass_condition": "Spearman ρ_dev > 0 and ρ_test > 0 for expected_sign='positive' (reversed for 'negative').",
+        "why_this_gate_matters": "A directional desk whose sign flips between splits has no stable learned signal. Protects against over-fit ridge coefficients.",
+        "what_this_gate_does_not_prove": "Gate 2 passing does NOT prove (a) that the claimed sign matches physical reality — only that the fitted model is consistent with its own training claim. (b) Gate 2 is slice-definition-sensitive; half-and-half split is arbitrary."
+      },
+      {
+        "gate_name": "Gate 3 — runtime hot-swap",
+        "what_it_is_supposed_to_measure": "That the Controller's Decision output changes predictably when a real desk is replaced with a generic StubDesk (measures shared-infra interface correctness, not desk quality).",
+        "formal_pass_condition": "build_hot_swap_callables runs Controller.decide() with real and stub closures; asserts both return valid Decisions, combined_signal_stub == combined_signal_real − weight × point_estimate (with staleness branches), and honest contributing_ids (stub's forecast_id absent from real run and vice versa).",
+        "why_this_gate_matters": "THE architectural invariant. Gate 3 is the direct empirical test of portability + interface correctness.",
+        "what_this_gate_does_not_prove": "Gate 3 says nothing about (a) desk quality, (b) ensemble diversity, (c) real-world deployability. It is a pure interface-contract test."
+      }
+    ],
+    "baselines": [
+      {
+        "name": "random_walk_price_baseline",
+        "definition": "Predicts prices[emission_indices[i] - 1] — i.e., 'no change from emission-time price'. Use for WTI_FRONT_MONTH_CLOSE targeted desks (storage_curve).",
+        "why_this_is_the_right_baseline": "Spec-level 'random walk on price (one-week horizon)' baseline. Both desk and baseline see the same information set at emission — apples-to-apples."
+      },
+      {
+        "name": "zero_return_baseline",
+        "definition": "Predicts 0 for every forecast. Random-walk analog for log-return / vol-delta targets. Added at W9 to close D-16.",
+        "why_this_is_the_right_baseline": "For desks that emit signed log-returns or deltas, the 'no change' prediction in return space is the zero-return baseline. Unit-compatible with the desk's point_estimate — Gate 1 compares like with like."
+      },
+      {
+        "name": "persistence_baseline",
+        "definition": "Last observed Print value. Defined in eval/data.py but with an explicit caveat: unsuitable for multi-day-horizon desks because it has information advantage over the desk.",
+        "why_this_is_the_right_baseline": "Only appropriate when forecast horizon ≈ inter-Print interval. Currently unused by the main gates."
+      }
+    ],
+    "evaluation_slices": [
+      "Per-seed (10 seeds in logic-gate; 1 seed in phase_a/b/c)",
+      "Per-desk (3 oil + 2 equity)",
+      "Per-regime (4 regimes in oil sim; 3 in equity)",
+      "Per-observation-mode (clean / leakage / realistic)",
+      "Dev / test (half-and-half time-split for Gate 2)",
+      "Training / held-out ([0, TRAIN_END) / [TRAIN_END, N_DAYS - HORIZON) for Gate 1)"
+    ],
+    "seed_policy": "Logic-gate uses SEEDS = range(10, 20). Phase A/B/C uses single seed 16 (chosen pre-v1.16 for balanced regime coverage). Earnings_calendar Gate 1 skill test uses seed 7. No ensembling across seeds in aggregate metrics — each seed is reported separately and pass rates are counted.",
+    "train_validation_test_boundary": "N_DAYS = 1200 / TRAIN_END = 700 / HELD_OUT_END = 1197. Training is [0, 700); held-out is [700, 1197). There is NO separate validation fold — Gate 2 uses half-and-half on held-out itself. This is a known coarseness — walk-forward validation is Phase 2P work.",
+    "walk_forward_or_split_logic": "Single-cut (not walk-forward). Weight promotion (propose_validate_and_promote) uses a 70/30 dev/held-out split within a regime's decisions.",
+    "leakage_controls": [
+      "Classical heads fit only on [0, TRAIN_END); never see held-out",
+      "Forward-correlation in sim (earnings X1) uses future vol_shocks but generates earnings BEFORE the desk observes them — desk at time t sees earnings[t] which is correlated with vol[t+3] by sim construction, no look-ahead at serve time",
+      "fair_vol_baseline uses strict-lag trailing mean; unit-tested",
+      "Gate 1 baseline (random_walk_price / zero_return) uses only prices[emission_index - 1] or 0; no future info"
+    ],
+    "known_evaluation_weaknesses": [
+      "No walk-forward — single time-split per seed can over-fit to regime timing",
+      "Seed 16 (Phase A/B/C) was chosen for regime coverage; the 10-seed logic-gate sweep is the primary multi-seed claim",
+      "Gate 1 test-size is ~497 samples per desk — not huge; RMSE variance is material",
+      "Phase A Gate 1 aggregate lowered to ≥ 1/3 under D1 debit scope — effectively tests only storage_curve",
+      "No out-of-distribution test against a sim with different parameters",
+      "No adversarial seed selection (worst-case seed isolation)",
+      "Attribution tests use signal-space Shapley; grading-space Shapley exists but weight-promotion still uses the signal-space path in some legacy callers"
+    ],
+    "what_the_current_tests_actually_prove": [
+      "The pipeline composes: Forecast → Bus → Controller → Decision → Grade → Attribution, byte-identically across runs",
+      "Hot-swap between real desks and stubs works (runtime-verified at v1.14)",
+      "Shared-infra diff = 0 between oil and equity-VRP (git-diff verified on 7 directories)",
+      "Each desk conforms to DeskProtocol structurally",
+      "D12 golden fixtures hold across 6 channel additions — sim is backward-compatible",
+      "Staleness propagates correctly from feed_incidents to desk emissions",
+      "Storage_curve has Gate 1/2/3 skill on the synthetic market (load-bearing baseline)",
+      "supply_disruption_news has Gate 1 skill on 6/10 logic-gate seeds; earnings_calendar has +14.66% Gate 1 rel_improvement on seed 7"
+    ],
+    "what_the_current_tests_do_not_prove": [
+      "That desks have alpha on real data",
+      "That Gate 1 / Gate 2 thresholds correspond to economically-meaningful improvement",
+      "That transaction costs would leave any P&L",
+      "That the regime classifier is robust to real market transitions",
+      "That D12 pins prevent ALL covert regressions (byte-identity is local; semantic regressions in untested paths can still slip through)",
+      "That the capability-debit ledger is complete (there is no automated audit of debit vs claim consistency)",
+      "That the merged desks' composite ridges are well-calibrated (averaging was a pragmatic choice, not a derived joint model)"
+    ]
+  },
+
+  "portability_claim_analysis": {
+    "claim_statement": "The architecture redeploys to an unrelated asset class (equity VRP — the Speckle and Spot project, instantiated via sim_equity_vrp/) with zero changes to shared infrastructure. (Spec §1.1, §8.4)",
+    "shared_infrastructure_asserted_unchanged": [
+      "contracts/v1.py",
+      "controller/",
+      "bus/",
+      "persistence/ (excluding append-only schema additions)",
+      "eval/hot_swap.py",
+      "provenance/",
+      "scheduler/"
+    ],
+    "how_unchanged_status_was_verified": [
+      "tests/test_phase2_portability_contract.py — 12 tests scanning for oil-specific vocabulary (WTI/EIA/CFTC/JODI/OPEC/BRENT/FRED/GPR) inside contracts/ and portability-target directories",
+      "tests/test_phase2_equity_vrp_portability.py — 12 tests asserting the equity-VRP desk composes through the bus + controller + grading without modifying shared code",
+      "Git-diff audit at phase2-mvp-v1.12: zero lines changed in each of bus/, controller/, persistence/ (non-schema), attribution/, grading/, provenance/, eval/, soak/, scheduler/",
+      "Additional Gate 3 coverage at v1.14 (D9 closure) — eval.hot_swap.build_hot_swap_callables now exercises Controller.decide() for real desk + stub swap"
+    ],
+    "append_only_or_non_breaking_changes_allowed": [
+      "contracts/target_variables.py — KNOWN_TARGETS frozen set; additions allowed per §4.6 v1.x revision rule (VIX_30D_FORWARD_3D_DELTA + WTI_FRONT_1W_LOG_RETURN added C2)",
+      "persistence/schema.sql — table additions allowed non-breakingly (e.g. feed_incidents, feed_latency_state at v1.7; planned pnl_events, backtest_runs at Phase 2P A4)",
+      "docs/architecture_spec_v1.md — change-log additions at v1.x revisions; any change to §4/§6-§11 forces v2 bump"
+    ],
+    "hidden_dependencies_that_could_break_portability": [
+      "config/release_calendar.yaml + config/data_sources.yaml carry oil-specific feed registrations. Under equity-VRP use, equity-specific feeds must be added; mixed schema is acceptable but the portability claim requires no code change to the scheduler that consumes them.",
+      "The Controller's raw-sum rule at decision.py:94-112 assumes unit-comparable point_estimates. Mixed units (price + log-return + vol-delta) in the same regime weight row would produce nonsense sums. Under v1.16 this is handled by emission-target convention per family, but the Controller does not itself enforce unit checking.",
+      "The config_target_variables registry is shared across families. Silent collisions (e.g. if someone registered a target name that shadowed a real market constant) would pass the bus validator but produce junk.",
+      "Replay-determinism assumes deterministic sim seed ordering. sim_equity_vrp/latent_state.py has a seed-offset convention (main, +1, +2, +3, +4) documented inline; any reordering of RNG draws breaks golden fixtures."
+    ],
+    "conditions_under_which_portability_claim_would_no_longer_hold": [
+      "If a new desk required a feature that the existing Forecast schema cannot carry (e.g. continuous-time horizons, discrete event timing) — would force a v2 contracts bump",
+      "If the Controller's linear sizing rule (§8.2a) proved inadequate for a family that needed position-scaling by volatility — would force a §8 revision (v2)",
+      "If the research-loop's event taxonomy (§6.2) needed a new event type not in the enum — would force a v2 contracts bump",
+      "If persistence append-only schema additions introduced a schema dependency loop — hard to detect without migration tooling",
+      "If the bus validator required relaxation of the KNOWN_TARGETS check (for e.g. dynamically-registered targets) — would violate §4.6"
+    ],
+    "portability_confidence": {
+      "rating": "high-for-the-2-desk-equity-MVP; medium-for-the-full-future-roster",
+      "reason": "The 2-desk equity MVP demonstrated the zero-diff property end-to-end. Adding an untested third asset class (e.g. FX, rates, credit) or additional desk types (e.g. cross-asset pairs, correlation trades) would expose whether the current contracts are sufficient. The portability claim is 'the architecture has not blocked redeployment YET', not 'it will support ANY future redeployment'."
+    }
+  },
+
+  "operational_model": {
+    "runtime_flow_summary": "On a schedule, each desk is called to produce a Forecast from its observation channel. All Forecasts + a RegimeLabel from the classifier are fed to Controller.decide(), which looks up the weight row for the current regime, sums weight × point_estimate, applies linear sizing, and emits a Decision. The Decision is persisted. Per-decision LODO attribution computes desk contributions; weekly Shapley rollups drive research-loop weight promotions. All events pass through the bus validator on publish.",
+    "decision_path_step_by_step": [
+      "1. Scheduler fires a per-desk tick (daily cadence in sim; real scheduler is cron-driven via croniter + config/release_calendar.yaml)",
+      "2. Each desk calls forecast_from_observation(channels, i, now_utc) and emits a Forecast with Provenance (including input_snapshot_hash and code_commit)",
+      "3. Bus validates the Forecast — rejects if target_variable ∉ KNOWN_TARGETS; rejects if code_commit ends '-dirty' in production mode",
+      "4. RegimeClassifier (HMM or ground-truth) emits a RegimeLabel for the current market state",
+      "5. Controller.decide is called with {(desk_name, target_variable): Forecast} and the RegimeLabel",
+      "6. Controller reads the latest SignalWeight rows for that regime + the latest ControllerParams (k_regime, pos_limit_regime); raw-sums weight × point_estimate across the forecasts present; clips by pos_limit",
+      "7. Controller emits a Decision event with combined_signal + position_size + contributing_ids + Provenance",
+      "8. LODO attribution computes per-desk contribution to the Decision by recomputing combined_signal without each desk and attributing the delta",
+      "9. When a Print eventually arrives with a matching target + horizon, grading computes a Grade",
+      "10. Periodically, research-loop handlers aggregate Grades + attribution for Shapley; propose weight promotions; the promotion path uses margin validation on held-out decisions"
+    ],
+    "cold_start_handling": "Spec §14.8: Controller.decide requires a ControllerParams row + SignalWeight rows for the active regime. Cold-start seeds both via seed_cold_start(conn, desks, regime_ids, boot_ts) with k_regime=1.0, pos_limit_regime=default, validation_artefact='cold_start'. Uniform weights (average forecast) are emitted as the first non-error mode.",
+    "missing_data_handling": "Forecast.staleness=True causes the Controller to exclude that forecast from combined_signal. If every contributing forecast is stale, combined_signal=0 and position_size=0 — 'no trade' state. Staleness flows from feed_incidents via each desk's _staleness_from_feeds(conn) call.",
+    "dependency_failure_handling": "The scheduler's tolerance_minutes per feed in data_sources.yaml triggers data_ingestion_failure research-loop events; data_ingestion_failure_handler opens a feed_incidents row; desks listing the feed in their feed_names automatically report staleness; the Controller excludes them. Under realistic mode this is tested end-to-end (phase_c test).",
+    "fallback_behaviour": "Uniform-weight cold-start path (§14.8) serves as the fallback when no promotion has occurred. If a desk fails entirely, it can be retired via retire_desk_for_all_regimes (weight → 0); Controller then excludes its contribution. Kill-switch (Phase 2P F1, not yet shipped) would retire all desks on daily-loss trigger.",
+    "operator_visibility": {
+      "logs": [
+        "research_loop_events table — every handler invocation",
+        "feed_incidents + feed_latency_state tables — staleness audit",
+        "decisions + attribution_lodo + attribution_shapley tables — full per-decision audit",
+        "model_registry table — per-desk model versions over time"
+      ],
+      "metrics": [
+        "soak/ResourceMonitor during Reliability-gate soak: RSS, FD count, DuckDB file size",
+        "research-loop KPI: event-driven latency per type (research_loop/kpi.py::compute_latency_report)",
+        "No P&L / Sharpe metrics exist currently"
+      ],
+      "alerts": [
+        "data_ingestion_failure research-loop events are the closest thing to an alert",
+        "No push-based alerting; no pager"
+      ],
+      "dashboards": [
+        "None. JSON artefacts + test stdout only. Phase 2P C1 report module is the closest planned dashboard."
+      ]
+    },
+    "replay_or_determinism_support": "Strong. Every Forecast carries input_snapshot_hash + code_commit. grade(Forecast, Print) is a pure function. Replay mode rejects dirty-tree Forecasts. tests/test_replay_determinism.py verifies byte-identical reproduction for a 300-round-trip smoke.",
+    "override_or_kill_switch": "Exists as a spec line (§8.3 rollback is explicit human operation) but kill-switch code does NOT exist. Phase 2P F1 plans it. Current system has no automated way to halt trading on loss — but since there is no actual trading, this is less of an operational risk than it sounds.",
+    "main_operational_unknowns": [
+      "Reliability-gate 4h soak has not been run to completion yet (I-01 open); a 4.5 MB soak_phase1.duckdb exists but may be a dry-run artefact, not the acceptance run",
+      "HMM retraining cadence in live mode is undefined (tests use batch-fit on training half)",
+      "How does the system handle a mid-day Python dependency upgrade? (Soak tests include 'upgrade' as a recoverable incident but this is untested in production)",
+      "What happens if the scheduler clock-drifts past a release-calendar firing window? Documented as tolerance_minutes but live stress never applied"
+    ]
+  },
+
+  "failure_modes": [
+    {
+      "failure_name": "Desk silently emits stale forecasts",
+      "failure_type": "data-quality",
+      "trigger": "Feed ingestion failure (real-world: API rate limit, network error, upstream outage) that is NOT caught by the tolerance_minutes window",
+      "what_breaks": "Desk's forecast_from_observation produces a non-stub Forecast with fitted point_estimate but derived from stale data; Controller includes it in combined_signal; Decision is wrong silently",
+      "how_detectable_it_is": "Low if the feed-incident handler doesn't fire; Page-Hinkley change-point detector (v1.7 Layer 3) catches slow-drift latency creep",
+      "current_mitigation": "Three-layer feed-reliability loop (§14.5 v1.7): Layer 1 feed_incidents registry; Layer 2 rolling failure-rate auto-retire with bounded cap; Layer 3 Page-Hinkley pre-emptive incident emission",
+      "residual_risk": "Moderate. Live paths have never been stressed. Synthetic staleness injection is a crude approximation."
+    },
+    {
+      "failure_name": "Weight-promotion regresses MSE in production",
+      "failure_type": "model-quality / research-loop",
+      "trigger": "Shapley rollup proposes weights that look good in-sample but over-fit to recent attribution noise",
+      "what_breaks": "Promoted weights produce worse Decisions than the pre-promoted configuration",
+      "how_detectable_it_is": "Medium — margin validation (propose_validate_and_promote) requires held-out MSE improvement, but margin=0 means any improvement passes",
+      "current_mitigation": "Margin validation with 70/30 split; rollback via explicit human operation per §8.3; direct-insert fallback (D4) for cold-start reinstatement",
+      "residual_risk": "Moderate-to-high. The 70/30 split is fixed; walk-forward validation is Phase 2P work; Goodhart-style drift is possible if the system runs long enough."
+    },
+    {
+      "failure_name": "Regime misclassification cascades into wrong weights",
+      "failure_type": "model-quality / coupling",
+      "trigger": "HMMRegimeClassifier infers the wrong regime; Controller looks up the wrong weight row; Decision is based on a regime that doesn't apply",
+      "what_breaks": "Downstream weight / sizing / attribution all treat a misclassified state as canonical; a misclassification that lasts several decisions compounds errors",
+      "how_detectable_it_is": "Low-medium — no automated cross-check against a secondary classifier; HMM fit diagnostics exist but are not monitored in production",
+      "current_mitigation": "Adaptive-K HMM with BIC selection reduces overfitting; RegimeLabel carries regime_probabilities so downstream code COULD soft-weight but does not (Controller picks argmax)",
+      "residual_risk": "High in real markets; low in sim (ground-truth available). This is a live-deployment blocker."
+    },
+    {
+      "failure_name": "Dirty-tree Forecast accidentally committed to the production bus",
+      "failure_type": "provenance / reproducibility",
+      "trigger": "Operator runs a modified working tree against production mode",
+      "what_breaks": "Bus rejects the Forecast; downstream silence — Controller sees no input and may return cold-start defaults",
+      "how_detectable_it_is": "High — bus rejection is loud; logged to research_loop_events",
+      "current_mitigation": "Strict validation at bus publish_forecast; code_commit = <base_sha>-dirty flags the Forecast; production-mode validator refuses",
+      "residual_risk": "Low — well-covered. Main risk is false-negative where test-mode accidentally runs against production DB."
+    },
+    {
+      "failure_name": "Mixed-unit target collision in Controller raw-sum",
+      "failure_type": "architecture / contract",
+      "trigger": "Two desks in the same regime weight row emit different units (e.g. a price-level and a log-return) — Controller raw-sums them, producing junk",
+      "what_breaks": "combined_signal is unitless garbage; Decision is nonsense",
+      "how_detectable_it_is": "Low — no automated unit check; tests rely on convention (one target per family)",
+      "current_mitigation": "Convention enforced by v1.16: oil family → WTI_FRONT_1W_LOG_RETURN; equity family → VIX_30D_FORWARD_3D_DELTA. Exception: storage_curve emits WTI_FRONT_MONTH_CLOSE (price), which is addressed in test harness by per-desk Print/baseline dispatch but NOT by Controller itself",
+      "residual_risk": "Moderate. A reviewer should check: does Controller actually enforce per-regime unit consistency? Current answer: no, it does not."
+    },
+    {
+      "failure_name": "Composite ridge averaging in surface_positioning_feedback masks either head's degradation",
+      "failure_type": "model-quality / attribution",
+      "trigger": "One of the two inlined heads (_DealerInventoryRidge, _HedgingDemandRidge) degrades (e.g. due to leakage or overfitting) but the other compensates; composite Gate 1/2 passes",
+      "what_breaks": "D7 debit: the desk appears healthy in aggregate; neither individual head is auditable as-shipped",
+      "how_detectable_it_is": "Low — composite.predict returns (combined_delta, combined_delta); the individual head contributions are not emitted separately",
+      "current_mitigation": "Docstring in desks/surface_positioning_feedback/classical.py notes the composite structure. Nothing automatic.",
+      "residual_risk": "Moderate. The composite is a pragmatic W5 choice; an external reviewer should question whether per-head diagnostics are needed."
+    },
+    {
+      "failure_name": "Replay determinism breaks on numpy / pytz minor version bump",
+      "failure_type": "reproducibility / dependency",
+      "trigger": "Dependency upgrade changes a float-ops default (e.g. numpy changing default dtype promotion rules)",
+      "what_breaks": "D12 golden fixtures fail; every downstream pin breaks",
+      "how_detectable_it_is": "High — tests will fail loudly on CI",
+      "current_mitigation": "pyproject.toml pins minimum versions; tests run on a pinned .venv",
+      "residual_risk": "Low-to-moderate. No upper pins, so a passive upgrade could break things. No CI; operator runs tests manually."
+    },
+    {
+      "failure_name": "Capability-debit ledger drifts from implementation reality",
+      "failure_type": "governance / audit",
+      "trigger": "A new debit is opened in capability_debits.md but the referenced test or mitigation is not actually in place",
+      "what_breaks": "The ledger's 'all in-budget' closure becomes misleading; a reviewer who trusts the ledger as ground truth gets a false assurance",
+      "how_detectable_it_is": "Low without manual audit; no automated debit-to-code consistency check",
+      "current_mitigation": "Each debit entry includes 'Pinned by: tests/...' — an auditor can grep. Session-long discipline (27 commits) has maintained this by hand.",
+      "residual_risk": "Moderate. Single-operator discipline does not scale. A reviewer should spot-check 2-3 debits against the cited tests."
+    }
+  ],
+
+  "hidden_assumptions": [
+    {
+      "assumption": "The synthetic sim's forward correlations approximate the correlation structure of real markets closely enough that desk architectures designed on the sim will transfer",
+      "why_it_must_be_true": "Every Gate 1/2 pass is evidence about the sim; if this transfer fails, the architecture's empirical support collapses",
+      "what_happens_if_false": "The architecture redeploys to real data and every desk fails Gate 1 immediately; the v1.16 roster is an over-fit to synthetic correlations",
+      "status": "unverified — no real-data test exists"
+    },
+    {
+      "assumption": "Replay-byte-identity across runs is the right notion of reproducibility for a research-system",
+      "why_it_must_be_true": "D12 golden fixtures, provenance pipeline, and the replay-first invariant all rely on it",
+      "what_happens_if_false": "Small numerical drift (e.g. CUDA / OpenBLAS minor version) could silently regress without tripping any test",
+      "status": "partially verified — tests cover the core path; dependency upgrades are not routinely tested"
+    },
+    {
+      "assumption": "Linear raw-sum aggregation (§8.2) is sufficient for combining desk forecasts",
+      "why_it_must_be_true": "It's the frozen Controller rule; any more sophisticated aggregation (e.g. non-linear, probabilistic) would force a v2 spec bump",
+      "what_happens_if_false": "The architecture's unit-consistency workaround (one target per family) is brittle; storage_curve's price-level emission is already a known exception that's patched in the test harness",
+      "status": "unverified against real deployment; the convention works in sim"
+    },
+    {
+      "assumption": "Regime classification from market-return features alone suffices for weight selection",
+      "why_it_must_be_true": "Controller.decide dispatches weights by regime_id; if regime inference is wrong, all downstream logic is wrong",
+      "what_happens_if_false": "A regime-misclassified period promotes the wrong desks; in real markets, regime transitions from returns-only HMM are notoriously unstable",
+      "status": "unverified in real markets; ground-truth regime classifier is used in several tests, which masks the real-deployment risk"
+    },
+    {
+      "assumption": "The staleness propagation mechanism (§14.5 v1.7 three-layer loop) catches enough real-world data failures",
+      "why_it_must_be_true": "It's the only line of defence between a bad feed and a bad Decision",
+      "what_happens_if_false": "Decisions are made on stale data; no automated alert fires",
+      "status": "partially verified — Page-Hinkley + tolerance_minutes + feed_incidents tested against synthetic injections, not real outages"
+    },
+    {
+      "assumption": "Single-operator discipline is sufficient governance",
+      "why_it_must_be_true": "Bus-factor-1 is explicit in spec §14.3; the capability-debit ledger and change-log depend on consistent manual audit",
+      "what_happens_if_false": "A handover or extended absence silently drops coverage; stale debits stay marked 'in budget' without verification",
+      "status": "unverified at scale"
+    },
+    {
+      "assumption": "8GB M-series Mac is sufficient compute for the entire production research loop, including any §7.3 escalation",
+      "why_it_must_be_true": "It's the declared compute constraint in spec §1.2",
+      "what_happens_if_false": "Any desk requiring BVAR / PyMC with ≥ 8 parameters may OOM; fine-tuning already requires borrowed compute",
+      "status": "probable risk for Phase 2P E2 / E3"
+    }
+  ],
+
+  "test_and_coverage_gaps": {
+    "retired_tests": [
+      "tests/test_dealer_inventory_gates.py (W6) — dealer_inventory-specific gate suite",
+      "tests/test_hedging_demand_gates.py (W6) — hedging_demand-specific gate suite",
+      "tests/test_classical_specialists.py (W6) — per-classical-head unit tests (legacy ridge variants)",
+      "tests/test_hot_swap_two_desk.py (W8) — same-target two-desk Controller-decide hot-swap"
+    ],
+    "replaced_indirectly_by": [
+      "dealer_inventory + hedging_demand coverage → test_logic_gate_multi_scenario (surface_positioning_feedback Gate 3 via composite) + test_earnings_calendar (same-target composition with earnings_calendar)",
+      "classical_specialists → no direct replacement; per-head testing was retired in the merger of W5",
+      "hot_swap_two_desk → tests/test_earnings_calendar.py::test_earnings_calendar_composes_with_surface_positioning (weaker — verifies target-variable match but not per-desk Shapley neutrality)"
+    ],
+    "still_uncovered_behaviours": [
+      "Composite-ridge per-head diagnostics for surface_positioning_feedback (cannot currently audit whether the dealer-flow head or the hedging-demand head is doing the work)",
+      "Sim_equity_vrp leakage mode + realistic mode (clean-only shipped; phase_b/c exist for oil only)",
+      "Live soak-gate pass at the pre-registered 4h threshold (I-01 still open)",
+      "Multi-seed aggregate Sharpe / drawdown on any desk (no P&L code)",
+      "Cross-validation / walk-forward split across training windows",
+      "Regime-transition-period-specific skill (currently regimes are sliced post-hoc from one training run)",
+      "Stress-test of feed-reliability learning loop under real-feed outage patterns",
+      "HMM regime-classifier robustness under regime-parameter drift"
+    ],
+    "highest_risk_remaining_gap": "Absence of any test that correlates desk-level skill with Decision-level outcomes. Gate 1 measures skill-vs-baseline at the forecast level, Gate 2 measures sign preservation, Gate 3 measures interface contract — but there is no test that asks 'given these desks' forecasts, does the Controller's Decision produce good outcomes?' That is the P&L gap the diagnostic identified.",
+    "why_not_blocking_or_why_blocking": "Not blocking for the Phase 2 architectural claim (per spec §1.1 — P&L is diagnostic, not objective). IS blocking for any claim that the system can trade. Phase 2P plan A1-G2 addresses this directly; until shipped, no trading claim is supported by evidence."
+  },
+
+  "evidence_register": [
+    {
+      "claim": "Architecture composes end-to-end",
+      "evidence_type": "test (integration)",
+      "evidence_location": "tests/test_phase1_round_trips.py — 30 round-trips × 3 desks",
+      "strength": "strong",
+      "reviewer_caveat": "Synthetic data only."
+    },
+    {
+      "claim": "Shared-infra zero-diff under equity-VRP redeployment",
+      "evidence_type": "test (portability)",
+      "evidence_location": "tests/test_phase2_equity_vrp_portability.py + test_phase2_portability_contract.py (44 passing)",
+      "strength": "strong",
+      "reviewer_caveat": "Only the 2-desk equity MVP has been redeployed; broader claims about any future family are not directly supported."
+    },
+    {
+      "claim": "Gate 3 runtime hot-swap passes for all desks",
+      "evidence_type": "test (unit + integration)",
+      "evidence_location": "tests/test_logic_gate_multi_scenario.py::test_logic_gate_hot_swap_always_passes + test_phase_a/b/c_*.py + test_earnings_calendar.py",
+      "strength": "strong",
+      "reviewer_caveat": "Tests a specific stub-swap scenario; not a general 'any future desk' claim."
+    },
+    {
+      "claim": "Replay byte-identity across runs",
+      "evidence_type": "test (determinism)",
+      "evidence_location": "tests/test_replay_determinism.py + tests/test_sim_equity_vrp.py D12 golden fixtures",
+      "strength": "strong",
+      "reviewer_caveat": "Only exercises the code-as-shipped; dependency-upgrade-induced drift untested."
+    },
+    {
+      "claim": "Controller excludes stale forecasts from combined_signal",
+      "evidence_type": "test",
+      "evidence_location": "tests/test_staleness_propagation.py + tests/test_controller_retire_exclusion.py",
+      "strength": "strong"
+    },
+    {
+      "claim": "supply_disruption_news has Gate 1 skill on a majority of 10 logic-gate seeds",
+      "evidence_type": "test (multi-seed)",
+      "evidence_location": "tests/test_logic_gate_multi_scenario.py post-W9 — 6/10 seeds pass per-scenario threshold; per-seed Gate 1 at 2-3/3",
+      "strength": "moderate",
+      "reviewer_caveat": "Sim's injected AR(1) + forward correlations are what make this pass; real-world skill is unknown."
+    },
+    {
+      "claim": "earnings_calendar Gate 1 rel_improvement 14.66% vs zero-return baseline",
+      "evidence_type": "test (single seed)",
+      "evidence_location": "tests/test_earnings_calendar.py::test_earnings_calendar_gate1_skill_on_new_channel — seed 7 probe",
+      "strength": "weak-to-moderate",
+      "reviewer_caveat": "Single seed. The sim's forward-correlated event channel is the MECHANISM — strip that and the desk has no skill."
+    },
+    {
+      "claim": "D12 golden fixtures preserved across 6 channel additions",
+      "evidence_type": "test (deterministic hash match)",
+      "evidence_location": "tests/test_sim_equity_vrp.py::test_dealer_inventory_golden_fixtures_unchanged + derived isolation tests per C9, C11, X1",
+      "strength": "strong"
+    },
+    {
+      "claim": "Capability-debit ledger records all open gaps",
+      "evidence_type": "manifest (docs/capability_debits.md)",
+      "evidence_location": "docs/capability_debits.md — D1, D7, D-16, D-17 entries",
+      "strength": "moderate",
+      "reviewer_caveat": "Manual discipline. No automated audit that every code-level debit has a ledger entry, or vice versa."
+    },
+    {
+      "claim": "Reliability-gate 4h soak verified",
+      "evidence_type": "operator run",
+      "evidence_location": "data/duckdb/soak_phase1.duckdb (4.5 MB, 2026-04-17)",
+      "strength": "weak (unconfirmed acceptance run)",
+      "reviewer_caveat": "The file may be a dry-run artefact, not the formal acceptance run. I-01 in raid_log.md still lists this as 'open'."
+    }
+  ],
+
+  "reviewer_guidance": {
+    "three_questions_a_serious_reviewer_should_focus_on_first": [
+      "The Controller's raw-sum rule (§8.2) sums weight × point_estimate across (desk, target) pairs. Under v1.16, storage_curve emits price-level WTI_FRONT_MONTH_CLOSE and the two merged oil desks emit WTI_FRONT_1W_LOG_RETURN. These units are not additive. Why is this not a v2-bump-requiring bug, and how is unit consistency actually enforced at runtime as opposed to by convention in the test harness?",
+      "Every Gate 1 / Gate 2 pass number in the repository is measured on a synthetic sim whose per-desk channels are AR(1)-correlated-by-construction with the target. The earnings_calendar channel's Gate 1 skill (14.66%) is demonstrably attributable to the sim's injected forward-correlation at lead=2. What would it take to convince you that any of these numbers will survive contact with a real data feed, and does the v1.16 roster design give that evidence?",
+      "The architectural claim is 'zero shared-infra diff under redeployment'. This was verified for the 2-desk equity-VRP MVP at phase2-mvp-v1.12 and re-verified through the v1.16 restructure. But adding a second asset class is easier than adding an N-th where N is large. What specifically about the current contracts surface would fail under a redeployment that introduced (a) continuous-time horizons, (b) cross-asset-pair desks, or (c) sub-daily frequency — and how is that coverage gap accounted for in the portability confidence rating?"
+    ],
+    "most_likely_place_the_design_is_correct_but_misleading": "The 'Gate 1 skill' numbers look like P&L-adjacent performance evidence but are actually RMSE-against-synthetic-baseline. A casual reader of the capability_debits.md 'all in-budget' closure could conclude that the system has measured alpha; it has not.",
+    "most_likely_place_the_design_is_stronger_than_it_looks": "The capability-debit discipline itself. The ledger + raid_log D-decisions + per-commit debit annotations constitute an unusual level of transparent self-criticism for a solo-operator research prototype. The fact that D-16 was OPENED and CLOSED within a 22-commit wave — with measurement of both opening and closing conditions — is stronger governance than most production systems achieve."
+  },
+
+  "final_self_assessment": {
+    "what_is_genuinely_verified": [
+      "The architecture composes end-to-end and replay-byte-identically",
+      "Gate 3 (hot-swap) passes for every desk across every test seed and observation mode",
+      "Shared-infra zero-diff under the specific 2-desk equity-VRP MVP redeployment",
+      "Sim-side D12 golden fixtures survive 6 channel additions",
+      "Staleness propagates from feed_incidents to Controller exclusion",
+      "The capability-debit ledger matches the open issues it lists (manual spot-check)"
+    ],
+    "what_is_only_partially_verified": [
+      "Gate 1 / Gate 2 skill claims — strong in the synthetic sim, zero evidence externally",
+      "Regime classifier robustness — tested with GroundTruth in phase_a/b/c, HMM tested only in isolation",
+      "Reliability-gate soak — 4h code-complete but not formally run",
+      "Composite-ridge performance for surface_positioning_feedback — Gate 3 strict-pass but no per-head diagnostics",
+      "Portability claim — strong for the one-additional-asset-class case; untested for N>2"
+    ],
+    "what_is_speculative_or_deferred": [
+      "Any P&L / Sharpe / drawdown measurement — no code exists (Phase 2P planned)",
+      "Real-data wiring — Phase 3, unscoped",
+      "Execution layer — zero code",
+      "BVAR / PyMC / Kalman escalations per §7.3 — commissioned, not shipped",
+      "Full HDP-HMM regime classifier — v0.3+ deferred",
+      "LLM event-extraction pipeline for supply_disruption_news — Phase 3 prerequisite",
+      "Signed option flow for customer_flow_pressure re-split — Phase 3"
+    ],
+    "single_biggest_reason_a_top_tier_reviewer_might_reject_the_claim": "The architecture's headline claim ('plumbing is correct, redeploys cleanly, composes safely') is verified. The plumbing is correct. But the system is presented as if that correctness is entitled to be called a 'trading system', and it is not. There is no P&L, no transaction cost, no execution, no real-data-validated desk. A reviewer who reads the PM artefacts casually could walk away with an inflated sense of readiness; a rigorous reviewer should reject any framing that does not sharply distinguish 'architecture-correct and portable in the synthetic regime' from 'capable of producing real returns'.",
+    "single_best_defence_of_the_design": "The system never claimed to be a trading system. Spec §1.1 is explicit: 'P&L is diagnostic, not the objective. The deliverable is the architecture.' Given that scope, the 27-commit v1.16 restructure + X1 + Y-series + Z wave delivered exactly what the spec required — a shared-infra-portable, capability-debit-governed, hot-swap-verified research architecture that composes across two domains with zero shared-infra diff and is ready for Phase 3 (real-data) once scoped. The discipline of opening debits explicitly (D-16, D-17) and closing them with evidence rather than assertion is the strongest single signal that the design does what it says."
+  }
+}
