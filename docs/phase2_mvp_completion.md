@@ -53,7 +53,7 @@ Rationale for the split (historical): 27 test-import migrations and 6 desk-direc
 | C10 | `aa5305e` | master_plan Phase 2 re-scope |
 | C11 | `44c2642` | fair_vol_baseline channel |
 | C12 | `a310ac6` | E2E verification + manifest updates + untracked WIP cleanup |
-| W2 | `9fecd81` | archive external_redesign_briefing as historical context |
+| W2 | `9fecd81` | archive external_redesign_briefing as historical context (deleted at v1.16 cleanup) |
 | W3 | `2ce9f2c` | inline ClassicalGeopoliticsModel → supply_disruption_news |
 | W4 | `8577100` | inline ClassicalDemandModel → oil_demand_nowcast |
 | W5 | `1944de4` | inline dealer+hedging ridges → surface_positioning_feedback |

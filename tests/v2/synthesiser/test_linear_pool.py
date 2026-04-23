@@ -13,7 +13,7 @@ from v2.feature_view import FeatureSpec, build_feature_view
 from v2.pit_store.manifest import open_manifest
 from v2.pit_store.reader import PITReader
 from v2.pit_store.writer import PITWriter
-from v2.synthesiser import synthesise_family
+from v2.synthesiser import FamilyInputMismatchError, synthesise_family
 
 _CAL = CalibrationMetadata(
     method="rolling_pinball_ratio",
@@ -32,6 +32,8 @@ def _forecast(
     data_quality_score: float = 0.9,
     abstain: bool = False,
     abstain_reason: str | None = None,
+    contract_hash: str = "sha256:contract",
+    release_calendar_version: str = "eia_wpsr:1.0.0",
 ) -> ForecastV2:
     m = open_manifest(tmp_path)
     try:
@@ -69,8 +71,8 @@ def _forecast(
             abstain_reason=abstain_reason,
             prereg_hash="sha256:prereg",
             code_commit="abcdef0",
-            contract_hash="sha256:contract",
-            release_calendar_version="eia_wpsr:1.0.0",
+            contract_hash=contract_hash,
+            release_calendar_version=release_calendar_version,
         )
     finally:
         m.close()
@@ -82,7 +84,11 @@ def _forecast(
 def test_single_desk_pools_to_identity(tmp_path):
     qv = (-0.10, -0.05, -0.02, 0.0, 0.02, 0.05, 0.10)
     f = _forecast(tmp_path, quantile_vector=qv)
-    fam = synthesise_family([f], contract_hash="sha256:c", release_calendar_version="v1")
+    fam = synthesise_family(
+        [f],
+        contract_hash="sha256:contract",
+        release_calendar_version="eia_wpsr:1.0.0",
+    )
     assert fam.abstain is False
     assert fam.quantile_vector is not None
     for a, b in zip(qv, fam.quantile_vector, strict=True):
@@ -96,7 +102,11 @@ def test_single_desk_pools_to_identity(tmp_path):
 
 def test_single_abstaining_desk_cascades_to_family_abstain(tmp_path):
     f = _forecast(tmp_path, abstain=True, abstain_reason="required feature missing")
-    fam = synthesise_family([f], contract_hash="sha256:c", release_calendar_version="v1")
+    fam = synthesise_family(
+        [f],
+        contract_hash="sha256:contract",
+        release_calendar_version="eia_wpsr:1.0.0",
+    )
     assert fam.abstain is True
     assert fam.quantile_vector is None
     assert "cascade" in fam.abstain_reason
@@ -112,7 +122,11 @@ def test_any_abstain_cascades_even_with_healthy_desks(tmp_path):
         abstain=True,
         abstain_reason="stale data",
     )
-    fam = synthesise_family([f_ok, f_bad], contract_hash="sha256:c", release_calendar_version="v1")
+    fam = synthesise_family(
+        [f_ok, f_bad],
+        contract_hash="sha256:contract",
+        release_calendar_version="eia_wpsr:1.0.0",
+    )
     assert fam.abstain is True
     assert "broken" in fam.abstaining_desk_ids
 
@@ -138,7 +152,9 @@ def test_zero_weight_desk_excluded_not_cascaded(tmp_path):
         data_quality_score=0.9,
     )
     fam = synthesise_family(
-        [f_good, f_muted], contract_hash="sha256:c", release_calendar_version="v1"
+        [f_good, f_muted],
+        contract_hash="sha256:contract",
+        release_calendar_version="eia_wpsr:1.0.0",
     )
     assert fam.abstain is False
     assert "muted" in fam.excluded_desk_ids
@@ -148,7 +164,11 @@ def test_zero_weight_desk_excluded_not_cascaded(tmp_path):
 def test_all_desks_zero_weight_triggers_family_abstain(tmp_path):
     f1 = _forecast(tmp_path / "a", desk_id="a", calibration_score=0.0)
     f2 = _forecast(tmp_path / "b", desk_id="b", data_quality_score=0.0)
-    fam = synthesise_family([f1, f2], contract_hash="sha256:c", release_calendar_version="v1")
+    fam = synthesise_family(
+        [f1, f2],
+        contract_hash="sha256:contract",
+        release_calendar_version="eia_wpsr:1.0.0",
+    )
     assert fam.abstain is True
     assert "all desks excluded" in fam.abstain_reason
     assert set(fam.excluded_desk_ids) == {"a", "b"}
@@ -159,7 +179,11 @@ def test_all_desks_zero_weight_triggers_family_abstain(tmp_path):
 
 def test_regime_posterior_defaults_to_normal(tmp_path):
     f = _forecast(tmp_path)
-    fam = synthesise_family([f], contract_hash="sha256:c", release_calendar_version="v1")
+    fam = synthesise_family(
+        [f],
+        contract_hash="sha256:contract",
+        release_calendar_version="eia_wpsr:1.0.0",
+    )
     assert fam.regime_posterior == {"normal": 1.0}
 
 
@@ -168,8 +192,8 @@ def test_regime_posterior_passed_through(tmp_path):
     fam = synthesise_family(
         [f],
         regime_posterior={"normal": 0.7, "shock": 0.3},
-        contract_hash="sha256:c",
-        release_calendar_version="v1",
+        contract_hash="sha256:contract",
+        release_calendar_version="eia_wpsr:1.0.0",
     )
     assert fam.regime_posterior == {"normal": 0.7, "shock": 0.3}
 
@@ -180,16 +204,54 @@ def test_regime_posterior_not_summing_to_one_rejected(tmp_path):
         synthesise_family(
             [f],
             regime_posterior={"normal": 0.4, "shock": 0.3},
-            contract_hash="sha256:c",
-            release_calendar_version="v1",
+            contract_hash="sha256:contract",
+            release_calendar_version="eia_wpsr:1.0.0",
         )
 
 
-# --- provenance passthrough ------------------------------------------------
+def test_negative_regime_posterior_rejected(tmp_path):
+    f = _forecast(tmp_path)
+    with pytest.raises(ValueError, match=r"\[0.0, 1.0\]"):
+        synthesise_family(
+            [f],
+            regime_posterior={"normal": 1.2, "shock": -0.2},
+            contract_hash="sha256:contract",
+            release_calendar_version="eia_wpsr:1.0.0",
+        )
+
+
+# --- provenance consistency ------------------------------------------------
+
+
+def test_family_contract_hash_must_match_inputs(tmp_path):
+    f = _forecast(tmp_path, contract_hash="sha256:contract")
+    with pytest.raises(FamilyInputMismatchError, match="family contract_hash"):
+        synthesise_family(
+            [f],
+            contract_hash="sha256:made_up_family",
+            release_calendar_version="eia_wpsr:1.0.0",
+        )
+
+
+def test_family_release_calendar_version_must_match_inputs(tmp_path):
+    f = _forecast(tmp_path, release_calendar_version="eia_wpsr:1.0.0")
+    with pytest.raises(FamilyInputMismatchError, match="family release_calendar_version"):
+        synthesise_family(
+            [f],
+            contract_hash="sha256:contract",
+            release_calendar_version="eia_wpsr:9.9.9",
+        )
+
+
+# --- provenance pass-through ------------------------------------------------
 
 
 def test_family_forecast_records_contract_hash(tmp_path):
-    f = _forecast(tmp_path)
+    f = _forecast(
+        tmp_path,
+        contract_hash="sha256:specific_contract",
+        release_calendar_version="eia_wpsr:1.0.0|cftc_cot:1.0.0",
+    )
     fam = synthesise_family(
         [f],
         contract_hash="sha256:specific_contract",
@@ -201,6 +263,10 @@ def test_family_forecast_records_contract_hash(tmp_path):
 
 def test_family_forecast_records_forecast_ids(tmp_path):
     f = _forecast(tmp_path)
-    fam = synthesise_family([f], contract_hash="sha256:c", release_calendar_version="v1")
+    fam = synthesise_family(
+        [f],
+        contract_hash="sha256:contract",
+        release_calendar_version="eia_wpsr:1.0.0",
+    )
     assert len(fam.contributing) == 1
     assert fam.contributing[0].forecast_id == f.forecast_id

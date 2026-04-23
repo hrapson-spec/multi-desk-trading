@@ -34,7 +34,7 @@ import numpy as np
 import pytest
 
 from attribution import compute_shapley_signal_space
-from contracts.target_variables import WTI_FRONT_1W_LOG_RETURN, WTI_FRONT_MONTH_CLOSE
+from contracts.target_variables import WTI_FRONT_MONTH_CLOSE
 from contracts.v1 import Forecast, Print, Provenance, RegimeLabel
 from controller import Controller, seed_cold_start
 from desks.oil_demand_nowcast import ClassicalOilDemandNowcastModel, OilDemandNowcastDesk
@@ -318,7 +318,10 @@ def test_phase_a_gate_pass_rate_across_three_desks(phase_a_setup, tmp_path):
         impr = r["metrics"]["g1"].get("relative_improvement", 0)
         print(f"  {name:30s}: {flags}  g1_impr={impr:+.2%}")
 
-    assert g1_count >= 1, f"Gate 1 pass rate too low: {g1_count}/3 (need storage_curve). Detailed: {results}"
+    assert g1_count >= 1, (
+        "Gate 1 pass rate too low: "
+        f"{g1_count}/3 (need storage_curve). Detailed: {results}"
+    )
     assert g2_count >= 1, f"Gate 2 pass rate too low: {g2_count}/3 (need storage_curve)"
     assert g3_count == 3, "Gate 3 (hot-swap) must pass for every desk"
     # Additional load-bearing check: storage_curve must pass Gate 1 and Gate 2

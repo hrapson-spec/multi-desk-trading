@@ -13,6 +13,11 @@ At v2.0 `regime_posterior` is pass-through metadata: it is recorded on
 the FamilyForecast, its values sum to 1.0 by v2.0 convention, and it
 contributes 1.0 to weight. Per-desk regime-weighted pooling activates
 at v2.2 alongside the real regime classifier.
+
+The family-level provenance fields (`contract_hash`,
+`release_calendar_version`) must match the shared values on the input
+ForecastV2s. The synthesiser will not stamp caller-supplied provenance
+onto a pooled forecast if it disagrees with the desks it combined.
 """
 
 from __future__ import annotations
@@ -24,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from v2.contracts.decision_unit import FIXED_QUANTILE_LEVELS, DecisionUnit
 from v2.contracts.forecast_v2 import CONTRACT_VERSION, ForecastV2
-from v2.synthesiser.compat import assert_compatible
+from v2.synthesiser.compat import FamilyInputMismatchError, assert_compatible
 from v2.synthesiser.pool import weighted_linear_pool_cdf
 
 
@@ -128,10 +133,22 @@ def synthesise_family(
     """
     assert_compatible(forecasts)
     ref = forecasts[0]
+    if contract_hash != ref.contract_hash:
+        raise FamilyInputMismatchError(
+            "family contract_hash must match input forecasts: "
+            f"{contract_hash!r} vs {ref.contract_hash!r}"
+        )
+    if release_calendar_version != ref.release_calendar_version:
+        raise FamilyInputMismatchError(
+            "family release_calendar_version must match input forecasts: "
+            f"{release_calendar_version!r} vs {ref.release_calendar_version!r}"
+        )
 
     rp = dict(regime_posterior) if regime_posterior else {"normal": 1.0}
     if not rp:
         raise ValueError("regime_posterior must not be empty")
+    if any(value < 0.0 or value > 1.0 for value in rp.values()):
+        raise ValueError("regime_posterior values must lie in [0.0, 1.0]")
     rp_sum = sum(rp.values())
     if not (0.999 <= rp_sum <= 1.001):
         raise ValueError(f"regime_posterior values must sum to 1.0 (got {rp_sum})")

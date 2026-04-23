@@ -141,3 +141,17 @@ def test_decision_ts_mismatch_rejected(tmp_path):
         m.close()
     with pytest.raises(FamilyInputMismatchError, match="decision_ts"):
         assert_compatible([f1, f3])
+
+
+def test_contract_hash_mismatch_rejected(tmp_path):
+    f1 = _mint(tmp_path / "a", contract_hash="sha256:contract_a")
+    f2 = _mint(tmp_path / "b", contract_hash="sha256:contract_b")
+    with pytest.raises(FamilyInputMismatchError, match="contract_hash mismatch"):
+        assert_compatible([f1, f2])
+
+
+def test_release_calendar_version_mismatch_rejected(tmp_path):
+    f1 = _mint(tmp_path / "a", release_calendar_version="eia_wpsr:1.0.0")
+    f2 = _mint(tmp_path / "b", release_calendar_version="eia_wpsr:2.0.0")
+    with pytest.raises(FamilyInputMismatchError, match="release_calendar_version mismatch"):
+        assert_compatible([f1, f2])

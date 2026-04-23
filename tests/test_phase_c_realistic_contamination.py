@@ -24,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 
-from contracts.target_variables import WTI_FRONT_1W_LOG_RETURN, WTI_FRONT_MONTH_CLOSE
+from contracts.target_variables import WTI_FRONT_MONTH_CLOSE
 from contracts.v1 import Forecast, Print, Provenance, RegimeLabel
 from controller import seed_cold_start
 from desks.oil_demand_nowcast import ClassicalOilDemandNowcastModel, OilDemandNowcastDesk

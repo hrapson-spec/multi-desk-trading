@@ -7,6 +7,8 @@ Every forecast in a synthesiser call must agree on:
     - decision_unit
     - quantile_levels (== FIXED_QUANTILE_LEVELS)
     - decision_ts
+    - contract_hash
+    - release_calendar_version
 
 Any mismatch raises FamilyInputMismatchError. Mixed-unit aggregation is
 the central failure mode v2 was designed to prevent; this check is the
@@ -54,6 +56,15 @@ def assert_compatible(forecasts: list[ForecastV2]) -> None:
             raise FamilyInputMismatchError(
                 f"decision_ts mismatch: {ref.decision_ts.isoformat()} "
                 f"vs {f.decision_ts.isoformat()}"
+            )
+        if f.contract_hash != ref.contract_hash:
+            raise FamilyInputMismatchError(
+                f"contract_hash mismatch: {ref.contract_hash!r} vs {f.contract_hash!r}"
+            )
+        if f.release_calendar_version != ref.release_calendar_version:
+            raise FamilyInputMismatchError(
+                "release_calendar_version mismatch: "
+                f"{ref.release_calendar_version!r} vs {f.release_calendar_version!r}"
             )
 
     # Grid must be the canonical fixed grid (redundant with ForecastV2's
