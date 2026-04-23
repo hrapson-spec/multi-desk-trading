@@ -18,6 +18,13 @@ Walk-forward and CPCV drivers land as B5b.
 
 from v2.eval.baselines import B0EWMAGaussian, B1Empirical
 from v2.eval.cost_model import CostParams, CostScenario, apply_costs
+from v2.eval.cpcv import (
+    CPCVParams,
+    CPCVSplit,
+    assert_no_label_leakage,
+    chronological_block_bounds,
+    generate_cpcv_splits,
+)
 from v2.eval.outcomes import RealisedOutcome
 from v2.eval.scoring import (
     approx_crps_from_quantiles,
@@ -28,19 +35,34 @@ from v2.eval.scoring import (
     pinball_loss,
 )
 from v2.eval.shadow_rule import monotone_b_tilde
+from v2.eval.walk_forward import (
+    DailyForecaster,
+    WalkForwardParams,
+    WalkForwardResult,
+    run_walk_forward,
+)
 
 __all__ = [
     "B0EWMAGaussian",
     "B1Empirical",
+    "CPCVParams",
+    "CPCVSplit",
     "CostParams",
     "CostScenario",
+    "DailyForecaster",
     "RealisedOutcome",
+    "WalkForwardParams",
+    "WalkForwardResult",
     "apply_costs",
     "approx_crps_from_quantiles",
+    "assert_no_label_leakage",
+    "chronological_block_bounds",
     "diebold_mariano_hac",
+    "generate_cpcv_splits",
     "interval_coverage",
     "mean_pinball_loss",
     "monotone_b_tilde",
     "moving_block_bootstrap",
     "pinball_loss",
+    "run_walk_forward",
 ]
