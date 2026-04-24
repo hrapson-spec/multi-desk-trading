@@ -1,6 +1,6 @@
 # S4-0 evidence manifest
 
-- **Status**: planning baseline, tag `v2-s4-0-plan-0.1`
+- **Status**: research-informed planning baseline, tag `v2-s4-0-research-0.1`
 - **Created**: 2026-04-24
 - **Stage**: S4-0 recorded replay
 

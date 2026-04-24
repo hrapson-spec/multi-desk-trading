@@ -1,6 +1,6 @@
 # S4-0 external researcher brief
 
-- **Status**: ready to commission
+- **Status**: fulfilled by `s4_0_research_findings.md`
 - **Created**: 2026-04-24
 - **Stage**: S4-0 recorded replay
 - **Owner**: Henri Rapson

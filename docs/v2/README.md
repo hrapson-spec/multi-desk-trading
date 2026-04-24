@@ -70,6 +70,8 @@ persisted into the `promotion_prereg.yaml` for any desk that cites it.
 |---|---|
 | `s4_0_dry_run_plan.md` | Pre-run plan for the first no-capital recorded replay rehearsal. |
 | `s4_0_researcher_brief.md` | External research commission for data-source, licence, and operational evidence requirements. |
+| `s4_0_research_findings.md` | External research output and conditional Databento source decision. |
+| `s4_0_licence_clearance_checklist.md` | Written licence and entitlement clearance checklist before S4-0 execution. |
 | `s4_0_evidence_manifest.md` | Required evidence pack structure for reviewer-grade S4-0 assessment. |
 | `s4_0_report_template.md` | Post-run report template using pre-registered stop/go criteria. |
 

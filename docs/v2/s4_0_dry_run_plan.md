@@ -1,6 +1,6 @@
 # S4-0 recorded replay dry-run plan
 
-- **Status**: planning baseline, tag `v2-s4-0-plan-0.1`
+- **Status**: research-informed planning baseline, tag `v2-s4-0-research-0.1`
 - **Created**: 2026-04-24
 - **Owner**: Henri Rapson
 - **Stage**: S4-0 recorded replay
@@ -27,7 +27,7 @@ real-capital claim.
 | Data mode | Recorded replay first |
 | First run duration | One full declared trading session |
 | Expansion condition | Move to one trading week only after a clean one-session rehearsal |
-| Data-source path | External researcher recommends sources before selection |
+| Data-source path | Databento CME Globex MDP 3.0 is the conditional preferred technical candidate |
 | Evidence standard | Strict reviewer-grade evidence pack |
 
 ## 3. Scope
@@ -134,7 +134,11 @@ A one-session rehearsal is clean only if:
 
 ## 9. Next Blocking Decision
 
-The next blocking decision is data-source selection. No S4-0 execution work
-should claim readiness until the external research brief has resolved vendor
-fit, timestamp semantics, entitlement evidence, licence boundaries, and local
-replay/storage rights for the selected source.
+The external research commission is complete. The next blocking decision is
+written licence and entitlement clearance for the conditional Databento CME
+Globex MDP 3.0 path, including non-display use, local storage, local replay,
+retention, internal review, external reviewer access if needed, and derived
+evidence handling.
+
+If Databento/CME clearance is not available, record the blocker and evaluate
+the alternate candidates in `s4_0_research_findings.md`.
