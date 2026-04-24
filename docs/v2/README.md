@@ -64,6 +64,15 @@ persisted into the `promotion_prereg.yaml` for any desk that cites it.
 | B9 | `b9_killctl_spec.md` | Operator kill-switch commands and incident log path. |
 | B10 | `b10_phase_b_dry_run_spec.md` | Deterministic Phase B operational dry-run closeout. |
 
+## S4 recorded replay planning
+
+| Artefact | Purpose |
+|---|---|
+| `s4_0_dry_run_plan.md` | Pre-run plan for the first no-capital recorded replay rehearsal. |
+| `s4_0_researcher_brief.md` | External research commission for data-source, licence, and operational evidence requirements. |
+| `s4_0_evidence_manifest.md` | Required evidence pack structure for reviewer-grade S4-0 assessment. |
+| `s4_0_report_template.md` | Post-run report template using pre-registered stop/go criteria. |
+
 ## Substrate
 
 `substrate/` holds the phase-2 review artefacts that led to the v2 redesign.
