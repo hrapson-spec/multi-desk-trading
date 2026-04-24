@@ -19,6 +19,7 @@
 | Market-data depth / fill-claim limits | `v2/s4_0/market_data.py` | `tests/v2/s4_0/test_market_data.py` |
 | Order-book overclaim control | MBP-10 cannot claim queue-position accuracy; MBO required for order-level queue claims | `test_fill_claim_limits_prevent_overclaiming_queue_accuracy_on_mbp10` |
 | Synthetic tick/book fixture gate | `v2/s4_0/synthetic_microstructure.py` | `tests/v2/s4_0/test_synthetic_microstructure.py` |
+| MBP-10 simulated-fill drill | `v2/s4_0/mbp10_fill.py` | `tests/v2/s4_0/test_mbp10_fill.py` |
 
 ## Deliberately Deferred
 
@@ -49,6 +50,10 @@ Latest result:
 - `tests/v2/s4_0`: 25 passed after S4-1 fixture gate
 - `ruff`: all checks passed after S4-1 fixture gate
 - `tests/v2`: 260 passed after S4-1 fixture gate
+- S4-2 MBP-10 fill drill: OK; 4 orders, 57/132 quantity filled, fill ratio 0.4318181818, max depth 2, queue position not claimed.
+- `tests/v2/s4_0`: 30 passed after S4-2 fill drill
+- `ruff`: all checks passed after S4-2 fill drill
+- `tests/v2`: 265 passed after S4-2 fill drill
 
 ## Interpretation
 
@@ -64,3 +69,7 @@ green.
 
 S4-1 now has an executable synthetic fixture layer. It validates tick ordering
 and order-book fixture semantics without claiming real book reconstruction.
+
+S4-2 now has an executable MBP-10 simulated-fill drill. It validates
+depth-aware synthetic fills, partial fills, limit constraints, aggregate
+metrics, and the queue-position non-claim.

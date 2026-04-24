@@ -9,6 +9,15 @@ from v2.s4_0.contract_roll import (
     select_front_next,
 )
 from v2.s4_0.market_data import MarketDataDepth, fill_claim_limit
+from v2.s4_0.mbp10_fill import (
+    FillSide,
+    FillSlice,
+    MBP10DrillReport,
+    MBP10FillResult,
+    MBP10Order,
+    run_mbp10_drill,
+    simulate_mbp10_fill,
+)
 from v2.s4_0.recorded_replay import (
     S40PreflightError,
     S40RecordedReplayReport,
@@ -25,6 +34,11 @@ from v2.s4_0.synthetic_microstructure import (
 __all__ = [
     "CLContract",
     "ExchangeCalendar",
+    "FillSide",
+    "FillSlice",
+    "MBP10DrillReport",
+    "MBP10FillResult",
+    "MBP10Order",
     "MarketDataDepth",
     "ReplayTick",
     "RollPolicy",
@@ -38,6 +52,8 @@ __all__ = [
     "evaluate_synthetic_fixture",
     "fill_claim_limit",
     "roll_status",
+    "run_mbp10_drill",
     "run_s4_0_recorded_replay",
     "select_front_next",
+    "simulate_mbp10_fill",
 ]
