@@ -33,7 +33,19 @@ from v2.paper_live.loop import MarketTickContext, run_decision_tick
 from v2.runtime.kill_switch import load_kill_switch
 from v2.runtime.replay import SnapshotVerification, verify_snapshot_receipt
 from v2.runtime.restore import restore_runtime_snapshot
+from v2.s4_0.market_data import MBPLevel, MBPSnapshot
+from v2.s4_0.mbp10_fill import FillSide, MBP10Order, run_mbp10_drill
 from v2.s4_0.replay_quality import ReplayTick, analyze_tick_quality
+from v2.s4_0.synthetic_claims import (
+    HiddenLiquidityScenario,
+    ProfitabilityTrade,
+    QueueEvent,
+    QueueEventKind,
+    QueuePositionScenario,
+    evaluate_profitability,
+    simulate_hidden_liquidity,
+    simulate_queue_position,
+)
 
 _FAMILY = "oil_wti_5d"
 _DESK = "s4_0_recorded_replay_desk"
@@ -197,6 +209,7 @@ class S40RecordedReplayReport:
     manifest_path: Path
     data_quality: DataQualityReport
     runtime_counts: dict[str, int]
+    microstructure_diagnostics: dict[str, Any]
     replay_verifications: tuple[SnapshotVerification, ...]
     restored_counts: dict[str, int] | None
     stop_go: str
@@ -232,6 +245,7 @@ def run_s4_0_recorded_replay(
     samples = _decision_samples(config, accepted)
     replay_verifications: list[SnapshotVerification] = []
     exceptions: list[str] = []
+    microstructure_diagnostics: dict[str, Any] = {}
 
     simulator = InternalSimulator.open(runtime_root)
     try:
@@ -244,6 +258,9 @@ def run_s4_0_recorded_replay(
             decision_dir=dirs["08_decisions"],
         )
         _write_simulation_ledger(simulator, dirs["09_simulation"])
+        microstructure_diagnostics = _write_microstructure_diagnostics(
+            config, dirs["09_simulation"]
+        )
         _write_runtime_controls(simulator.runtime_root, dirs["10_runtime_controls"])
         _write_incidents(simulator.runtime_root, dirs["11_incidents"])
         _write_monitoring(config, quality, runtime_counts, dirs["12_monitoring"])
@@ -281,8 +298,24 @@ def run_s4_0_recorded_replay(
 
     _write_reconciliation(quality, runtime_counts, dirs["13_reconciliation"])
     stop_go = _stop_go(quality, replay_verifications, restored_counts, exceptions)
-    _write_final_report(config, quality, runtime_counts, stop_go, exceptions, dirs["16_report"])
-    manifest_path = _write_manifest(config, run_root, quality, runtime_counts, exceptions, stop_go)
+    _write_final_report(
+        config,
+        quality,
+        runtime_counts,
+        microstructure_diagnostics,
+        stop_go,
+        exceptions,
+        dirs["16_report"],
+    )
+    manifest_path = _write_manifest(
+        config,
+        run_root,
+        quality,
+        runtime_counts,
+        microstructure_diagnostics,
+        exceptions,
+        stop_go,
+    )
 
     return S40RecordedReplayReport(
         run_id=config.run_id,
@@ -292,6 +325,7 @@ def run_s4_0_recorded_replay(
         manifest_path=manifest_path,
         data_quality=quality,
         runtime_counts=runtime_counts,
+        microstructure_diagnostics=microstructure_diagnostics,
         replay_verifications=tuple(replay_verifications),
         restored_counts=restored_counts,
         stop_go=stop_go,
@@ -314,6 +348,7 @@ def main(argv: list[str] | None = None) -> int:
         "run_root": str(report.run_root),
         "stop_go": report.stop_go,
         "runtime_counts": report.runtime_counts,
+        "microstructure_diagnostics": report.microstructure_diagnostics,
         "manifest_path": str(report.manifest_path),
         "exceptions": list(report.exceptions),
     }
@@ -811,6 +846,169 @@ def _write_simulation_ledger(simulator: InternalSimulator, root: Path) -> None:
     )
 
 
+def _write_microstructure_diagnostics(
+    config: S40ReplayConfig, root: Path
+) -> dict[str, Any]:
+    mbp10_report = _synthetic_mbp10_drill(config)
+    queue_result = simulate_queue_position(
+        QueuePositionScenario(
+            order_id="synthetic_queue_probe",
+            symbol=config.front_symbol,
+            side=FillSide.BUY,
+            order_quantity=20,
+            initial_queue_ahead=15,
+            events=(
+                QueueEvent(QueueEventKind.TRADE, 5),
+                QueueEvent(QueueEventKind.CANCEL, 4),
+                QueueEvent(QueueEventKind.TRADE, 10),
+                QueueEvent(QueueEventKind.TRADE, 16),
+            ),
+        )
+    )
+    hidden_result = simulate_hidden_liquidity(
+        HiddenLiquidityScenario(
+            order_id="synthetic_hidden_probe",
+            symbol=config.front_symbol,
+            side=FillSide.BUY,
+            order_quantity=30,
+            displayed_quantity=10,
+            hidden_quantity=15,
+            replenish_clip=5,
+        )
+    )
+    profitability_result = evaluate_profitability(
+        [
+            ProfitabilityTrade(
+                "synthetic_buy_win",
+                FillSide.BUY,
+                quantity=10,
+                entry_price=75,
+                exit_price=76,
+                fees=1,
+            ),
+            ProfitabilityTrade(
+                "synthetic_sell_win",
+                FillSide.SELL,
+                quantity=5,
+                entry_price=80,
+                exit_price=78,
+                fees=0.5,
+            ),
+            ProfitabilityTrade(
+                "synthetic_buy_loss",
+                FillSide.BUY,
+                quantity=4,
+                entry_price=50,
+                exit_price=49,
+                fees=0.25,
+            ),
+        ]
+    )
+    claim_boundary = _claim_boundary(config)
+    synthetic_claims = {
+        "queue_position": queue_result.as_dict(),
+        "hidden_liquidity": hidden_result.as_dict(),
+        "profitability": profitability_result.as_dict(),
+    }
+    summary = {
+        "source_market_depth": config.market_depth,
+        "claim_boundary": claim_boundary,
+        "mbp10": {
+            "metrics": mbp10_report.metrics(),
+            "synthetic_fixture_only": True,
+            "source_used_for_formal_order_book_claim": False,
+        },
+        "synthetic_claims": synthetic_claims,
+        "overall": {
+            "ok": (
+                mbp10_report.ok
+                and queue_result.ok
+                and hidden_result.ok
+                and profitability_result.ok
+                and not queue_result.real_queue_position_claimed
+                and not hidden_result.real_hidden_liquidity_claimed
+                and not profitability_result.real_profitability_claimed
+            ),
+            "real_queue_position_claimed": False,
+            "real_hidden_liquidity_claimed": False,
+            "real_profitability_claimed": False,
+            "production_readiness_claimed": False,
+        },
+    }
+    _write_json(root / "claim_boundary_report.json", claim_boundary)
+    _write_json(root / "mbp10_diagnostic_report.json", mbp10_report.as_dict())
+    _write_json(root / "synthetic_claim_diagnostics.json", synthetic_claims)
+    _write_json(root / "microstructure_diagnostics_summary.json", summary)
+    return summary
+
+
+def _synthetic_mbp10_drill(config: S40ReplayConfig):
+    book = MBPSnapshot(
+        levels=(
+            MBPLevel(bid_price=74.99, bid_size=10, ask_price=75.01, ask_size=10),
+            MBPLevel(bid_price=74.98, bid_size=20, ask_price=75.02, ask_size=20),
+            MBPLevel(bid_price=74.97, bid_size=30, ask_price=75.03, ask_size=30),
+        )
+    )
+    orders = [
+        MBP10Order("synthetic_buy_full", config.front_symbol, FillSide.BUY, quantity=15),
+        MBP10Order(
+            "synthetic_sell_full",
+            config.front_symbol,
+            FillSide.SELL,
+            quantity=12,
+            limit_price=74.98,
+        ),
+        MBP10Order(
+            "synthetic_buy_partial",
+            config.front_symbol,
+            FillSide.BUY,
+            quantity=100,
+            limit_price=75.02,
+        ),
+        MBP10Order(
+            "synthetic_sell_unfilled",
+            config.front_symbol,
+            FillSide.SELL,
+            quantity=5,
+            limit_price=75.10,
+        ),
+    ]
+    return run_mbp10_drill(orders, {config.front_symbol: book})
+
+
+def _claim_boundary(config: S40ReplayConfig) -> dict[str, Any]:
+    depth = config.market_depth.lower().replace("-", "_").replace("/", "_")
+    is_mbp10 = depth in {"mbp10", "mbp_10", "level_2", "level2", "l2"}
+    if is_mbp10:
+        allowed_claim = "level_2_depth_aware_fill_approximation"
+        prohibited_claims = [
+            "queue_position_accuracy",
+            "hidden_liquidity_inference",
+            "real_profitability",
+            "production_readiness",
+        ]
+    else:
+        allowed_claim = "source_limited_recorded_replay_only"
+        prohibited_claims = [
+            "tick_level_replay",
+            "order_book_replay",
+            "queue_position_accuracy",
+            "hidden_liquidity_inference",
+            "real_profitability",
+            "production_readiness",
+        ]
+    return {
+        "source_market_depth": config.market_depth,
+        "allowed_claim": allowed_claim,
+        "prohibited_claims": prohibited_claims,
+        "synthetic_mbp10_fixture_included": True,
+        "synthetic_claim_diagnostics_included": True,
+        "real_or_licensed_data_required": False,
+        "formal_real_market_claims_blocked": True,
+    }
+
+
 def _write_runtime_controls(runtime_root: Path, root: Path) -> None:
     kill_switch = runtime_root / "kill_switch.yaml"
     if kill_switch.exists():
@@ -926,10 +1124,13 @@ def _write_final_report(
     config: S40ReplayConfig,
     quality: DataQualityReport,
     runtime_counts: dict[str, int],
+    microstructure_diagnostics: dict[str, Any],
     stop_go: str,
     exceptions: list[str],
     root: Path,
 ) -> None:
+    mbp10_metrics = microstructure_diagnostics.get("mbp10", {}).get("metrics", {})
+    overall = microstructure_diagnostics.get("overall", {})
     report = f"""# {config.stage} run report
 
 - Run ID: `{config.run_id}`
@@ -947,6 +1148,16 @@ def _write_final_report(
 - Execution rows: {runtime_counts["execution_ledger"]}
 - Duplicate rows: {quality.duplicate_rows}
 - Out-of-order rows: {quality.out_of_order_rows}
+
+## Microstructure Diagnostics
+
+- Source market depth: `{config.market_depth}`
+- MBP-10 synthetic diagnostic fill ratio: {mbp10_metrics.get("fill_ratio", "n/a")}
+- MBP-10 synthetic diagnostic max depth consumed: {mbp10_metrics.get("max_depth_consumed", "n/a")}
+- Real queue position claimed: {overall.get("real_queue_position_claimed", False)}
+- Real hidden liquidity claimed: {overall.get("real_hidden_liquidity_claimed", False)}
+- Real profitability claimed: {overall.get("real_profitability_claimed", False)}
+- Production readiness claimed: {overall.get("production_readiness_claimed", False)}
 
 ## Exceptions
 
@@ -967,6 +1178,7 @@ def _write_manifest(
     run_root: Path,
     quality: DataQualityReport,
     runtime_counts: dict[str, int],
+    microstructure_diagnostics: dict[str, Any],
     exceptions: list[str],
     stop_go: str,
 ) -> Path:
@@ -994,6 +1206,16 @@ def _write_manifest(
         "record_counts": {
             **_dataclass_payload(quality),
             **runtime_counts,
+        },
+        "microstructure_diagnostics": {
+            "source_market_depth": config.market_depth,
+            "claim_boundary": microstructure_diagnostics.get("claim_boundary", {}),
+            "overall": microstructure_diagnostics.get("overall", {}),
+            "mbp10_report_hash": (
+                microstructure_diagnostics.get("mbp10", {})
+                .get("metrics", {})
+                .get("report_hash")
+            ),
         },
         "known_exceptions": exceptions,
         "stop_go": stop_go,

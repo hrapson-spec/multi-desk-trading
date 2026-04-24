@@ -21,6 +21,7 @@
 | Synthetic tick/book fixture gate | `v2/s4_0/synthetic_microstructure.py` | `tests/v2/s4_0/test_synthetic_microstructure.py` |
 | MBP-10 simulated-fill drill | `v2/s4_0/mbp10_fill.py` | `tests/v2/s4_0/test_mbp10_fill.py` |
 | Synthetic queue/hidden/PnL diagnostics | `v2/s4_0/synthetic_claims.py` | `tests/v2/s4_0/test_synthetic_claims.py` |
+| Replay-integrated microstructure evidence | S4 replay now writes claim-boundary, MBP-10, queue/hidden/PnL diagnostic reports into `09_simulation/` | `tests/v2/s4_0/test_recorded_replay.py` |
 
 ## Deliberately Deferred
 
@@ -60,6 +61,11 @@ Latest result:
 - `tests/v2/s4_0`: 38 passed after S4-2A diagnostic layer
 - `ruff`: all checks passed after S4-2A diagnostic layer
 - `tests/v2`: 273 passed after S4-2A diagnostic layer
+- S4-2B replay integration: local/free replay green with integrated microstructure diagnostics; 20 family decisions, 40 execution ledger rows, 0 exceptions, source depth `daily-continuous-front-futures-proxy`, MBP-10 diagnostic fill ratio 0.4318181818, real queue/hidden/profitability/production-readiness claims false.
+- `tests/v2/s4_0/test_recorded_replay.py`: 6 passed after S4-2B integration
+- `tests/v2/s4_0`: 38 passed after S4-2B integration
+- `ruff`: all checks passed after S4-2B integration
+- `tests/v2`: 273 passed after S4-2B integration
 
 ## Interpretation
 
@@ -84,3 +90,7 @@ S4-2A now has explicit synthetic diagnostics for queue-position mechanics,
 hidden-liquidity mechanics, and profitability arithmetic. This adds measurable
 coverage for the disputed areas without converting them into real-market
 claims.
+
+S4-2B integrates those diagnostics into recorded-replay evidence packs. Each
+run now emits a claim-boundary report, MBP-10 diagnostic report, synthetic
+claim diagnostics, and a manifest-level summary.

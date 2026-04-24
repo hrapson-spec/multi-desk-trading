@@ -79,6 +79,8 @@ persisted into the `promotion_prereg.yaml` for any desk that cites it.
 | `s4_1_closeout.md` | Formal S4-1 closeout decision. |
 | `s4_2_mbp10_simulated_fill_spec.md` | MBP-10 simulated-fill drill specification. |
 | `s4_2_mbp10_simulated_fill_results.md` | MBP-10 simulated-fill drill metric results. |
+| `s4_2a_synthetic_claim_diagnostics.md` | Synthetic queue-position, hidden-liquidity, and profitability diagnostics. |
+| `s4_2b_replay_microstructure_integration.md` | Integration of microstructure diagnostics into recorded-replay evidence packs. |
 | `s4_test_execution_status.md` | Executed test-layer status for CL roll policy, synthetic tick replay semantics, lineage, and market-depth claim limits. |
 | `s4_0_run_config_template.yaml` | Local run-config template for local/free or synthetic replay files. |
 | `s4_0_evidence_manifest.md` | Required evidence pack structure for reviewer-grade S4-0 assessment. |

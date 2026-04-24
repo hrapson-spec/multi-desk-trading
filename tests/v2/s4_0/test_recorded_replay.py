@@ -39,6 +39,13 @@ def test_s4_0_recorded_replay_writes_reviewer_grade_evidence(tmp_path):
     assert report.restored_counts == {"family_decisions": 3, "execution_ledger": 6}
     assert report.data_quality.front_rows == 4
     assert report.data_quality.next_rows == 2
+    assert report.microstructure_diagnostics["overall"] == {
+        "ok": True,
+        "real_queue_position_claimed": False,
+        "real_hidden_liquidity_claimed": False,
+        "real_profitability_claimed": False,
+        "production_readiness_claimed": False,
+    }
     assert report.manifest_path.exists()
     assert (report.run_root / "manifest.sha256").exists()
     assert (report.run_root / "03_raw_feed" / "raw_source_manifest.json").exists()
@@ -51,6 +58,14 @@ def test_s4_0_recorded_replay_writes_reviewer_grade_evidence(tmp_path):
         report.run_root / "06_features" / "source_to_decision_lineage_report.json"
     ).exists()
     assert (report.run_root / "09_simulation" / "simulated_ledger.csv").exists()
+    assert (report.run_root / "09_simulation" / "claim_boundary_report.json").exists()
+    assert (report.run_root / "09_simulation" / "mbp10_diagnostic_report.json").exists()
+    assert (
+        report.run_root / "09_simulation" / "synthetic_claim_diagnostics.json"
+    ).exists()
+    assert (
+        report.run_root / "09_simulation" / "microstructure_diagnostics_summary.json"
+    ).exists()
     assert (report.run_root / "14_replay" / "replay_verification_report.json").exists()
     assert (report.run_root / "15_restore" / "restore_summary.json").exists()
     stop_go = json.loads(
@@ -69,6 +84,23 @@ def test_s4_0_recorded_replay_writes_reviewer_grade_evidence(tmp_path):
             encoding="utf-8"
         )
     )
+    claim_boundary = json.loads(
+        (report.run_root / "09_simulation" / "claim_boundary_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    mbp10 = json.loads(
+        (report.run_root / "09_simulation" / "mbp10_diagnostic_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    synthetic_claims = json.loads(
+        (
+            report.run_root
+            / "09_simulation"
+            / "synthetic_claim_diagnostics.json"
+        ).read_text(encoding="utf-8")
+    )
     assert len(lineage) == 3
     assert {row["symbol"] for row in lineage} == {"CLM6"}
     assert all(row["source_row_hash"] for row in lineage)
@@ -80,6 +112,13 @@ def test_s4_0_recorded_replay_writes_reviewer_grade_evidence(tmp_path):
     ]
     assert timestamp_audit["negative_latency_count"] == 0
     assert timestamp_audit["tick_quality"]["sequence_gap_count"] == 0
+    assert claim_boundary["allowed_claim"] == "source_limited_recorded_replay_only"
+    assert "order_book_replay" in claim_boundary["prohibited_claims"]
+    assert mbp10["metrics"]["fill_ratio"] == pytest.approx(57 / 132)
+    assert mbp10["metrics"]["queue_position_claimed"] is False
+    assert synthetic_claims["queue_position"]["real_queue_position_claimed"] is False
+    assert synthetic_claims["hidden_liquidity"]["real_hidden_liquidity_claimed"] is False
+    assert synthetic_claims["profitability"]["real_profitability_claimed"] is False
 
 
 def test_s4_0_recorded_replay_requires_run_control_and_no_money_attestation(tmp_path):

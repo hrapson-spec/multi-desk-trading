@@ -137,3 +137,19 @@ The run is not assessable unless:
 - Reconciliation samples are present.
 - Replay and restore reports exist.
 - Stop/go assessment is signed or explicitly left unsigned with a blocker.
+
+## 8. Microstructure Diagnostic Evidence
+
+S4 replay evidence packs now include microstructure diagnostic evidence under
+`09_simulation/`:
+
+- `claim_boundary_report.json`
+- `mbp10_diagnostic_report.json`
+- `synthetic_claim_diagnostics.json`
+- `microstructure_diagnostics_summary.json`
+
+These files are required to distinguish what the replay source can support from
+what is only tested under synthetic assumptions. If the source is not tick-level
+or order-book data, the claim-boundary report must prohibit tick replay,
+order-book replay, queue-position accuracy, hidden-liquidity inference, real
+profitability, and production-readiness claims.
