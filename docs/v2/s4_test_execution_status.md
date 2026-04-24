@@ -24,6 +24,7 @@
 | Replay-integrated microstructure evidence | S4 replay now writes claim-boundary, MBP-10, queue/hidden/PnL diagnostic reports into `09_simulation/` | `tests/v2/s4_0/test_recorded_replay.py` |
 | Local/free WTI model-quality diagnostic | PIT-safe ridge walk-forward over FRED WTI spot proxy versus empirical and zero-Gaussian baselines | `tests/v2/s4_0/test_model_quality.py` |
 | PIT-safe exogenous feature hook | Model-quality gate can merge release-timestamped features by backward as-of semantics | `tests/v2/s4_0/test_model_quality.py` |
+| CFTC COT WTI feature normalizer | Normalizes official disaggregated COT CSV/text shape for WTI market code `067651` into release-timestamped exogenous features | `tests/v2/ingest/test_cftc_cot.py` |
 
 ## Deliberately Deferred
 
@@ -78,6 +79,11 @@ Latest result:
 - `tests/v2/s4_0`: 43 passed after S4-3A hook
 - `ruff`: all checks passed after S4-3A hook
 - `tests/v2`: 278 passed after S4-3A hook
+- S4-3B CFTC feature normalizer: WTI COT disaggregated futures-only rows normalized into Friday 15:30 ET release-timestamped features; managed-money, producer/merchant, swap, other reportable, and non-reportable net positioning exposed.
+- `tests/v2/ingest/test_cftc_cot.py`: 4 passed after S4-3B normalizer
+- `tests/v2/ingest tests/v2/s4_0`: 51 passed after S4-3B normalizer
+- `ruff`: all checks passed after S4-3B normalizer
+- `tests/v2`: 282 passed after S4-3B normalizer
 
 ## Interpretation
 
@@ -113,3 +119,6 @@ must improve signal inputs rather than advance production-readiness claims.
 
 S4-3A adds the PIT-safe exogenous feature hook required for EIA/CFTC/event
 features.
+
+S4-3B adds the first concrete exogenous feature adapter: CFTC COT WTI
+positioning normalization with release-time indexing.

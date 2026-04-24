@@ -43,7 +43,9 @@ gate after each addition.
 
 **Mitigation progress.** S4-3A added a PIT-safe exogenous feature hook. The gate
 can now consume release-timestamped EIA/CFTC/event features using backward
-as-of semantics, so the next work is concrete data-adapter implementation.
+as-of semantics. S4-3B added a CFTC COT WTI feature normalizer for market code
+`067651`; the remaining step is historical file download/local placement and a
+rerun of the S4-3 gate with positioning features.
 
 **Pinned by.**
 
@@ -51,6 +53,7 @@ as-of semantics, so the next work is concrete data-adapter implementation.
 - `tests/v2/s4_0/test_model_quality.py`
 - `docs/v2/s4_3_wti_model_quality_diagnostic.md`
 - `docs/v2/s4_3a_exogenous_feature_hook.md`
+- `docs/v2/s4_3b_cftc_cot_feature_normalizer.md`
 
 ### D1. Phase A model weakness — v1.16 narrowed scope
 

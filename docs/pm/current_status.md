@@ -12,14 +12,14 @@
 | v1.16 restructure | Shipped and documented. | `master_plan.md`, `../first_principles_redesign.md`, `raid_log.md` D-15/D-18 |
 | Reliability gate | 86-decision reliability sample assessed clean; full 4h wall-clock gate was deliberately interrupted and is not claimed passed. | `master_plan.md`, `raid_log.md` I-01, `reliability_sample_assessment_2026-04-24.md` |
 | Capability debits | Remaining open debits are model-quality focused. | `../capability_debits.md` |
-| v2 redesign | B6b-B10 accepted; Phase B complete; S4-0 and S4-1 accepted/closed. S4-2 through S4-2B evidence harness is verified. S4-3 shows the price-only ridge is not promotable; S4-3A adds PIT-safe exogenous feature plumbing. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md`, `../v2/b8_runtime_restore_spec.md`, `../v2/b9_killctl_spec.md`, `../v2/b10_phase_b_dry_run_spec.md`, `../v2/phase_b_closeout.md`, `../v2/s4_0_closeout.md`, `../v2/s4_1_closeout.md`, `../v2/s4_2_mbp10_simulated_fill_results.md`, `../v2/s4_2a_synthetic_claim_diagnostics.md`, `../v2/s4_2b_replay_microstructure_integration.md`, `../v2/s4_3_wti_model_quality_diagnostic.md`, `../v2/s4_3a_exogenous_feature_hook.md` |
-| S4 test layer | CL roll policy, synthetic replay quality, timestamp/lineage evidence, market-depth claim limits, microstructure evidence, local/free WTI model-quality diagnostics, and PIT-safe exogenous feature plumbing are executable. | `../v2/s4_test_execution_status.md` |
+| v2 redesign | B6b-B10 accepted; Phase B complete; S4-0 and S4-1 accepted/closed. S4-2 through S4-2B evidence harness is verified. S4-3 shows the price-only ridge is not promotable; S4-3A/S4-3B add PIT-safe exogenous feature plumbing and CFTC WTI positioning normalization. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md`, `../v2/b8_runtime_restore_spec.md`, `../v2/b9_killctl_spec.md`, `../v2/b10_phase_b_dry_run_spec.md`, `../v2/phase_b_closeout.md`, `../v2/s4_0_closeout.md`, `../v2/s4_1_closeout.md`, `../v2/s4_2_mbp10_simulated_fill_results.md`, `../v2/s4_2a_synthetic_claim_diagnostics.md`, `../v2/s4_2b_replay_microstructure_integration.md`, `../v2/s4_3_wti_model_quality_diagnostic.md`, `../v2/s4_3a_exogenous_feature_hook.md`, `../v2/s4_3b_cftc_cot_feature_normalizer.md` |
+| S4 test layer | CL roll policy, synthetic replay quality, timestamp/lineage evidence, market-depth claim limits, microstructure evidence, local/free WTI model-quality diagnostics, PIT-safe exogenous feature plumbing, and CFTC WTI positioning normalization are executable. | `../v2/s4_test_execution_status.md` |
 
 ## 2. Next outcomes
 
 | Priority | Outcome | Target / trigger | Tracking |
 |---|---|---|---|
-| 1 | Improve the S4-3 model-quality result by adding real observable WTI features, starting with EIA inventory/supply data and CFTC positioning where available. | Current phase gate. | `../v2/s4_3_wti_model_quality_diagnostic.md`, `../capability_debits.md` |
+| 1 | Run S4-3 with CFTC COT positioning once local historical CFTC files are available or the official downloader is implemented. | Current phase gate. | `../v2/s4_3b_cftc_cot_feature_normalizer.md`, `../v2/s4_3_wti_model_quality_diagnostic.md` |
 | 2 | Re-run S4-3 after each signal-feature addition; promote only if the model beats both baselines on pinball and CRPS. | After feature additions. | `../v2/s4_test_execution_status.md` |
 | 3 | Decide whether the clean 86-decision sample is enough for current PM purposes or whether exact 4h evidence is still needed. | Before making a strict §12.2 reliability-gate claim. | `raid_log.md` I-01, `reliability_sample_assessment_2026-04-24.md` |
 
@@ -103,6 +103,11 @@ Record only verification that supports a project claim.
 | 2026-04-24 | `uv run pytest tests/v2/s4_0 -q` | 43 passed | S4-3A full S4 slice coverage |
 | 2026-04-24 | `uv run ruff check v2/s4_0 tests/v2/s4_0` | All checks passed | S4-3A touched-code lint |
 | 2026-04-24 | `uv run pytest tests/v2 -q` | 278 passed | No v2 regression after S4-3A hook |
+| 2026-04-24 | S4-3B CFTC COT feature normalizer | WTI market code `067651` normalized into release-timestamped positioning features for the S4-3 exogenous hook | S4-3B CFTC feature adapter |
+| 2026-04-24 | `uv run pytest tests/v2/ingest/test_cftc_cot.py -q` | 4 passed | CFTC WTI normalizer coverage |
+| 2026-04-24 | `uv run pytest tests/v2/ingest tests/v2/s4_0 -q` | 51 passed | Ingest + S4 adjacent coverage |
+| 2026-04-24 | `uv run ruff check v2/ingest v2/s4_0 tests/v2/ingest tests/v2/s4_0` | All checks passed | S4-3B touched-code lint |
+| 2026-04-24 | `uv run pytest tests/v2 -q` | 282 passed | No v2 regression after S4-3B normalizer |
 
 ## 5. This-week commitment
 
