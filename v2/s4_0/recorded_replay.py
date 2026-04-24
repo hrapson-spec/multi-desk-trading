@@ -51,6 +51,10 @@ _OPTIONAL_CLEARANCE_FILES = (
     "unresolved_licence_questions.md",
 )
 _OWNER_APPROVAL_LINE = "- [x] Approved for S4-0 no-money recorded replay execution."
+_OWNER_APPROVAL_LINE_S4_0F = (
+    "- [x] Approved for S4-0F no-money free-data rehearsal execution."
+)
+_OWNER_APPROVAL_LINES = (_OWNER_APPROVAL_LINE, _OWNER_APPROVAL_LINE_S4_0F)
 _OWNER_REJECTION_LINE = "- [x] Not approved; blocker remains."
 _NO_MONEY_LINES = (
     "- [x] No live broker route is configured.",
@@ -90,6 +94,7 @@ class S40ReplayConfig:
     code_commit: str = "s4-0-local"
     contract_hash: str = "sha256:s4-0-contract"
     release_calendar_version: str = "cme-cl-calendar:s4-0"
+    stage: str = _STAGE
 
     @property
     def run_root(self) -> Path:
@@ -320,9 +325,11 @@ def _preflight(config: S40ReplayConfig) -> None:
     owner_clearance = (config.licence_clearance_dir / "owner_clearance_decision.md").read_text(
         encoding="utf-8"
     )
-    if _OWNER_REJECTION_LINE in owner_clearance or _OWNER_APPROVAL_LINE not in owner_clearance:
+    if _OWNER_REJECTION_LINE in owner_clearance or not any(
+        line in owner_clearance for line in _OWNER_APPROVAL_LINES
+    ):
         raise S40PreflightError(
-            "owner_clearance_decision.md must explicitly approve S4-0 execution"
+            "owner_clearance_decision.md must explicitly approve S4-0/S4-0F execution"
         )
     no_money = (config.licence_clearance_dir / "no_money_attestation.md").read_text(
         encoding="utf-8"
@@ -879,9 +886,10 @@ def _write_final_report(
     exceptions: list[str],
     root: Path,
 ) -> None:
-    report = f"""# S4-0 run report
+    report = f"""# {config.stage} run report
 
 - Run ID: `{config.run_id}`
+- Stage: `{config.stage}`
 - Vendor: `{config.vendor}`
 - Dataset: `{config.dataset}`
 - Front / next: `{config.front_symbol}` / `{config.next_symbol}`
@@ -931,7 +939,7 @@ def _write_manifest(
         )
     payload = {
         "run_id": config.run_id,
-        "stage": _STAGE,
+        "stage": config.stage,
         "instrument_family": _FAMILY,
         "session_start": _utc_iso(config.session_start),
         "session_end": _utc_iso(config.session_end),
@@ -992,6 +1000,7 @@ def _config_payload(config: S40ReplayConfig) -> dict[str, Any]:
         "copy_raw": config.copy_raw,
         "restore_last_snapshot": config.restore_last_snapshot,
         "code_commit": config.code_commit,
+        "stage": config.stage,
     }
 
 

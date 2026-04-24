@@ -123,7 +123,34 @@ def test_s4_0_cli_runs_from_yaml_config(tmp_path, capsys):
     assert output["runtime_counts"] == {"execution_ledger": 6, "family_decisions": 3}
 
 
-def _clearance_dir(tmp_path, *, approved: bool = True):
+def test_s4_0f_free_data_stage_label_and_approval_line(tmp_path):
+    clearance = _clearance_dir(tmp_path, approval_line="s4_0f")
+    raw = _raw_feed(tmp_path)
+    config = S40ReplayConfig(
+        run_id="s4_0f_wti_free_data_001",
+        evidence_root=tmp_path / "evidence",
+        raw_feed_csv=raw,
+        licence_clearance_dir=clearance,
+        front_symbol="CLM6",
+        next_symbol="CLN6",
+        session_start=datetime(2026, 4, 24, 13, 0, tzinfo=UTC),
+        session_end=datetime(2026, 4, 24, 16, 0, tzinfo=UTC),
+        decision_interval_minutes=60,
+        stage="S4-0F free-data operational rehearsal",
+    )
+
+    report = run_s4_0_recorded_replay(config)
+
+    manifest = yaml.safe_load(report.manifest_path.read_text(encoding="utf-8"))
+    final_report = (
+        report.run_root / "16_report" / "final_s4_0_report.md"
+    ).read_text(encoding="utf-8")
+    assert report.ok is True
+    assert manifest["stage"] == "S4-0F free-data operational rehearsal"
+    assert "# S4-0F free-data operational rehearsal run report" in final_report
+
+
+def _clearance_dir(tmp_path, *, approved: bool = True, approval_line: str = "s4_0"):
     root = tmp_path / "clearance"
     root.mkdir()
     (root / "licence_boundary_table.md").write_text(
@@ -132,11 +159,12 @@ def _clearance_dir(tmp_path, *, approved: bool = True):
     (root / "vendor_terms_summary.md").write_text(
         "vendor_terms_summary.md: cleared for test fixture\n", encoding="utf-8"
     )
-    owner_line = (
-        "- [x] Approved for S4-0 no-money recorded replay execution."
-        if approved
-        else "- [ ] Approved for S4-0 no-money recorded replay execution."
+    approval_text = (
+        "Approved for S4-0F no-money free-data rehearsal execution."
+        if approval_line == "s4_0f"
+        else "Approved for S4-0 no-money recorded replay execution."
     )
+    owner_line = f"- [{'x' if approved else ' '}] {approval_text}"
     (root / "owner_clearance_decision.md").write_text(
         f"{owner_line}\n- [ ] Not approved; blocker remains.\n",
         encoding="utf-8",
