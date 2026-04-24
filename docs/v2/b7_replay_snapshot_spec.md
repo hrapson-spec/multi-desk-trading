@@ -1,6 +1,6 @@
 # B7 replay and snapshot verification specification
 
-**Status**: implemented in workspace; awaiting acceptance tag  
+**Status**: accepted baseline, tag `v2-b7-replay-verifier-0.1`  
 **Created**: 2026-04-24  
 **Slice**: v2 Phase B, immediately after B6b  
 **Depends on**: B6b paper-live runtime receipts, deterministic runtime IDs  

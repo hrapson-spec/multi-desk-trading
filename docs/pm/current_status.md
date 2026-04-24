@@ -12,14 +12,14 @@
 | v1.16 restructure | Shipped and documented. | `master_plan.md`, `../first_principles_redesign.md`, `raid_log.md` D-15/D-18 |
 | Reliability gate | 4h wall-clock soak still appears open in PM tracking. | `master_plan.md` in-flight row; `raid_log.md` I-01 |
 | Capability debits | Remaining open debits are model-quality focused. | `../capability_debits.md` |
-| v2 redesign | B6b accepted at tag `v2-b6b-paper-live-0.1`; B7 replay verification implemented and tested. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md` |
+| v2 redesign | B6b accepted at `v2-b6b-paper-live-0.1`; B7 accepted at `v2-b7-replay-verifier-0.1`. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md` |
 
 ## 2. Next outcomes
 
 | Priority | Outcome | Target / trigger | Tracking |
 |---|---|---|---|
-| 1 | Review and acceptance-tag B7 replay/snapshot receipt verification. | Before any S4-style operational claim. | `../v2/b7_replay_snapshot_spec.md` |
-| 2 | Decide when to expand from receipt verification to full restore tooling. | After B7. | Add/update RAID decision if it changes scope. |
+| 1 | Specify and implement full restore tooling on top of B7 receipt verification. | Before any S4-style operational claim. | New B8 spec. |
+| 2 | Decide whether restore tooling is enough for a dry-run harness or whether `killctl` comes first. | After B8. | Add/update RAID decision if it changes scope. |
 | 3 | Resolve the 4h reliability soak status for the older v1 track. | Before any v1 phase-complete claim that depends on it. | `raid_log.md` I-01 |
 
 ## 3. Open exceptions
@@ -48,6 +48,6 @@ Record only verification that supports a project claim.
 
 Keep this to at most three outcomes.
 
-- [ ] Review/tag B7 replay/snapshot receipt verification.
-- [ ] Decide whether next slice is full restore tooling or S4 dry-run harness.
+- [ ] Specify B8 full restore tooling.
+- [ ] Implement B8 restore verification path.
 - [ ] Reconcile reliability-gate status.
