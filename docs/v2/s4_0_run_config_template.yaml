@@ -1,5 +1,6 @@
 # Template for local licensed paths; keep filled configs outside the docs tree.
 run_id: s4_0_wti_YYYYMMDD_001
+stage: S4-0 recorded replay
 evidence_root: /absolute/path/to/evidence/s4_0
 raw_feed_csv: /absolute/path/to/licensed/databento_cl_replay.csv
 licence_clearance_dir: /absolute/path/to/licence_clearance
