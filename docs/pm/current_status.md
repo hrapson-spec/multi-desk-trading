@@ -12,8 +12,8 @@
 | v1.16 restructure | Shipped and documented. | `master_plan.md`, `../first_principles_redesign.md`, `raid_log.md` D-15/D-18 |
 | Reliability gate | 86-decision reliability sample assessed clean; full 4h wall-clock gate was deliberately interrupted and is not claimed passed. | `master_plan.md`, `raid_log.md` I-01, `reliability_sample_assessment_2026-04-24.md` |
 | Capability debits | Remaining open debits are model-quality focused. | `../capability_debits.md` |
-| v2 redesign | B6b-B10 accepted; Phase B complete; S4-0 and S4-1 accepted/closed. S4-2 through S4-2B evidence harness is verified. S4-3 model-quality diagnostic is implemented and shows the simple ridge signal is not promotable. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md`, `../v2/b8_runtime_restore_spec.md`, `../v2/b9_killctl_spec.md`, `../v2/b10_phase_b_dry_run_spec.md`, `../v2/phase_b_closeout.md`, `../v2/s4_0_closeout.md`, `../v2/s4_1_closeout.md`, `../v2/s4_2_mbp10_simulated_fill_results.md`, `../v2/s4_2a_synthetic_claim_diagnostics.md`, `../v2/s4_2b_replay_microstructure_integration.md`, `../v2/s4_3_wti_model_quality_diagnostic.md` |
-| S4 test layer | CL roll policy, synthetic replay quality, timestamp/lineage evidence, market-depth claim limits, microstructure evidence, and local/free WTI model-quality diagnostics are executable. | `../v2/s4_test_execution_status.md` |
+| v2 redesign | B6b-B10 accepted; Phase B complete; S4-0 and S4-1 accepted/closed. S4-2 through S4-2B evidence harness is verified. S4-3 shows the price-only ridge is not promotable; S4-3A adds PIT-safe exogenous feature plumbing. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md`, `../v2/b8_runtime_restore_spec.md`, `../v2/b9_killctl_spec.md`, `../v2/b10_phase_b_dry_run_spec.md`, `../v2/phase_b_closeout.md`, `../v2/s4_0_closeout.md`, `../v2/s4_1_closeout.md`, `../v2/s4_2_mbp10_simulated_fill_results.md`, `../v2/s4_2a_synthetic_claim_diagnostics.md`, `../v2/s4_2b_replay_microstructure_integration.md`, `../v2/s4_3_wti_model_quality_diagnostic.md`, `../v2/s4_3a_exogenous_feature_hook.md` |
+| S4 test layer | CL roll policy, synthetic replay quality, timestamp/lineage evidence, market-depth claim limits, microstructure evidence, local/free WTI model-quality diagnostics, and PIT-safe exogenous feature plumbing are executable. | `../v2/s4_test_execution_status.md` |
 
 ## 2. Next outcomes
 
@@ -98,6 +98,11 @@ Record only verification that supports a project claim.
 | 2026-04-24 | `uv run pytest tests/v2/s4_0 -q` | 42 passed | S4-3 full S4 slice coverage |
 | 2026-04-24 | `uv run ruff check v2/s4_0 tests/v2/s4_0` | All checks passed | S4-3 touched-code lint |
 | 2026-04-24 | `uv run pytest tests/v2 -q` | 277 passed | No v2 regression after S4-3 diagnostic |
+| 2026-04-24 | S4-3A exogenous feature hook | PIT-safe backward-as-of feature merge added for release-timestamped EIA/CFTC/event features | S4-3A signal-expansion path |
+| 2026-04-24 | `uv run pytest tests/v2/s4_0/test_model_quality.py -q` | 5 passed | S4-3A exogenous-hook coverage |
+| 2026-04-24 | `uv run pytest tests/v2/s4_0 -q` | 43 passed | S4-3A full S4 slice coverage |
+| 2026-04-24 | `uv run ruff check v2/s4_0 tests/v2/s4_0` | All checks passed | S4-3A touched-code lint |
+| 2026-04-24 | `uv run pytest tests/v2 -q` | 278 passed | No v2 regression after S4-3A hook |
 
 ## 5. This-week commitment
 

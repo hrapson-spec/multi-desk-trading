@@ -41,11 +41,16 @@ claims: EIA weekly inventory/supply data, CFTC positioning, carry/term-structure
 proxies where free data permits, and event-calendar flags. Re-run the same S4-3
 gate after each addition.
 
+**Mitigation progress.** S4-3A added a PIT-safe exogenous feature hook. The gate
+can now consume release-timestamped EIA/CFTC/event features using backward
+as-of semantics, so the next work is concrete data-adapter implementation.
+
 **Pinned by.**
 
 - `v2/s4_0/model_quality.py`
 - `tests/v2/s4_0/test_model_quality.py`
 - `docs/v2/s4_3_wti_model_quality_diagnostic.md`
+- `docs/v2/s4_3a_exogenous_feature_hook.md`
 
 ### D1. Phase A model weakness — v1.16 narrowed scope
 

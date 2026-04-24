@@ -23,6 +23,7 @@
 | Synthetic queue/hidden/PnL diagnostics | `v2/s4_0/synthetic_claims.py` | `tests/v2/s4_0/test_synthetic_claims.py` |
 | Replay-integrated microstructure evidence | S4 replay now writes claim-boundary, MBP-10, queue/hidden/PnL diagnostic reports into `09_simulation/` | `tests/v2/s4_0/test_recorded_replay.py` |
 | Local/free WTI model-quality diagnostic | PIT-safe ridge walk-forward over FRED WTI spot proxy versus empirical and zero-Gaussian baselines | `tests/v2/s4_0/test_model_quality.py` |
+| PIT-safe exogenous feature hook | Model-quality gate can merge release-timestamped features by backward as-of semantics | `tests/v2/s4_0/test_model_quality.py` |
 
 ## Deliberately Deferred
 
@@ -72,6 +73,11 @@ Latest result:
 - `tests/v2/s4_0`: 42 passed after S4-3 diagnostic
 - `ruff`: all checks passed after S4-3 diagnostic
 - `tests/v2`: 277 passed after S4-3 diagnostic
+- S4-3A exogenous hook: model-quality gate now accepts release-timestamped exogenous features and merges them with backward as-of semantics.
+- `tests/v2/s4_0/test_model_quality.py`: 5 passed after S4-3A hook
+- `tests/v2/s4_0`: 43 passed after S4-3A hook
+- `ruff`: all checks passed after S4-3A hook
+- `tests/v2`: 278 passed after S4-3A hook
 
 ## Interpretation
 
@@ -104,3 +110,6 @@ claim diagnostics, and a manifest-level summary.
 S4-3 adds the first local/free WTI model-quality diagnostic. The current simple
 ridge signal fails promotion against conservative baselines, so the next work
 must improve signal inputs rather than advance production-readiness claims.
+
+S4-3A adds the PIT-safe exogenous feature hook required for EIA/CFTC/event
+features.

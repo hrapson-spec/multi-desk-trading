@@ -113,3 +113,7 @@ The next work should not be production hardening. It should be signal research:
 - Add CFTC positioning features.
 - Add event calendar flags.
 - Re-run the same S4-3 gate before promoting any model-quality claim.
+
+S4-3A has now added the PIT-safe exogenous feature hook needed for that work.
+Feature rows are merged by backward as-of release timestamp, not by economic
+observation date.

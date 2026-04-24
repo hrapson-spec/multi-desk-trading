@@ -38,6 +38,7 @@ class WTIModelQualityReport:
     decisions: int
     horizon_days: int
     warmup_days: int
+    exogenous_feature_columns: tuple[str, ...]
     min_train_samples_observed: int
     max_train_samples_observed: int
     model_pinball_loss: float
@@ -76,6 +77,7 @@ class WTIModelQualityReport:
             "decisions": self.decisions,
             "horizon_days": self.horizon_days,
             "warmup_days": self.warmup_days,
+            "exogenous_feature_columns": list(self.exogenous_feature_columns),
             "min_train_samples_observed": self.min_train_samples_observed,
             "max_train_samples_observed": self.max_train_samples_observed,
             "model_pinball_loss": self.model_pinball_loss,
@@ -108,7 +110,10 @@ class WTIModelQualityReport:
 
 
 def run_wti_model_quality_diagnostic(
-    source_path: Path, params: WTIModelQualityParams | None = None
+    source_path: Path,
+    params: WTIModelQualityParams | None = None,
+    *,
+    exogenous_features: pd.DataFrame | None = None,
 ) -> WTIModelQualityReport:
     """Run a PIT-safe walk-forward ridge diagnostic on free WTI prices."""
     params = params or WTIModelQualityParams()
@@ -122,11 +127,24 @@ def run_wti_model_quality_diagnostic(
         raise ValueError("ridge_alpha must be >= 0")
 
     prices = load_wti_price_series(source_path)
-    frame = _feature_frame(prices, params.horizon_days)
+    frame, exogenous_cols = _feature_frame(
+        prices,
+        params.horizon_days,
+        exogenous_features=exogenous_features,
+    )
     if len(frame) < params.warmup_days + params.horizon_days + params.min_train_samples:
         raise ValueError("not enough rows for requested warmup, horizon, and train size")
 
-    feature_cols = ["lag1", "lag2", "mom5", "mom20", "vol20", "vol60", "z20"]
+    feature_cols = [
+        "lag1",
+        "lag2",
+        "mom5",
+        "mom20",
+        "vol20",
+        "vol60",
+        "z20",
+        *exogenous_cols,
+    ]
     levels = np.asarray(FIXED_QUANTILE_LEVELS, dtype=float)
     model_q: list[np.ndarray] = []
     empirical_q: list[np.ndarray] = []
@@ -201,6 +219,7 @@ def run_wti_model_quality_diagnostic(
         "model_crps": model_crps,
         "empirical_crps": empirical_crps,
         "zero_gaussian_crps": zero_crps,
+        "exogenous_feature_columns": exogenous_cols,
         "directional_accuracy": directional,
         "promoted_for_research": promoted,
     }
@@ -211,6 +230,7 @@ def run_wti_model_quality_diagnostic(
         decisions=int(y.size),
         horizon_days=params.horizon_days,
         warmup_days=params.warmup_days,
+        exogenous_feature_columns=tuple(exogenous_cols),
         min_train_samples_observed=int(min(train_counts)),
         max_train_samples_observed=int(max(train_counts)),
         model_pinball_loss=model_pinball,
@@ -275,7 +295,12 @@ def load_wti_price_series(source_path: Path) -> pd.Series:
     return series
 
 
-def _feature_frame(price: pd.Series, horizon_days: int) -> pd.DataFrame:
+def _feature_frame(
+    price: pd.Series,
+    horizon_days: int,
+    *,
+    exogenous_features: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, list[str]]:
     log_price = np.log(price)
     ret1 = log_price.diff()
     frame = pd.DataFrame(index=price.index)
@@ -288,7 +313,41 @@ def _feature_frame(price: pd.Series, horizon_days: int) -> pd.DataFrame:
     frame["vol60"] = ret1.rolling(60).std()
     frame["z20"] = (price / price.rolling(20).mean()) - 1.0
     frame["target_5d"] = log_price.shift(-horizon_days) - log_price
-    return frame
+    if exogenous_features is None:
+        return frame, []
+    return _merge_exogenous_features(frame, exogenous_features)
+
+
+def _merge_exogenous_features(
+    frame: pd.DataFrame,
+    exogenous_features: pd.DataFrame,
+) -> tuple[pd.DataFrame, list[str]]:
+    if not isinstance(exogenous_features.index, pd.DatetimeIndex):
+        raise ValueError("exogenous_features must use a DatetimeIndex")
+    exog = exogenous_features.copy()
+    exog.index = pd.DatetimeIndex(pd.to_datetime(exog.index, utc=True))
+    exog = exog.sort_index()
+    exog = exog[~exog.index.duplicated(keep="last")]
+    numeric = exog.apply(pd.to_numeric, errors="coerce")
+    numeric = numeric.dropna(axis=1, how="all")
+    if numeric.empty:
+        raise ValueError("exogenous_features must contain numeric columns")
+    renamed = {
+        column: f"exog_{column}"
+        for column in numeric.columns
+    }
+    numeric = numeric.rename(columns=renamed)
+    left = frame.reset_index(names="decision_ts").sort_values("decision_ts")
+    right = numeric.reset_index(names="decision_ts").sort_values("decision_ts")
+    merged = pd.merge_asof(
+        left,
+        right,
+        on="decision_ts",
+        direction="backward",
+        allow_exact_matches=True,
+    )
+    merged = merged.set_index("decision_ts")
+    return merged, list(renamed.values())
 
 
 def _ridge_predict(

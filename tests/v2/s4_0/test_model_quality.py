@@ -56,6 +56,33 @@ def test_model_quality_diagnostic_is_deterministic(tmp_path):
     assert first.as_dict() == second.as_dict()
 
 
+def test_model_quality_diagnostic_accepts_asof_exogenous_features(tmp_path):
+    path = _predictable_wti_csv(tmp_path, n=500)
+    release_index = pd.date_range("2020-02-01", periods=70, freq="W-WED", tz="UTC")
+    exogenous = pd.DataFrame(
+        {"inventory_surprise": np.sin(np.arange(len(release_index)) / 3.0)},
+        index=release_index,
+    )
+
+    report = run_wti_model_quality_diagnostic(
+        path,
+        WTIModelQualityParams(
+            warmup_days=180,
+            min_train_samples=90,
+            horizon_days=5,
+            ridge_alpha=2.0,
+        ),
+        exogenous_features=exogenous,
+    )
+
+    assert report.ok is True
+    assert report.exogenous_feature_columns == ("exog_inventory_surprise",)
+    assert report.decisions > 0
+    assert report.as_dict()["exogenous_feature_columns"] == [
+        "exog_inventory_surprise"
+    ]
+
+
 def test_model_quality_loader_accepts_s4_replay_style_csv(tmp_path):
     path = tmp_path / "replay.csv"
     path.write_text(
