@@ -75,6 +75,25 @@ def test_s4_0_recorded_replay_requires_licence_and_no_money_clearance(tmp_path):
         run_s4_0_recorded_replay(config)
 
 
+def test_s4_0_recorded_replay_rejects_unapproved_clearance_template(tmp_path):
+    raw = _raw_feed(tmp_path)
+    clearance = _clearance_dir(tmp_path, approved=False)
+
+    config = S40ReplayConfig(
+        run_id="s4_0_wti_20260424_001",
+        evidence_root=tmp_path / "evidence",
+        raw_feed_csv=raw,
+        licence_clearance_dir=clearance,
+        front_symbol="CLM6",
+        next_symbol="CLN6",
+        session_start=datetime(2026, 4, 24, 13, 0, tzinfo=UTC),
+        session_end=datetime(2026, 4, 24, 16, 0, tzinfo=UTC),
+    )
+
+    with pytest.raises(S40PreflightError, match="must explicitly approve"):
+        run_s4_0_recorded_replay(config)
+
+
 def test_s4_0_cli_runs_from_yaml_config(tmp_path, capsys):
     clearance = _clearance_dir(tmp_path)
     raw = _raw_feed(tmp_path)
@@ -104,16 +123,38 @@ def test_s4_0_cli_runs_from_yaml_config(tmp_path, capsys):
     assert output["runtime_counts"] == {"execution_ledger": 6, "family_decisions": 3}
 
 
-def _clearance_dir(tmp_path):
+def _clearance_dir(tmp_path, *, approved: bool = True):
     root = tmp_path / "clearance"
     root.mkdir()
-    for name in (
-        "licence_boundary_table.md",
-        "vendor_terms_summary.md",
-        "owner_clearance_decision.md",
-        "no_money_attestation.md",
-    ):
-        (root / name).write_text(f"{name}: cleared for test fixture\n", encoding="utf-8")
+    (root / "licence_boundary_table.md").write_text(
+        "licence_boundary_table.md: cleared for test fixture\n", encoding="utf-8"
+    )
+    (root / "vendor_terms_summary.md").write_text(
+        "vendor_terms_summary.md: cleared for test fixture\n", encoding="utf-8"
+    )
+    owner_line = (
+        "- [x] Approved for S4-0 no-money recorded replay execution."
+        if approved
+        else "- [ ] Approved for S4-0 no-money recorded replay execution."
+    )
+    (root / "owner_clearance_decision.md").write_text(
+        f"{owner_line}\n- [ ] Not approved; blocker remains.\n",
+        encoding="utf-8",
+    )
+    checked = "[x]" if approved else "[ ]"
+    (root / "no_money_attestation.md").write_text(
+        "\n".join(
+            [
+                f"- {checked} No live broker route is configured.",
+                f"- {checked} No funded account is connected.",
+                f"- {checked} No live order API key is present in the run environment.",
+                f"- {checked} Execution is internal simulation only.",
+                f"- {checked} Any paper/live brokerage integration is out of scope for this run.",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     return root
 
 

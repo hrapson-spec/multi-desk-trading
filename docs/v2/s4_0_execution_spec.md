@@ -22,6 +22,9 @@ The runner can execute once these local inputs exist:
   decision interval.
 
 The runner refuses to start if required clearance files are missing.
+It also refuses pending templates: `owner_clearance_decision.md` must have the
+S4-0 approval checkbox checked, and `no_money_attestation.md` must have all
+no-money attestations checked.
 
 ## 3. Command
 

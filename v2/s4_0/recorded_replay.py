@@ -50,6 +50,15 @@ _OPTIONAL_CLEARANCE_FILES = (
     "reviewer_access_model.md",
     "unresolved_licence_questions.md",
 )
+_OWNER_APPROVAL_LINE = "- [x] Approved for S4-0 no-money recorded replay execution."
+_OWNER_REJECTION_LINE = "- [x] Not approved; blocker remains."
+_NO_MONEY_LINES = (
+    "- [x] No live broker route is configured.",
+    "- [x] No funded account is connected.",
+    "- [x] No live order API key is present in the run environment.",
+    "- [x] Execution is internal simulation only.",
+    "- [x] Any paper/live brokerage integration is out of scope for this run.",
+)
 
 
 class S40PreflightError(RuntimeError):
@@ -307,6 +316,22 @@ def _preflight(config: S40ReplayConfig) -> None:
     if missing:
         raise S40PreflightError(
             "licence/no-money clearance files missing: " + ", ".join(missing)
+        )
+    owner_clearance = (config.licence_clearance_dir / "owner_clearance_decision.md").read_text(
+        encoding="utf-8"
+    )
+    if _OWNER_REJECTION_LINE in owner_clearance or _OWNER_APPROVAL_LINE not in owner_clearance:
+        raise S40PreflightError(
+            "owner_clearance_decision.md must explicitly approve S4-0 execution"
+        )
+    no_money = (config.licence_clearance_dir / "no_money_attestation.md").read_text(
+        encoding="utf-8"
+    )
+    missing_attestations = [line for line in _NO_MONEY_LINES if line not in no_money]
+    if missing_attestations:
+        raise S40PreflightError(
+            "no_money_attestation.md missing checked attestations: "
+            + ", ".join(missing_attestations)
         )
 
 
