@@ -74,6 +74,8 @@ persisted into the `promotion_prereg.yaml` for any desk that cites it.
 | `s4_0_licence_clearance_checklist.md` | Archived checklist; no longer a requirement for S4-0 local/free replay execution. |
 | `s4_0_execution_spec.md` | Executable recorded-replay runner boundary, command, and acceptance tests. |
 | `s4_0f_free_data_rehearsal.md` | Free-data operational rehearsal result now accepted under the local/free S4-0 scope. |
+| `s4_0_closeout.md` | Formal S4-0 closeout decision under the revised local/free scope. |
+| `s4_1_synthetic_tick_book_spec.md` | Next gate for synthetic tick and order-book fixture validation. |
 | `s4_test_execution_status.md` | Executed test-layer status for CL roll policy, synthetic tick replay semantics, lineage, and market-depth claim limits. |
 | `s4_0_run_config_template.yaml` | Local run-config template for local/free or synthetic replay files. |
 | `s4_0_evidence_manifest.md` | Required evidence pack structure for reviewer-grade S4-0 assessment. |

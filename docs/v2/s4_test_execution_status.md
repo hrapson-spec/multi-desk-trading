@@ -18,11 +18,12 @@
 | Sequence gaps vs time gaps | Material sequence gaps separated from no-trade style time gaps | `test_sequence_gap_is_material_sev1`, `test_time_gap_without_sequence_break_is_not_the_same_as_sequence_gap` |
 | Market-data depth / fill-claim limits | `v2/s4_0/market_data.py` | `tests/v2/s4_0/test_market_data.py` |
 | Order-book overclaim control | MBP-10 cannot claim queue-position accuracy; MBO required for order-level queue claims | `test_fill_claim_limits_prevent_overclaiming_queue_accuracy_on_mbp10` |
+| Synthetic tick/book fixture gate | `v2/s4_0/synthetic_microstructure.py` | `tests/v2/s4_0/test_synthetic_microstructure.py` |
 
 ## Deliberately Deferred
 
-- Full MBO reconstructor.
-- PCAP/raw-feed replay.
+- Full MBO reconstructor beyond explicit deferral checks.
+- PCAP/raw-feed replay beyond explicit deferral checks.
 - Real/licensed CL front/next replay.
 - Real/licensed tick/order-book replay.
 - Any profitability or production-readiness claim.
@@ -44,6 +45,10 @@ Latest result:
 - `tests/v2`: 255 passed after removing the licensed-data gate
 - `s4_0_wti_futures_yfinance_20251230_002`: green local/free S4-0 rerun
 - `s4_0c_wti_futures_yfinance_week_20251219_001`: green one-week local/free expansion
+- S4-1 synthetic tick/book fixture tests added for deterministic hashes, sequence gaps, top-of-book/MBP validation, and MBO deferral.
+- `tests/v2/s4_0`: 25 passed after S4-1 fixture gate
+- `ruff`: all checks passed after S4-1 fixture gate
+- `tests/v2`: 260 passed after S4-1 fixture gate
 
 ## Interpretation
 
@@ -56,3 +61,6 @@ non-claims.
 The local/free recorded replay gate has now run twice under the revised scope:
 a current-scope full-window rerun and an explicit one-week expansion. Both were
 green.
+
+S4-1 now has an executable synthetic fixture layer. It validates tick ordering
+and order-book fixture semantics without claiming real book reconstruction.

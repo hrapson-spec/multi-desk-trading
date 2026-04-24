@@ -16,6 +16,11 @@ from v2.s4_0.recorded_replay import (
     run_s4_0_recorded_replay,
 )
 from v2.s4_0.replay_quality import ReplayTick, analyze_tick_quality
+from v2.s4_0.synthetic_microstructure import (
+    SyntheticFixtureReport,
+    SyntheticMarketEvent,
+    evaluate_synthetic_fixture,
+)
 
 __all__ = [
     "CLContract",
@@ -26,8 +31,11 @@ __all__ = [
     "S40PreflightError",
     "S40RecordedReplayReport",
     "S40ReplayConfig",
+    "SyntheticFixtureReport",
+    "SyntheticMarketEvent",
     "analyze_tick_quality",
     "cl_last_trade_date",
+    "evaluate_synthetic_fixture",
     "fill_claim_limit",
     "roll_status",
     "run_s4_0_recorded_replay",
