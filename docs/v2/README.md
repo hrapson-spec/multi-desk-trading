@@ -1,6 +1,7 @@
 # v2 redesign
 
-This directory holds the read-only paper artefacts (Phase D) of the v2 redesign.
+This directory holds the read-only paper artefacts (Phase D) of the v2 redesign
+plus implementation specifications for Phase B build slices.
 No `v2/` Python code may land on this branch until `D5 — Inventory + ownership` is
 tagged and signed. See the approved plan at
 `~/.claude/plans/see-the-multi-desk-trading-humble-mist.md` for the full
@@ -52,6 +53,12 @@ deviation record per `D3 — promotion_lifecycle.md` (once tagged).
 
 Each tag is signed. Each artefact carries its own SHA-256 hash which is
 persisted into the `promotion_prereg.yaml` for any desk that cites it.
+
+## Phase B implementation specs
+
+| Slice | Artefact | Purpose |
+|---|---|---|
+| B6b | `b6b_paper_live_spec.md` | Stateful internal simulator + paper-live loop after B6a execution primitives. |
 
 ## Substrate
 

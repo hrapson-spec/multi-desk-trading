@@ -8,6 +8,7 @@ Protocol directly without inheriting.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from v2.contracts.forecast_v2 import ForecastV2
@@ -38,6 +39,9 @@ class DeskV2(Protocol):
         *,
         prereg_hash: str,
         code_commit: str,
+        contract_hash: str = "",
+        release_calendar_version: str = "",
+        emitted_ts: datetime | None = None,
     ) -> ForecastV2: ...
 
 

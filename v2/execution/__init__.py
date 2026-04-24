@@ -12,11 +12,21 @@ The stateful simulator + paper-live loop land in B6b.
 from v2.execution.adapter import AdapterParams, TargetLotResult, target_lots
 from v2.execution.control_law import ControlLawParams, compute_target_risk_budget
 from v2.execution.degradation import ExposureState, TickEvent, step
+from v2.execution.simulator import (
+    DecisionRecord,
+    InternalSimulator,
+    LedgerRecord,
+    RuntimeLedgerConflict,
+)
 
 __all__ = [
     "AdapterParams",
     "ControlLawParams",
+    "DecisionRecord",
     "ExposureState",
+    "InternalSimulator",
+    "LedgerRecord",
+    "RuntimeLedgerConflict",
     "TargetLotResult",
     "TickEvent",
     "compute_target_risk_budget",

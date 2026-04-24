@@ -1,0 +1,50 @@
+# Current project status
+
+**Last updated**: 2026-04-24  
+**Owner**: Henri Rapson  
+**Source of truth rule**: this file is the live dashboard. Detailed evidence remains in the linked artefacts.
+
+## 1. Current state
+
+| Area | Status | Evidence / notes |
+|---|---|---|
+| v1 architecture | Phase 1 complete; Phase 2 MVP portability verified. | `../phase1_completion.md`, `../phase2_mvp_completion.md` |
+| v1.16 restructure | Shipped and documented. | `master_plan.md`, `../first_principles_redesign.md`, `raid_log.md` D-15/D-18 |
+| Reliability gate | 4h wall-clock soak still appears open in PM tracking. | `master_plan.md` in-flight row; `raid_log.md` I-01 |
+| Capability debits | Remaining open debits are model-quality focused. | `../capability_debits.md` |
+| v2 redesign | B6b paper-live infrastructure accepted; baseline tag `v2-b6b-paper-live-0.1`. | `../v2/b6b_paper_live_spec.md`, `../../v2/execution/simulator.py`, `../../v2/paper_live/loop.py` |
+
+## 2. Next outcomes
+
+| Priority | Outcome | Target / trigger | Tracking |
+|---|---|---|---|
+| 1 | Start B7 replay/snapshot restore hardening. | After B6b acceptance. | Add a B7 implementation spec before coding. |
+| 2 | Decide whether B7 is a minimal restore verifier or a fuller operational recovery tool. | Before B7 implementation. | Add/update RAID decision if it changes scope. |
+| 3 | Resolve the 4h reliability soak status for the older v1 track. | Before any v1 phase-complete claim that depends on it. | `raid_log.md` I-01 |
+
+## 3. Open exceptions
+
+| ID | Exception | Type | Next action |
+|---|---|---|---|
+| I-01 | 4h Reliability gate soak not yet executed / not yet reconciled. | Issue | Run it, attach evidence, or explicitly accept as debit. |
+| R-03 | Single-operator bus factor. | Risk | Keep current-status and manifests clean enough for handover. |
+| A-08 | Git tags and commit messages are the audit trail. | Assumption | Confirm whether v2 hash/signing discipline supersedes this. |
+
+## 4. Latest useful verification
+
+Record only verification that supports a project claim.
+
+| Date | Command / evidence | Result | Claim supported |
+|---|---|---|---|
+| 2026-04-22 | Phase 2 manifest evidence | See `../phase2_mvp_completion.md` | v1.16 restructure and MVP portability status |
+| 2026-04-24 | `uv run pytest tests/v2/execution tests/v2/paper_live -q` | 46 passed | B6b execution + paper-live acceptance |
+| 2026-04-24 | `uv run pytest tests/v2 -q` | 216 passed | No v2 regression after B6b |
+| 2026-04-24 | `uv run ruff check v2/desks/base.py v2/execution/__init__.py v2/execution/simulator.py v2/paper_live v2/runtime tests/v2/execution/test_simulator.py tests/v2/paper_live` | All checks passed | B6b touched-code lint |
+
+## 5. This-week commitment
+
+Keep this to at most three outcomes.
+
+- [ ] Write B7 replay/snapshot restore specification.
+- [ ] Select B7 acceptance evidence.
+- [ ] Reconcile reliability-gate status.

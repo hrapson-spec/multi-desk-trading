@@ -1,9 +1,11 @@
 # Project management artefacts
 
-Three living documents that track the multi-desk-trading project beyond the architectural spec.
+Lightweight PMO artefacts that track the multi-desk-trading project beyond the architectural spec.
 
 | File | Purpose | Update cadence |
 |---|---|---|
+| [`solo_pmo.md`](solo_pmo.md) | Solo-operator PMO operating model: cadence, tolerances, decision rules, work-package template. | Review monthly or when the tracking system stops being useful |
+| [`current_status.md`](current_status.md) | Live dashboard: current phase/status, next outcomes, open exceptions, latest useful verification. | End of every meaningful work session |
 | [`master_plan.md`](master_plan.md) | Milestones + dates + deliverables register. Phase 1 / Phase 2 MVP / Phase 2 scale-out / Phase 3 timeline. | On every milestone ship |
 | [`raid_log.md`](raid_log.md) | Strategic Risks, Assumptions, Issues, Decisions. Forward-looking. | On every risk/assumption/decision change |
 | [`problem_log.md`](problem_log.md) | Defects / bugs / regressions and their resolution. Backward-looking audit trail. | On every P-entry |
