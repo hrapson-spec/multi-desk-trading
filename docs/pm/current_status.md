@@ -13,6 +13,7 @@
 | Reliability gate | 86-decision reliability sample assessed clean; full 4h wall-clock gate was deliberately interrupted and is not claimed passed. | `master_plan.md`, `raid_log.md` I-01, `reliability_sample_assessment_2026-04-24.md` |
 | Capability debits | Remaining open debits are model-quality focused. | `../capability_debits.md` |
 | v2 redesign | B6b-B10 accepted; Phase B complete; S4-0 executor implemented. S4-0F free-data rehearsal executed green; formal S4-0 remains blocked on licensed CL front/next replay data. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md`, `../v2/b8_runtime_restore_spec.md`, `../v2/b9_killctl_spec.md`, `../v2/b10_phase_b_dry_run_spec.md`, `../v2/phase_b_closeout.md`, `../v2/s4_0_dry_run_plan.md`, `../v2/s4_0_research_findings.md`, `../v2/s4_0_execution_spec.md`, `../v2/s4_0f_free_data_rehearsal.md` |
+| S4 test layer | First executable slice shipped: CL roll policy, synthetic replay quality, timestamp/lineage evidence, and market-depth claim limits. Formal S4 remains blocked on licensed CL data. | `../v2/s4_test_execution_status.md` |
 
 ## 2. Next outcomes
 
@@ -64,6 +65,9 @@ Record only verification that supports a project claim.
 | 2026-04-24 | `uv run python -m v2.governance.s4_0 --config data/s4_0/free_source_wti_futures/s4_0f.yaml --overwrite` | Green; 20 decisions, 40 simulated ledger rows, replay and restore passed | S4-0F free-data operational rehearsal |
 | 2026-04-24 | `uv run pytest tests/test_soak_checkpoint.py tests/test_soak_monitor.py tests/test_soak_incident.py tests/test_soak_runner_short.py -q` | 25 passed | Soak runner focused regression coverage |
 | 2026-04-24 | Reliability sample run, interrupted by operator direction | 5,104s elapsed; 86 decisions; 430 forecasts; 86 resource samples; 0 soak incidents; FDs 5 to 5; final RSS 38.89 MB | Partial reliability-gate sample assessment |
+| 2026-04-24 | `uv run pytest tests/v2/s4_0 -q` | 19 passed | S4 test-layer execution: roll, replay-quality, market-depth limits, lineage |
+| 2026-04-24 | `uv run ruff check v2/s4_0 tests/v2/s4_0` | All checks passed | S4 touched-code lint |
+| 2026-04-24 | `uv run pytest tests/v2 -q` | 254 passed | No v2 regression after S4 test-layer execution |
 
 ## 5. This-week commitment
 

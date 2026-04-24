@@ -43,6 +43,12 @@ def test_s4_0_recorded_replay_writes_reviewer_grade_evidence(tmp_path):
     assert (report.run_root / "manifest.sha256").exists()
     assert (report.run_root / "03_raw_feed" / "raw_source_manifest.json").exists()
     assert (report.run_root / "04_normalized_feed" / "normalized_events.csv").exists()
+    assert (
+        report.run_root / "05_data_quality" / "timestamp_audit_report.json"
+    ).exists()
+    assert (
+        report.run_root / "06_features" / "source_to_decision_lineage_report.json"
+    ).exists()
     assert (report.run_root / "09_simulation" / "simulated_ledger.csv").exists()
     assert (report.run_root / "14_replay" / "replay_verification_report.json").exists()
     assert (report.run_root / "15_restore" / "restore_summary.json").exists()
@@ -52,6 +58,27 @@ def test_s4_0_recorded_replay_writes_reviewer_grade_evidence(tmp_path):
         )
     )
     assert stop_go["result"] == "green"
+    lineage = json.loads(
+        (
+            report.run_root / "06_features" / "source_to_decision_lineage_report.json"
+        ).read_text(encoding="utf-8")
+    )
+    timestamp_audit = json.loads(
+        (report.run_root / "05_data_quality" / "timestamp_audit_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert len(lineage) == 3
+    assert {row["symbol"] for row in lineage} == {"CLM6"}
+    assert all(row["source_row_hash"] for row in lineage)
+    assert timestamp_audit["event_ordering_priority"] == [
+        "exchange_sequence_number",
+        "ts_event",
+        "ts_recv",
+        "vendor_row_number",
+    ]
+    assert timestamp_audit["negative_latency_count"] == 0
+    assert timestamp_audit["tick_quality"]["sequence_gap_count"] == 0
 
 
 def test_s4_0_recorded_replay_requires_licence_and_no_money_clearance(tmp_path):

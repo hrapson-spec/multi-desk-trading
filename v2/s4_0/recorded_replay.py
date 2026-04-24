@@ -33,6 +33,7 @@ from v2.paper_live.loop import MarketTickContext, run_decision_tick
 from v2.runtime.kill_switch import load_kill_switch
 from v2.runtime.replay import SnapshotVerification, verify_snapshot_receipt
 from v2.runtime.restore import restore_runtime_snapshot
+from v2.s4_0.replay_quality import ReplayTick, analyze_tick_quality
 
 _FAMILY = "oil_wti_5d"
 _DESK = "s4_0_recorded_replay_desk"
@@ -205,7 +206,7 @@ def run_s4_0_recorded_replay(
     _write_reference_data(config, dirs["02_reference_data"])
     _write_raw_evidence(config, raw_events, dirs["03_raw_feed"])
     _write_normalized_events(accepted, dirs["04_normalized_feed"])
-    _write_data_quality(quality, dirs["05_data_quality"])
+    _write_data_quality(quality, accepted, dirs["05_data_quality"])
 
     runtime_root = run_root / "runtime"
     restore_root = run_root / "15_restore" / "runtime_restored"
@@ -219,6 +220,7 @@ def run_s4_0_recorded_replay(
             config,
             samples,
             simulator=simulator,
+            feature_dir=dirs["06_features"],
             forecast_dir=dirs["07_forecasts"],
             decision_dir=dirs["08_decisions"],
         )
@@ -494,6 +496,7 @@ def _run_decision_samples(
     samples: list[DecisionSample],
     *,
     simulator: InternalSimulator,
+    feature_dir: Path,
     forecast_dir: Path,
     decision_dir: Path,
 ) -> dict[str, int]:
@@ -504,6 +507,7 @@ def _run_decision_samples(
         ticks_since_valid=0,
     )
     prior_lots = 0
+    lineage: list[dict[str, Any]] = []
     for sample in samples:
         kill_switch = load_kill_switch(simulator.runtime_root, family=_FAMILY)
         forecast = _forecast_for_sample(config, sample)
@@ -568,8 +572,21 @@ def _run_decision_samples(
             decision_dir / f"{_timestamp_key(sample.event.ts_event)}_decision.json",
             outcome.decision.model_dump(mode="json"),
         )
+        lineage.append(
+            {
+                "decision_ts": _utc_iso(sample.event.ts_event),
+                "symbol": sample.event.symbol,
+                "source_row_index": sample.event.source_row_index,
+                "source_row_hash": sample.event.source_row_hash,
+                "forecast_id": forecast.forecast_id,
+                "decision_id": decision_record.decision_id,
+                "decision_hash": decision_record.decision_hash,
+                "execution_ids": list(execution_ids),
+            }
+        )
         exposure = outcome.new_exposure
         prior_lots = outcome.target_lots
+    _write_json(feature_dir / "source_to_decision_lineage_report.json", lineage)
     return simulator.counts()
 
 
@@ -714,8 +731,9 @@ def _write_normalized_events(events: list[MarketEvent], root: Path) -> None:
     )
 
 
-def _write_data_quality(report: DataQualityReport, root: Path) -> None:
+def _write_data_quality(report: DataQualityReport, events: list[MarketEvent], root: Path) -> None:
     _write_json(root / "data_quality_report.json", _dataclass_payload(report))
+    _write_json(root / "timestamp_audit_report.json", _timestamp_audit(events))
     with (root / "gap_duplicate_out_of_order_report.csv").open(
         "w", newline="", encoding="utf-8"
     ) as handle:
@@ -965,6 +983,50 @@ def _write_manifest(
     return manifest_path
 
 
+def _timestamp_audit(events: list[MarketEvent]) -> dict[str, Any]:
+    latencies = [
+        (event.ts_recv - event.ts_event).total_seconds()
+        for event in events
+        if event.ts_recv is not None
+    ]
+    ticks = [
+        ReplayTick(
+            symbol=event.symbol,
+            ts_event=event.ts_event,
+            ts_recv=event.ts_recv,
+            vendor_row_number=event.source_row_index,
+            exchange_sequence_number=_parse_sequence(event.sequence),
+        )
+        for event in events
+    ]
+    tick_quality = analyze_tick_quality(
+        ticks,
+        expected_symbols={event.symbol for event in events},
+        sequence_scope="global",
+    )
+    negative_latency = sum(1 for value in latencies if value < 0)
+    return {
+        "event_ordering_priority": [
+            "exchange_sequence_number",
+            "ts_event",
+            "ts_recv",
+            "vendor_row_number",
+        ],
+        "timestamp_fields": {
+            "ts_event": "source event timestamp",
+            "ts_recv": "vendor receive/capture timestamp when present",
+            "local_normalization_time": "not recorded by S4-0 scaffold",
+            "decision_time": "same as selected decision event timestamp",
+            "replay_time": "runtime wall-clock replay not used for ordering",
+        },
+        "rows_with_ts_recv": len(latencies),
+        "negative_latency_count": negative_latency,
+        "min_latency_seconds": min(latencies) if latencies else None,
+        "max_latency_seconds": max(latencies) if latencies else None,
+        "tick_quality": tick_quality.as_dict(),
+    }
+
+
 def _stop_go(
     quality: DataQualityReport,
     verifications: list[SnapshotVerification],
@@ -1053,6 +1115,15 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _parse_sequence(value: str | None) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 def _markdown_list(items: list[str]) -> str:
