@@ -22,6 +22,7 @@
 | MBP-10 simulated-fill drill | `v2/s4_0/mbp10_fill.py` | `tests/v2/s4_0/test_mbp10_fill.py` |
 | Synthetic queue/hidden/PnL diagnostics | `v2/s4_0/synthetic_claims.py` | `tests/v2/s4_0/test_synthetic_claims.py` |
 | Replay-integrated microstructure evidence | S4 replay now writes claim-boundary, MBP-10, queue/hidden/PnL diagnostic reports into `09_simulation/` | `tests/v2/s4_0/test_recorded_replay.py` |
+| Local/free WTI model-quality diagnostic | PIT-safe ridge walk-forward over FRED WTI spot proxy versus empirical and zero-Gaussian baselines | `tests/v2/s4_0/test_model_quality.py` |
 
 ## Deliberately Deferred
 
@@ -66,6 +67,11 @@ Latest result:
 - `tests/v2/s4_0`: 38 passed after S4-2B integration
 - `ruff`: all checks passed after S4-2B integration
 - `tests/v2`: 273 passed after S4-2B integration
+- S4-3 model-quality diagnostic: 9,381 walk-forward decisions on FRED WTI spot proxy; simple ridge not promotable; pinball improvements -1.54% versus empirical and -0.66% versus zero-Gaussian; directional accuracy 50.77%.
+- `tests/v2/s4_0/test_model_quality.py`: 4 passed after S4-3 diagnostic
+- `tests/v2/s4_0`: 42 passed after S4-3 diagnostic
+- `ruff`: all checks passed after S4-3 diagnostic
+- `tests/v2`: 277 passed after S4-3 diagnostic
 
 ## Interpretation
 
@@ -94,3 +100,7 @@ claims.
 S4-2B integrates those diagnostics into recorded-replay evidence packs. Each
 run now emits a claim-boundary report, MBP-10 diagnostic report, synthetic
 claim diagnostics, and a manifest-level summary.
+
+S4-3 adds the first local/free WTI model-quality diagnostic. The current simple
+ridge signal fails promotion against conservative baselines, so the next work
+must improve signal inputs rather than advance production-readiness claims.

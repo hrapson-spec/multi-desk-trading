@@ -12,6 +12,41 @@ controller correctness, or the frozen contract surface is not in-budget.
 
 ## Active debits (2026-04-22 worktree — v1.16 restructure)
 
+### D-S4-3. Local/free WTI ridge signal not promotable — opened 2026-04-24
+
+**Finding.** The first S4-3 local/free model-quality diagnostic evaluates a
+PIT-safe ridge feature stack on FRED WTI spot proxy data (`DCOILWTICO.csv`) for
+5-day forward log returns. It produced 9,381 walk-forward decisions and did not
+beat either conservative baseline.
+
+Pinned metrics:
+
+- Model pinball loss: `0.0101535604`
+- Empirical baseline pinball loss: `0.0099992225`
+- Zero-Gaussian baseline pinball loss: `0.0100873280`
+- Pinball improvement vs empirical: `-1.5435%`
+- Pinball improvement vs zero-Gaussian: `-0.6566%`
+- Model CRPS: `0.0282836815`
+- Empirical baseline CRPS: `0.0278908143`
+- Zero-Gaussian baseline CRPS: `0.0281232229`
+- Directional accuracy: `50.77%`
+- Research promotion: `false`
+
+**Scope.** Model-quality debit, not an operational-readiness debit. The S4
+evidence harness works; the current simple price-only feature stack does not
+support a high-performing ML trading claim.
+
+**Mitigation.** Add real observable WTI features before making model-quality
+claims: EIA weekly inventory/supply data, CFTC positioning, carry/term-structure
+proxies where free data permits, and event-calendar flags. Re-run the same S4-3
+gate after each addition.
+
+**Pinned by.**
+
+- `v2/s4_0/model_quality.py`
+- `tests/v2/s4_0/test_model_quality.py`
+- `docs/v2/s4_3_wti_model_quality_diagnostic.md`
+
 ### D1. Phase A model weakness — v1.16 narrowed scope
 
 **v1.16 scope narrowing (2026-04-22).** Roster shrinks from 5 oil desks to 3

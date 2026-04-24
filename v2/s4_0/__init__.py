@@ -18,6 +18,12 @@ from v2.s4_0.mbp10_fill import (
     run_mbp10_drill,
     simulate_mbp10_fill,
 )
+from v2.s4_0.model_quality import (
+    WTIModelQualityParams,
+    WTIModelQualityReport,
+    load_wti_price_series,
+    run_wti_model_quality_diagnostic,
+)
 from v2.s4_0.recorded_replay import (
     S40PreflightError,
     S40RecordedReplayReport,
@@ -53,6 +59,8 @@ __all__ = [
     "MBP10FillResult",
     "MBP10Order",
     "MarketDataDepth",
+    "WTIModelQualityParams",
+    "WTIModelQualityReport",
     "HiddenLiquidityResult",
     "HiddenLiquidityScenario",
     "ReplayTick",
@@ -73,9 +81,11 @@ __all__ = [
     "evaluate_profitability",
     "evaluate_synthetic_fixture",
     "fill_claim_limit",
+    "load_wti_price_series",
     "roll_status",
     "run_mbp10_drill",
     "run_s4_0_recorded_replay",
+    "run_wti_model_quality_diagnostic",
     "select_front_next",
     "simulate_hidden_liquidity",
     "simulate_mbp10_fill",
