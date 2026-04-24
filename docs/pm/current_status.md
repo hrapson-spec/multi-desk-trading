@@ -12,15 +12,15 @@
 | v1.16 restructure | Shipped and documented. | `master_plan.md`, `../first_principles_redesign.md`, `raid_log.md` D-15/D-18 |
 | Reliability gate | 86-decision reliability sample assessed clean; full 4h wall-clock gate was deliberately interrupted and is not claimed passed. | `master_plan.md`, `raid_log.md` I-01, `reliability_sample_assessment_2026-04-24.md` |
 | Capability debits | Remaining open debits are model-quality focused. | `../capability_debits.md` |
-| v2 redesign | B6b-B10 accepted; Phase B complete; S4-0 executor implemented. S4-0 now accepts local/free or synthetic replay data; real/licensed data is no longer a phase requirement. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md`, `../v2/b8_runtime_restore_spec.md`, `../v2/b9_killctl_spec.md`, `../v2/b10_phase_b_dry_run_spec.md`, `../v2/phase_b_closeout.md`, `../v2/s4_0_dry_run_plan.md`, `../v2/s4_0_execution_spec.md`, `../v2/s4_0f_free_data_rehearsal.md` |
+| v2 redesign | B6b-B10 accepted; Phase B complete; S4-0 executor implemented. S4-0 local/free one-session rerun and S4-0C one-week expansion both executed green; real/licensed data is no longer a phase requirement. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md`, `../v2/b8_runtime_restore_spec.md`, `../v2/b9_killctl_spec.md`, `../v2/b10_phase_b_dry_run_spec.md`, `../v2/phase_b_closeout.md`, `../v2/s4_0_dry_run_plan.md`, `../v2/s4_0_execution_spec.md`, `../v2/s4_0f_free_data_rehearsal.md` |
 | S4 test layer | First executable slice shipped: CL roll policy, synthetic replay quality, timestamp/lineage evidence, and market-depth claim limits. Formal S4 is no longer blocked on licensed CL data. | `../v2/s4_test_execution_status.md` |
 
 ## 2. Next outcomes
 
 | Priority | Outcome | Target / trigger | Tracking |
 |---|---|---|---|
-| 1 | Treat the completed free-data replay as accepted S4-0 operating-model evidence, with source limitations recorded as non-claims. | Current phase closeout. | `../v2/s4_0f_free_data_rehearsal.md`, generated `manifest.yaml` |
-| 2 | Execute the updated local/free S4-0 runner contract and then expand to one week if clean. | Before any broader S4 claim. | `../v2/s4_0_execution_spec.md`, `../v2/s4_0_run_config_template.yaml` |
+| 1 | Review the updated S4-0 local/free one-session and one-week evidence packs and decide whether S4-0 is complete under the revised scope. | Current phase closeout. | `../v2/s4_0f_free_data_rehearsal.md`, generated `manifest.yaml` |
+| 2 | Define the next phase gate after S4-0: likely synthetic tick/order-book fixture expansion, not real/licensed data. | After S4-0 closeout decision. | `../v2/s4_test_execution_status.md`, `../v2/s4_0_dry_run_plan.md` |
 | 3 | Decide whether the clean 86-decision sample is enough for current PM purposes or whether exact 4h evidence is still needed. | Before making a strict §12.2 reliability-gate claim. | `raid_log.md` I-01, `reliability_sample_assessment_2026-04-24.md` |
 
 ## 3. Open exceptions
@@ -71,11 +71,16 @@ Record only verification that supports a project claim.
 | 2026-04-24 | `uv run pytest tests/v2/s4_0 -q` | 20 passed | S4 local/free replay scope: no licensed-data gate |
 | 2026-04-24 | `uv run ruff check v2/s4_0 tests/v2/s4_0` | All checks passed | S4 local/free replay touched-code lint |
 | 2026-04-24 | `uv run pytest tests/v2 -q` | 255 passed | No v2 regression after removing licensed-data requirement |
+| 2026-04-24 | `uv run python -m v2.governance.s4_0 --config data/s4_0/free_source_wti_futures/s4_0_local_free.yaml --overwrite` | Green; 20 decisions, 40 simulated ledger rows, 20 replay windows, restore passed, manifest hash verified | S4-0 local/free recorded replay under updated scope |
+| 2026-04-24 | `uv run python -m v2.governance.s4_0 --config data/s4_0/free_source_wti_futures/s4_0c_local_free_week.yaml --overwrite` | Green; 5 decisions, 10 simulated ledger rows, 5 replay windows, restore passed, manifest hash verified | S4-0C one-week local/free expansion |
+| 2026-04-24 | `uv run pytest tests/v2/s4_0 -q` | 20 passed | S4 replay tests after S4-0C execution |
+| 2026-04-24 | `uv run ruff check v2/s4_0 tests/v2/s4_0` | All checks passed | S4 lint after S4-0C execution |
+| 2026-04-24 | `uv run pytest tests/v2 -q` | 255 passed | No v2 regression after S4-0C execution |
 
 ## 5. This-week commitment
 
 Keep this to at most three outcomes.
 
 - [x] Commission S4-0 data-source and licence research.
-- [x] Execute S4-0F free-data operational rehearsal on existing WTI futures data.
+- [x] Execute S4-0 local/free replay and S4-0C one-week expansion on existing WTI futures data.
 - [x] Reconcile reliability-gate status with an 86-decision partial sample assessment.

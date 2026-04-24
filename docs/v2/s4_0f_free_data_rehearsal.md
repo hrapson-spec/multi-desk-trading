@@ -1,10 +1,11 @@
 # S4-0F free-data operational rehearsal
 
-- **Status**: executed green
+- **Status**: executed green; one-week expansion also green under current local/free S4-0 scope
 - **Created**: 2026-04-24
 - **Owner**: Henri Rapson
 - **Stage**: S4-0F free-data operational rehearsal
-- **Executor commit**: `08f95ce`
+- **Original executor commit**: `08f95ce`
+- **Current-scope rerun commit**: `3fb8334`
 - **Formal S4-0 status**: accepted as the current S4-0 local/free-data evidence run
 
 ## 1. Scope Decision
@@ -34,7 +35,42 @@ but it is no longer a requirement for this phase.
 | Data shape | Daily continuous WTI futures OHLCV proxy; close used as replay price; volume used as size |
 | Window | `2025-12-02T21:00:00Z` to `2025-12-30T21:00:00Z` |
 
-## 3. Run Result
+## 3. Run Results
+
+### Current-Scope Rerun
+
+| Metric | Result |
+|---|---:|
+| Run ID | `s4_0_wti_futures_yfinance_20251230_002` |
+| Stage | `S4-0 local/free recorded replay` |
+| Stop/go | green |
+| Accepted replay rows | 20 |
+| Decision count | 20 |
+| Simulated execution ledger rows | 40 |
+| Duplicate rows | 0 |
+| Out-of-order rows | 0 |
+| Replay windows verified | 20 |
+| Restore outcome | passed |
+| Manifest hash | verified |
+| Exceptions | none |
+
+Evidence root:
+
+```text
+data/s4_0/free_source_wti_futures/evidence/s4_0_wti_futures_yfinance_20251230_002/
+```
+
+Key generated files:
+
+- `manifest.yaml`
+- `01_data_source/data_source_manifest.json`
+- `05_data_quality/timestamp_audit_report.json`
+- `06_features/source_to_decision_lineage_report.json`
+- `14_replay/replay_verification_report.json`
+- `15_restore/restore_summary.json`
+- `16_report/final_s4_0_report.md`
+
+### Original S4-0F Run
 
 | Metric | Result |
 |---|---:|
@@ -62,6 +98,29 @@ Key generated files:
 - `14_replay/replay_verification_report.json`
 - `15_restore/restore_summary.json`
 
+### S4-0C One-Week Expansion
+
+| Metric | Result |
+|---|---:|
+| Run ID | `s4_0c_wti_futures_yfinance_week_20251219_001` |
+| Stage | `S4-0C one-week local/free recorded replay` |
+| Stop/go | green |
+| Accepted replay rows | 5 |
+| Decision count | 5 |
+| Simulated execution ledger rows | 10 |
+| Duplicate rows | 0 |
+| Out-of-order rows | 0 |
+| Replay windows verified | 5 |
+| Restore outcome | passed |
+| Manifest hash | verified |
+| Exceptions | none |
+
+Evidence root:
+
+```text
+data/s4_0/free_source_wti_futures/evidence/s4_0c_wti_futures_yfinance_week_20251219_001/
+```
+
 ## 4. Non-Claims
 
 S4-0F does not prove:
@@ -76,6 +135,7 @@ S4-0F does not prove:
 
 ## 5. Next Gate
 
-The next gate is a repeatable S4-0 local/free replay run with the updated
-runner contract in `docs/v2/s4_0_execution_spec.md`, then a one-week expansion
-only if the one-session evidence pack remains green.
+The one-week expansion is complete under the revised local/free S4-0 scope. The
+next gate should be a scoped S4 closeout decision: either mark S4-0 complete
+under the revised non-claims, or commission the next synthetic fixture layer for
+tick/order-book semantics.

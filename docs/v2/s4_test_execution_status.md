@@ -42,6 +42,8 @@ Latest result:
 - `tests/v2`: 254 passed
 - `tests/v2/s4_0`: 20 passed after removing the licensed-data gate
 - `tests/v2`: 255 passed after removing the licensed-data gate
+- `s4_0_wti_futures_yfinance_20251230_002`: green local/free S4-0 rerun
+- `s4_0c_wti_futures_yfinance_week_20251219_001`: green one-week local/free expansion
 
 ## Interpretation
 
@@ -50,3 +52,7 @@ harness can test CL roll policy, replay ordering, lineage, and market-data depth
 claim limits without waiting for licensed data. Formal S4 can proceed on
 local/free or synthetic replay evidence, with source limitations recorded as
 non-claims.
+
+The local/free recorded replay gate has now run twice under the revised scope:
+a current-scope full-window rerun and an explicit one-week expansion. Both were
+green.
