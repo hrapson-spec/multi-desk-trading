@@ -62,6 +62,7 @@ persisted into the `promotion_prereg.yaml` for any desk that cites it.
 | B7 | `b7_replay_snapshot_spec.md` | Replay/snapshot receipt verification before S4-style operational claims. |
 | B8 | `b8_runtime_restore_spec.md` | Restore verified runtime state into a fresh runtime root. |
 | B9 | `b9_killctl_spec.md` | Operator kill-switch commands and incident log path. |
+| B10 | `b10_phase_b_dry_run_spec.md` | Deterministic Phase B operational dry-run closeout. |
 
 ## Substrate
 

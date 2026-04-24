@@ -12,14 +12,14 @@
 | v1.16 restructure | Shipped and documented. | `master_plan.md`, `../first_principles_redesign.md`, `raid_log.md` D-15/D-18 |
 | Reliability gate | 4h wall-clock soak still appears open in PM tracking. | `master_plan.md` in-flight row; `raid_log.md` I-01 |
 | Capability debits | Remaining open debits are model-quality focused. | `../capability_debits.md` |
-| v2 redesign | B6b-B9 accepted; B10 dry-run closeout remains. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md`, `../v2/b8_runtime_restore_spec.md`, `../v2/b9_killctl_spec.md` |
+| v2 redesign | B6b-B10 accepted; Phase B operational substrate complete. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md`, `../v2/b8_runtime_restore_spec.md`, `../v2/b9_killctl_spec.md`, `../v2/b10_phase_b_dry_run_spec.md`, `../v2/phase_b_closeout.md` |
 
 ## 2. Next outcomes
 
 | Priority | Outcome | Target / trigger | Tracking |
 |---|---|---|---|
-| 1 | Implement B10 dry-run harness and Phase B closeout evidence. | After B9. | New B10 spec + test evidence. |
-| 2 | Review and tag Phase B complete. | After B10. | Phase B closeout evidence. |
+| 1 | Prepare S4 dry-run plan against real or recorded live feeds. | After Phase B closeout. | New S4 plan and evidence-pack checklist. |
+| 2 | Define Layer-5 drill requirements for S4-style operational evidence. | Before any S4 promotion claim. | Pre-registered drill plan. |
 | 3 | Resolve the 4h reliability soak status for the older v1 track. | Before any v1 phase-complete claim that depends on it. | `raid_log.md` I-01 |
 
 ## 3. Open exceptions
@@ -49,11 +49,14 @@ Record only verification that supports a project claim.
 | 2026-04-24 | `uv run pytest tests/v2/runtime tests/v2/paper_live tests/v2/execution -q` | 62 passed | B9 killctl + adjacent runtime/paper-live acceptance |
 | 2026-04-24 | `uv run pytest tests/v2 -q` | 232 passed | No v2 regression after B9 |
 | 2026-04-24 | `uv run ruff check v2/runtime v2/governance tests/v2/runtime` | All checks passed | B9 touched-code lint |
+| 2026-04-24 | `uv run pytest tests/v2/runtime tests/v2/paper_live tests/v2/execution -q` | 65 passed | B10 dry-run + composed runtime substrate acceptance |
+| 2026-04-24 | `uv run pytest tests/v2 -q` | 235 passed | No v2 regression after B10 / Phase B closeout |
+| 2026-04-24 | `uv run ruff check v2/runtime v2/governance tests/v2/runtime` | All checks passed | B10 touched-code lint |
 
 ## 5. This-week commitment
 
 Keep this to at most three outcomes.
 
-- [ ] Implement B10 dry-run harness and Phase B closeout.
-- [ ] Review/tag Phase B complete.
+- [x] Implement B10 dry-run harness and Phase B closeout.
+- [x] Review/tag Phase B complete.
 - [ ] Reconcile reliability-gate status.
