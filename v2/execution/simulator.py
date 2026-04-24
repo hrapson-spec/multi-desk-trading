@@ -344,6 +344,82 @@ class InternalSimulator:
         execution_count = self.conn.execute("SELECT count(*) FROM execution_ledger").fetchone()[0]
         return {"family_decisions": decision_count, "execution_ledger": execution_count}
 
+    def counts_through(self, decision_ts: datetime) -> dict[str, int]:
+        decision_count = self.conn.execute(
+            "SELECT count(*) FROM family_decisions WHERE decision_ts <= ?",
+            [_naive_utc(decision_ts)],
+        ).fetchone()[0]
+        execution_count = self.conn.execute(
+            "SELECT count(*) FROM execution_ledger WHERE decision_ts <= ?",
+            [_naive_utc(decision_ts)],
+        ).fetchone()[0]
+        return {"family_decisions": decision_count, "execution_ledger": execution_count}
+
+    def decision_row(self, decision_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            """
+            SELECT decision_id, family, decision_ts, emitted_ts, decision_json,
+                   decision_hash, family_forecast_hash, forecast_ids_json,
+                   kill_switch_json, kill_switch_hash
+            FROM family_decisions
+            WHERE decision_id = ?
+            """,
+            [decision_id],
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "decision_id": row[0],
+            "family": row[1],
+            "decision_ts": _as_utc(row[2]),
+            "emitted_ts": _as_utc(row[3]),
+            "decision_json": row[4],
+            "decision_hash": row[5],
+            "family_forecast_hash": row[6],
+            "forecast_ids_json": row[7],
+            "kill_switch_json": row[8],
+            "kill_switch_hash": row[9],
+        }
+
+    def execution_row(self, execution_id: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            """
+            SELECT execution_id, execution_hash, decision_id, family, decision_ts,
+                   emitted_ts, scenario, prior_target, new_target, prior_lots,
+                   new_lots, raw_lots, effective_b, price, market_vol_5d,
+                   fill_cost, gross_return, net_return, degradation_state,
+                   abstain, abstain_reason
+            FROM execution_ledger
+            WHERE execution_id = ?
+            """,
+            [execution_id],
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "execution_id": row[0],
+            "execution_hash": row[1],
+            "decision_id": row[2],
+            "family": row[3],
+            "decision_ts": _as_utc(row[4]),
+            "emitted_ts": _as_utc(row[5]),
+            "scenario": row[6],
+            "prior_target": row[7],
+            "new_target": row[8],
+            "prior_lots": row[9],
+            "new_lots": row[10],
+            "raw_lots": row[11],
+            "effective_b": row[12],
+            "price": row[13],
+            "market_vol_5d": row[14],
+            "fill_cost": row[15],
+            "gross_return": row[16],
+            "net_return": row[17],
+            "degradation_state": row[18],
+            "abstain": row[19],
+            "abstain_reason": row[20],
+        }
+
     def write_snapshot_receipt(
         self,
         *,

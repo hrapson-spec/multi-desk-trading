@@ -12,14 +12,14 @@
 | v1.16 restructure | Shipped and documented. | `master_plan.md`, `../first_principles_redesign.md`, `raid_log.md` D-15/D-18 |
 | Reliability gate | 4h wall-clock soak still appears open in PM tracking. | `master_plan.md` in-flight row; `raid_log.md` I-01 |
 | Capability debits | Remaining open debits are model-quality focused. | `../capability_debits.md` |
-| v2 redesign | B6b paper-live infrastructure accepted; baseline tag `v2-b6b-paper-live-0.1`. | `../v2/b6b_paper_live_spec.md`, `../../v2/execution/simulator.py`, `../../v2/paper_live/loop.py` |
+| v2 redesign | B6b accepted at tag `v2-b6b-paper-live-0.1`; B7 replay verification implemented and tested. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md` |
 
 ## 2. Next outcomes
 
 | Priority | Outcome | Target / trigger | Tracking |
 |---|---|---|---|
-| 1 | Start B7 replay/snapshot restore hardening. | After B6b acceptance. | Add a B7 implementation spec before coding. |
-| 2 | Decide whether B7 is a minimal restore verifier or a fuller operational recovery tool. | Before B7 implementation. | Add/update RAID decision if it changes scope. |
+| 1 | Review and acceptance-tag B7 replay/snapshot receipt verification. | Before any S4-style operational claim. | `../v2/b7_replay_snapshot_spec.md` |
+| 2 | Decide when to expand from receipt verification to full restore tooling. | After B7. | Add/update RAID decision if it changes scope. |
 | 3 | Resolve the 4h reliability soak status for the older v1 track. | Before any v1 phase-complete claim that depends on it. | `raid_log.md` I-01 |
 
 ## 3. Open exceptions
@@ -40,11 +40,14 @@ Record only verification that supports a project claim.
 | 2026-04-24 | `uv run pytest tests/v2/execution tests/v2/paper_live -q` | 46 passed | B6b execution + paper-live acceptance |
 | 2026-04-24 | `uv run pytest tests/v2 -q` | 216 passed | No v2 regression after B6b |
 | 2026-04-24 | `uv run ruff check v2/desks/base.py v2/execution/__init__.py v2/execution/simulator.py v2/paper_live v2/runtime tests/v2/execution/test_simulator.py tests/v2/paper_live` | All checks passed | B6b touched-code lint |
+| 2026-04-24 | `uv run pytest tests/v2/runtime tests/v2/paper_live tests/v2/execution -q` | 51 passed | B7 replay verification + adjacent runtime/paper-live acceptance |
+| 2026-04-24 | `uv run pytest tests/v2 -q` | 221 passed | No v2 regression after B7 |
+| 2026-04-24 | `uv run ruff check v2/runtime v2/execution/simulator.py tests/v2/runtime` | All checks passed | B7 touched-code lint |
 
 ## 5. This-week commitment
 
 Keep this to at most three outcomes.
 
-- [ ] Write B7 replay/snapshot restore specification.
-- [ ] Select B7 acceptance evidence.
+- [ ] Review/tag B7 replay/snapshot receipt verification.
+- [ ] Decide whether next slice is full restore tooling or S4 dry-run harness.
 - [ ] Reconcile reliability-gate status.
