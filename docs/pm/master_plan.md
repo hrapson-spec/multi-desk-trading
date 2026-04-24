@@ -4,7 +4,7 @@
 **Owner**: Henri Rapson (sole operator)  
 **Started**: 2026-04-17  
 **Current spec version**: v1.16
-**Last updated**: 2026-04-22
+**Last updated**: 2026-04-24
 
 ## 1. Purpose
 
@@ -51,7 +51,7 @@ Three phases with discrete gates. Spec §12 is authoritative; this section is th
 
 | Date | Milestone | Status | Blocker |
 |---|---|---|---|
-| 2026-04-18 → ~04-25 | Run 4h Reliability gate soak | Pending (operator-side) | Requires 4 hours of laptop uptime |
+| 2026-04-24 | Reliability-gate sample assessment | Partial sample complete | 86 decisions over 5,104s, 0 incidents; exact 4h gate not claimed |
 | 2026-04-18 | Establish PM artefacts (this doc + RAID + problem log) | In progress | — |
 
 ### Forward — Phase 2 scale-out (v1.16 re-scoped)
