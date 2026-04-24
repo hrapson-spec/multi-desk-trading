@@ -14,6 +14,7 @@ from typing import Any
 import yaml
 
 ENABLED = "enabled"
+DESK_ISOLATED = "desk_isolated"
 FROZEN = "frozen"
 HALTED = "halted"
 HALTING_STATES = {FROZEN, HALTED}
@@ -143,7 +144,7 @@ def _parse_family_state(raw: dict[str, Any]) -> FamilyKillSwitchState:
 
 def _normalise_state(value: object) -> str:
     state = str(value or ENABLED).strip().lower()
-    if state not in {ENABLED, FROZEN, HALTED}:
+    if state not in {ENABLED, DESK_ISOLATED, FROZEN, HALTED}:
         raise ValueError(f"unknown kill-switch state {state!r}")
     return state
 
