@@ -12,14 +12,14 @@
 | v1.16 restructure | Shipped and documented. | `master_plan.md`, `../first_principles_redesign.md`, `raid_log.md` D-15/D-18 |
 | Reliability gate | 4h wall-clock soak still appears open in PM tracking. | `master_plan.md` in-flight row; `raid_log.md` I-01 |
 | Capability debits | Remaining open debits are model-quality focused. | `../capability_debits.md` |
-| v2 redesign | B6b-B10 accepted; Phase B complete; S4-0 research received; Databento is conditional preferred source pending licence clearance. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md`, `../v2/b8_runtime_restore_spec.md`, `../v2/b9_killctl_spec.md`, `../v2/b10_phase_b_dry_run_spec.md`, `../v2/phase_b_closeout.md`, `../v2/s4_0_dry_run_plan.md`, `../v2/s4_0_research_findings.md` |
+| v2 redesign | B6b-B10 accepted; Phase B complete; S4-0 recorded replay executor implemented and fixture-tested. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md`, `../v2/b8_runtime_restore_spec.md`, `../v2/b9_killctl_spec.md`, `../v2/b10_phase_b_dry_run_spec.md`, `../v2/phase_b_closeout.md`, `../v2/s4_0_dry_run_plan.md`, `../v2/s4_0_research_findings.md`, `../v2/s4_0_execution_spec.md` |
 
 ## 2. Next outcomes
 
 | Priority | Outcome | Target / trigger | Tracking |
 |---|---|---|---|
-| 1 | Obtain written Databento/CME licence and entitlement clearance. | Before S4-0 run execution. | `../v2/s4_0_licence_clearance_checklist.md` |
-| 2 | Confirm S4-0 contract pair, session window, and market depth. | After licence clearance. | `../v2/s4_0_dry_run_plan.md`, `../v2/s4_0_research_findings.md` |
+| 1 | Provide local Databento-style replay CSV and required clearance files. | Before first real S4-0 run. | `../v2/s4_0_execution_spec.md`, `../v2/s4_0_run_config_template.yaml` |
+| 2 | Execute first real S4-0 replay run and review evidence pack. | After local inputs are present. | `../v2/s4_0_evidence_manifest.md`, generated `manifest.yaml` |
 | 3 | Resolve the 4h reliability soak status for the older v1 track. | Before any v1 phase-complete claim that depends on it. | `raid_log.md` I-01 |
 
 ## 3. Open exceptions
@@ -27,7 +27,7 @@
 | ID | Exception | Type | Next action |
 |---|---|---|---|
 | I-01 | 4h Reliability gate soak not yet executed / not yet reconciled. | Issue | Run it, attach evidence, or explicitly accept as debit. |
-| I-02 | S4-0 data source is selected only conditionally; licence not yet cleared. | Issue | Obtain written Databento/CME clearance for non-display use, local storage, replay, retention, review access, and derived evidence. |
+| I-02 | First real S4-0 run is blocked on local licensed data and clearance artefacts. | Issue | Provide Databento-style replay CSV plus required files in `licence_clearance_dir`; runner enforces this preflight. |
 | R-03 | Single-operator bus factor. | Risk | Keep current-status and manifests clean enough for handover. |
 | A-08 | Git tags and commit messages are the audit trail. | Assumption | Confirm whether v2 hash/signing discipline supersedes this. |
 
@@ -55,11 +55,14 @@ Record only verification that supports a project claim.
 | 2026-04-24 | `uv run ruff check v2/runtime v2/governance tests/v2/runtime` | All checks passed | B10 touched-code lint |
 | 2026-04-24 | S4-0 planning artefacts | See `../v2/s4_0_dry_run_plan.md`, `../v2/s4_0_researcher_brief.md`, `../v2/s4_0_evidence_manifest.md`, `../v2/s4_0_report_template.md` | S4-0 recorded replay plan baseline |
 | 2026-04-24 | S4-0 external research memo | See `../v2/s4_0_research_findings.md`, `../v2/s4_0_licence_clearance_checklist.md` | Databento conditional source decision and licence-clearance hard gate |
+| 2026-04-24 | `uv run pytest tests/v2/s4_0 -q` | 3 passed | S4-0 recorded replay executor fixture acceptance |
+| 2026-04-24 | `uv run ruff check v2/s4_0 v2/governance/s4_0.py tests/v2/s4_0` | All checks passed | S4-0 executor touched-code lint |
+| 2026-04-24 | `uv run pytest tests/v2 -q` | 238 passed | No v2 regression after S4-0 executor |
 
 ## 5. This-week commitment
 
 Keep this to at most three outcomes.
 
 - [x] Commission S4-0 data-source and licence research.
-- [ ] Obtain written Databento/CME licence and entitlement clearance.
+- [ ] Provide local Databento-style replay CSV and required clearance files.
 - [ ] Reconcile reliability-gate status.
