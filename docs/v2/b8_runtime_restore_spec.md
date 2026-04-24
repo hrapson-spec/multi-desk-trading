@@ -1,6 +1,6 @@
 # B8 runtime restore specification
 
-**Status**: implemented in workspace; awaiting acceptance tag  
+**Status**: accepted baseline, tag `v2-b8-runtime-restore-0.1`  
 **Created**: 2026-04-24  
 **Slice**: v2 Phase B, immediately after B7  
 **Depends on**: B6b runtime DB, B7 receipt verification  
