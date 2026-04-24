@@ -60,6 +60,7 @@ persisted into the `promotion_prereg.yaml` for any desk that cites it.
 |---|---|---|
 | B6b | `b6b_paper_live_spec.md` | Stateful internal simulator + paper-live loop after B6a execution primitives. |
 | B7 | `b7_replay_snapshot_spec.md` | Replay/snapshot receipt verification before S4-style operational claims. |
+| B8 | `b8_runtime_restore_spec.md` | Restore verified runtime state into a fresh runtime root. |
 
 ## Substrate
 

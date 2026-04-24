@@ -6,12 +6,20 @@ from v2.runtime.kill_switch import (
     load_kill_switch,
 )
 from v2.runtime.replay import ReplayCheck, SnapshotVerification, verify_snapshot_receipt
+from v2.runtime.restore import (
+    SnapshotRestoreError,
+    SnapshotRestoreReport,
+    restore_runtime_snapshot,
+)
 
 __all__ = [
     "FamilyKillSwitchState",
     "KillSwitchState",
     "ReplayCheck",
+    "SnapshotRestoreError",
+    "SnapshotRestoreReport",
     "SnapshotVerification",
     "load_kill_switch",
+    "restore_runtime_snapshot",
     "verify_snapshot_receipt",
 ]

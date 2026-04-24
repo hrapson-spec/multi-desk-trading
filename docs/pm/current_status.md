@@ -12,14 +12,14 @@
 | v1.16 restructure | Shipped and documented. | `master_plan.md`, `../first_principles_redesign.md`, `raid_log.md` D-15/D-18 |
 | Reliability gate | 4h wall-clock soak still appears open in PM tracking. | `master_plan.md` in-flight row; `raid_log.md` I-01 |
 | Capability debits | Remaining open debits are model-quality focused. | `../capability_debits.md` |
-| v2 redesign | B6b accepted at `v2-b6b-paper-live-0.1`; B7 accepted at `v2-b7-replay-verifier-0.1`. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md` |
+| v2 redesign | B6b accepted at `v2-b6b-paper-live-0.1`; B7 accepted at `v2-b7-replay-verifier-0.1`; B8 restore tooling implemented and tested. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md`, `../v2/b8_runtime_restore_spec.md` |
 
 ## 2. Next outcomes
 
 | Priority | Outcome | Target / trigger | Tracking |
 |---|---|---|---|
-| 1 | Specify and implement full restore tooling on top of B7 receipt verification. | Before any S4-style operational claim. | New B8 spec. |
-| 2 | Decide whether restore tooling is enough for a dry-run harness or whether `killctl` comes first. | After B8. | Add/update RAID decision if it changes scope. |
+| 1 | Review and acceptance-tag B8 runtime restore tooling. | Before any S4-style operational claim. | `../v2/b8_runtime_restore_spec.md` |
+| 2 | Decide whether next slice is S4 dry-run harness or `killctl` integration. | After B8. | Add/update RAID decision if it changes scope. |
 | 3 | Resolve the 4h reliability soak status for the older v1 track. | Before any v1 phase-complete claim that depends on it. | `raid_log.md` I-01 |
 
 ## 3. Open exceptions
@@ -43,11 +43,14 @@ Record only verification that supports a project claim.
 | 2026-04-24 | `uv run pytest tests/v2/runtime tests/v2/paper_live tests/v2/execution -q` | 51 passed | B7 replay verification + adjacent runtime/paper-live acceptance |
 | 2026-04-24 | `uv run pytest tests/v2 -q` | 221 passed | No v2 regression after B7 |
 | 2026-04-24 | `uv run ruff check v2/runtime v2/execution/simulator.py tests/v2/runtime` | All checks passed | B7 touched-code lint |
+| 2026-04-24 | `uv run pytest tests/v2/runtime tests/v2/paper_live tests/v2/execution -q` | 55 passed | B8 restore tooling + adjacent runtime/paper-live acceptance |
+| 2026-04-24 | `uv run pytest tests/v2 -q` | 225 passed | No v2 regression after B8 |
+| 2026-04-24 | `uv run ruff check v2/runtime tests/v2/runtime` | All checks passed | B8 touched-code lint |
 
 ## 5. This-week commitment
 
 Keep this to at most three outcomes.
 
-- [ ] Specify B8 full restore tooling.
-- [ ] Implement B8 restore verification path.
+- [ ] Review/tag B8 runtime restore tooling.
+- [ ] Decide whether next slice is S4 dry-run harness or `killctl` integration.
 - [ ] Reconcile reliability-gate status.
