@@ -20,6 +20,7 @@
 | Order-book overclaim control | MBP-10 cannot claim queue-position accuracy; MBO required for order-level queue claims | `test_fill_claim_limits_prevent_overclaiming_queue_accuracy_on_mbp10` |
 | Synthetic tick/book fixture gate | `v2/s4_0/synthetic_microstructure.py` | `tests/v2/s4_0/test_synthetic_microstructure.py` |
 | MBP-10 simulated-fill drill | `v2/s4_0/mbp10_fill.py` | `tests/v2/s4_0/test_mbp10_fill.py` |
+| Synthetic queue/hidden/PnL diagnostics | `v2/s4_0/synthetic_claims.py` | `tests/v2/s4_0/test_synthetic_claims.py` |
 
 ## Deliberately Deferred
 
@@ -27,7 +28,7 @@
 - PCAP/raw-feed replay beyond explicit deferral checks.
 - Real/licensed CL front/next replay.
 - Real/licensed tick/order-book replay.
-- Any profitability or production-readiness claim.
+- Any real profitability or production-readiness claim.
 
 ## Verification
 
@@ -54,6 +55,11 @@ Latest result:
 - `tests/v2/s4_0`: 30 passed after S4-2 fill drill
 - `ruff`: all checks passed after S4-2 fill drill
 - `tests/v2`: 265 passed after S4-2 fill drill
+- S4-2A synthetic claim diagnostics: queue-position, hidden-liquidity, and profitability mechanics tested under synthetic assumptions; real queue, real hidden-liquidity, and real profitability claims all false by construction.
+- `tests/v2/s4_0/test_synthetic_claims.py`: 8 passed after S4-2A diagnostic layer
+- `tests/v2/s4_0`: 38 passed after S4-2A diagnostic layer
+- `ruff`: all checks passed after S4-2A diagnostic layer
+- `tests/v2`: 273 passed after S4-2A diagnostic layer
 
 ## Interpretation
 
@@ -73,3 +79,8 @@ and order-book fixture semantics without claiming real book reconstruction.
 S4-2 now has an executable MBP-10 simulated-fill drill. It validates
 depth-aware synthetic fills, partial fills, limit constraints, aggregate
 metrics, and the queue-position non-claim.
+
+S4-2A now has explicit synthetic diagnostics for queue-position mechanics,
+hidden-liquidity mechanics, and profitability arithmetic. This adds measurable
+coverage for the disputed areas without converting them into real-market
+claims.

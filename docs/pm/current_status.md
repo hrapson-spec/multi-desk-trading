@@ -12,15 +12,15 @@
 | v1.16 restructure | Shipped and documented. | `master_plan.md`, `../first_principles_redesign.md`, `raid_log.md` D-15/D-18 |
 | Reliability gate | 86-decision reliability sample assessed clean; full 4h wall-clock gate was deliberately interrupted and is not claimed passed. | `master_plan.md`, `raid_log.md` I-01, `reliability_sample_assessment_2026-04-24.md` |
 | Capability debits | Remaining open debits are model-quality focused. | `../capability_debits.md` |
-| v2 redesign | B6b-B10 accepted; Phase B complete; S4-0 and S4-1 accepted/closed. S4-2 MBP-10 simulated-fill drill is implemented and verified; owner closeout pending. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md`, `../v2/b8_runtime_restore_spec.md`, `../v2/b9_killctl_spec.md`, `../v2/b10_phase_b_dry_run_spec.md`, `../v2/phase_b_closeout.md`, `../v2/s4_0_closeout.md`, `../v2/s4_1_closeout.md`, `../v2/s4_2_mbp10_simulated_fill_results.md` |
-| S4 test layer | CL roll policy, synthetic replay quality, timestamp/lineage evidence, market-depth claim limits, synthetic tick/book validation, and MBP-10 simulated-fill metrics are executable. | `../v2/s4_test_execution_status.md` |
+| v2 redesign | B6b-B10 accepted; Phase B complete; S4-0 and S4-1 accepted/closed. S4-2 MBP-10 simulated-fill drill and S4-2A synthetic claim diagnostics are implemented and verified; owner closeout pending. | `../v2/b6b_paper_live_spec.md`, `../v2/b7_replay_snapshot_spec.md`, `../v2/b8_runtime_restore_spec.md`, `../v2/b9_killctl_spec.md`, `../v2/b10_phase_b_dry_run_spec.md`, `../v2/phase_b_closeout.md`, `../v2/s4_0_closeout.md`, `../v2/s4_1_closeout.md`, `../v2/s4_2_mbp10_simulated_fill_results.md`, `../v2/s4_2a_synthetic_claim_diagnostics.md` |
+| S4 test layer | CL roll policy, synthetic replay quality, timestamp/lineage evidence, market-depth claim limits, synthetic tick/book validation, MBP-10 simulated-fill metrics, and synthetic queue/hidden/PnL diagnostics are executable. | `../v2/s4_test_execution_status.md` |
 
 ## 2. Next outcomes
 
 | Priority | Outcome | Target / trigger | Tracking |
 |---|---|---|---|
-| 1 | Review S4-2 MBP-10 simulated-fill metrics and decide whether to close the drill. | Current phase gate. | `../v2/s4_2_mbp10_simulated_fill_results.md`, `../v2/s4_test_execution_status.md` |
-| 2 | Decide whether the next drill is synthetic multi-session microstructure replay or MBP-10 integration into the recorded-replay evidence pack. | After S4-2 review. | `../v2/s4_test_execution_status.md` |
+| 1 | Review S4-2/S4-2A simulated-fill and synthetic-claim metrics and decide whether to close the drill. | Current phase gate. | `../v2/s4_2_mbp10_simulated_fill_results.md`, `../v2/s4_2a_synthetic_claim_diagnostics.md`, `../v2/s4_test_execution_status.md` |
+| 2 | Decide whether the next drill is synthetic multi-session microstructure replay or MBP-10 integration into the recorded-replay evidence pack. | After S4-2/S4-2A review. | `../v2/s4_test_execution_status.md` |
 | 3 | Decide whether the clean 86-decision sample is enough for current PM purposes or whether exact 4h evidence is still needed. | Before making a strict §12.2 reliability-gate claim. | `raid_log.md` I-01, `reliability_sample_assessment_2026-04-24.md` |
 
 ## 3. Open exceptions
@@ -83,6 +83,11 @@ Record only verification that supports a project claim.
 | 2026-04-24 | `uv run pytest tests/v2/s4_0 -q` | 30 passed | S4-2 MBP-10 simulated-fill drill |
 | 2026-04-24 | `uv run ruff check v2/s4_0 tests/v2/s4_0` | All checks passed | S4-2 touched-code lint |
 | 2026-04-24 | `uv run pytest tests/v2 -q` | 265 passed | No v2 regression after S4-2 fill drill |
+| 2026-04-24 | Synthetic queue/hidden/PnL diagnostics | OK; queue fill 20/20 with real queue claim false; hidden synthetic fill 25/30 with real hidden claim false; synthetic net PnL 14.25 with real profitability claim false | S4-2A synthetic claim diagnostics |
+| 2026-04-24 | `uv run pytest tests/v2/s4_0/test_synthetic_claims.py -q` | 8 passed | S4-2A focused diagnostic coverage |
+| 2026-04-24 | `uv run pytest tests/v2/s4_0 -q` | 38 passed | S4-2A full S4 slice coverage |
+| 2026-04-24 | `uv run ruff check v2/s4_0 tests/v2/s4_0` | All checks passed | S4-2A touched-code lint |
+| 2026-04-24 | `uv run pytest tests/v2 -q` | 273 passed | No v2 regression after S4-2A diagnostic layer |
 
 ## 5. This-week commitment
 

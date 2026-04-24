@@ -65,3 +65,8 @@ Orders:
 The drill proves bounded MBP-10 depth-aware simulated fills on synthetic data.
 It does not prove queue position, real exchange execution quality, hidden
 liquidity, order-level reconstruction, profitability, or production readiness.
+
+The queue-position, hidden-liquidity, and profitability gaps are now covered by
+`s4_2a_synthetic_claim_diagnostics.md` as synthetic diagnostics only. Those
+diagnostics measure the mechanics under declared assumptions while keeping real
+queue, real hidden-liquidity, and real profitability claims false.
