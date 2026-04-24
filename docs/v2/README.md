@@ -69,13 +69,13 @@ persisted into the `promotion_prereg.yaml` for any desk that cites it.
 | Artefact | Purpose |
 |---|---|
 | `s4_0_dry_run_plan.md` | Pre-run plan for the first no-capital recorded replay rehearsal. |
-| `s4_0_researcher_brief.md` | External research commission for data-source, licence, and operational evidence requirements. |
-| `s4_0_research_findings.md` | External research output and conditional Databento source decision. |
-| `s4_0_licence_clearance_checklist.md` | Written licence and entitlement clearance checklist before S4-0 execution. |
+| `s4_0_researcher_brief.md` | Archived external research commission for optional commercial data sources. |
+| `s4_0_research_findings.md` | Archived external research output; Databento is no longer a gate. |
+| `s4_0_licence_clearance_checklist.md` | Archived checklist; no longer a requirement for S4-0 local/free replay execution. |
 | `s4_0_execution_spec.md` | Executable recorded-replay runner boundary, command, and acceptance tests. |
-| `s4_0f_free_data_rehearsal.md` | Downgraded free-data operational rehearsal result; proves machinery only, not formal S4-0. |
+| `s4_0f_free_data_rehearsal.md` | Free-data operational rehearsal result now accepted under the local/free S4-0 scope. |
 | `s4_test_execution_status.md` | Executed test-layer status for CL roll policy, synthetic tick replay semantics, lineage, and market-depth claim limits. |
-| `s4_0_run_config_template.yaml` | Local run-config template for a licensed Databento-style replay file. |
+| `s4_0_run_config_template.yaml` | Local run-config template for local/free or synthetic replay files. |
 | `s4_0_evidence_manifest.md` | Required evidence pack structure for reviewer-grade S4-0 assessment. |
 | `s4_0_report_template.md` | Post-run report template using pre-registered stop/go criteria. |
 

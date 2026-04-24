@@ -1,9 +1,9 @@
 """S4-0 recorded replay runner.
 
 This module executes the first no-money S4 rehearsal against a local
-recorded-replay CSV export. It deliberately does not download vendor data or
-store credentials. The caller must provide the licensed data file and written
-clearance artefacts before the run can start.
+recorded-replay CSV export. It deliberately does not download vendor data,
+store credentials, or require licensed market data. The caller must provide a
+local replay file plus no-money run-control artefacts before the run can start.
 """
 
 from __future__ import annotations
@@ -40,22 +40,31 @@ _DESK = "s4_0_recorded_replay_desk"
 _STAGE = "S4-0 recorded replay"
 _TARGET_VARIABLE = "WTI_FRONT_1W_LOG_RETURN"
 _TARGET_HORIZON = "5d"
-_REQUIRED_CLEARANCE_FILES = (
-    "licence_boundary_table.md",
-    "vendor_terms_summary.md",
+_REQUIRED_RUN_CONTROL_FILES = (
     "owner_clearance_decision.md",
     "no_money_attestation.md",
 )
-_OPTIONAL_CLEARANCE_FILES = (
+_OPTIONAL_DATA_SOURCE_FILES = (
+    "data_source_summary.md",
+    "source_rights_note.md",
+    "licence_boundary_table.md",
+    "vendor_terms_summary.md",
     "exchange_route_summary.md",
     "reviewer_access_model.md",
     "unresolved_licence_questions.md",
 )
 _OWNER_APPROVAL_LINE = "- [x] Approved for S4-0 no-money recorded replay execution."
+_OWNER_APPROVAL_LINE_FREE = (
+    "- [x] Approved for S4-0 local/free recorded replay execution."
+)
 _OWNER_APPROVAL_LINE_S4_0F = (
     "- [x] Approved for S4-0F no-money free-data rehearsal execution."
 )
-_OWNER_APPROVAL_LINES = (_OWNER_APPROVAL_LINE, _OWNER_APPROVAL_LINE_S4_0F)
+_OWNER_APPROVAL_LINES = (
+    _OWNER_APPROVAL_LINE,
+    _OWNER_APPROVAL_LINE_FREE,
+    _OWNER_APPROVAL_LINE_S4_0F,
+)
 _OWNER_REJECTION_LINE = "- [x] Not approved; blocker remains."
 _NO_MONEY_LINES = (
     "- [x] No live broker route is configured.",
@@ -75,13 +84,13 @@ class S40ReplayConfig:
     run_id: str
     evidence_root: Path
     raw_feed_csv: Path
-    licence_clearance_dir: Path
+    run_control_dir: Path
     front_symbol: str
     next_symbol: str
     session_start: datetime
     session_end: datetime
-    vendor: str = "Databento"
-    dataset: str = "CME Globex MDP 3.0"
+    vendor: str = "local"
+    dataset: str = "local/free/synthetic recorded replay"
     market_depth: str = "unknown"
     decision_interval_minutes: int = 60
     market_vol_5d: float = 0.04
@@ -101,6 +110,11 @@ class S40ReplayConfig:
     def run_root(self) -> Path:
         return self.evidence_root / self.run_id
 
+    @property
+    def licence_clearance_dir(self) -> Path:
+        """Backward-compatible alias for older local configs."""
+        return self.run_control_dir
+
     @classmethod
     def from_yaml(cls, path: Path) -> S40ReplayConfig:
         path = Path(path)
@@ -115,10 +129,15 @@ class S40ReplayConfig:
             **data,
             "evidence_root": _path("evidence_root"),
             "raw_feed_csv": _path("raw_feed_csv"),
-            "licence_clearance_dir": _path("licence_clearance_dir"),
+            "run_control_dir": _path(
+                "run_control_dir"
+                if "run_control_dir" in data
+                else "licence_clearance_dir"
+            ),
             "session_start": _parse_utc(str(data["session_start"])),
             "session_end": _parse_utc(str(data["session_end"])),
         }
+        payload.pop("licence_clearance_dir", None)
         return cls(**payload)
 
 
@@ -202,7 +221,7 @@ def run_s4_0_recorded_replay(
         raise S40PreflightError("; ".join(quality.hard_failures))
 
     _write_run_control(config, dirs["00_run_control"])
-    _write_entitlements(config, dirs["01_entitlements"])
+    _write_data_source(config, dirs["01_data_source"])
     _write_reference_data(config, dirs["02_reference_data"])
     _write_raw_evidence(config, raw_events, dirs["03_raw_feed"])
     _write_normalized_events(accepted, dirs["04_normalized_feed"])
@@ -311,29 +330,25 @@ def _preflight(config: S40ReplayConfig) -> None:
         raise S40PreflightError("market_vol_5d must be > 0")
     if not config.raw_feed_csv.exists():
         raise S40PreflightError(f"raw_feed_csv is missing: {config.raw_feed_csv}")
-    if not config.licence_clearance_dir.exists():
-        raise S40PreflightError(
-            f"licence_clearance_dir is missing: {config.licence_clearance_dir}"
-        )
+    if not config.run_control_dir.exists():
+        raise S40PreflightError(f"run_control_dir is missing: {config.run_control_dir}")
     missing = [
         name
-        for name in _REQUIRED_CLEARANCE_FILES
-        if not (config.licence_clearance_dir / name).exists()
+        for name in _REQUIRED_RUN_CONTROL_FILES
+        if not (config.run_control_dir / name).exists()
     ]
     if missing:
-        raise S40PreflightError(
-            "licence/no-money clearance files missing: " + ", ".join(missing)
-        )
-    owner_clearance = (config.licence_clearance_dir / "owner_clearance_decision.md").read_text(
+        raise S40PreflightError("run-control files missing: " + ", ".join(missing))
+    owner_clearance = (config.run_control_dir / "owner_clearance_decision.md").read_text(
         encoding="utf-8"
     )
     if _OWNER_REJECTION_LINE in owner_clearance or not any(
         line in owner_clearance for line in _OWNER_APPROVAL_LINES
     ):
         raise S40PreflightError(
-            "owner_clearance_decision.md must explicitly approve S4-0/S4-0F execution"
+            "owner_clearance_decision.md must explicitly approve S4-0 execution"
         )
-    no_money = (config.licence_clearance_dir / "no_money_attestation.md").read_text(
+    no_money = (config.run_control_dir / "no_money_attestation.md").read_text(
         encoding="utf-8"
     )
     missing_attestations = [line for line in _NO_MONEY_LINES if line not in no_money]
@@ -356,7 +371,7 @@ def _prepare_run_root(run_root: Path, *, overwrite: bool) -> Path:
 def _prepare_evidence_dirs(run_root: Path) -> dict[str, Path]:
     names = (
         "00_run_control",
-        "01_entitlements",
+        "01_data_source",
         "02_reference_data",
         "03_raw_feed",
         "04_normalized_feed",
@@ -649,15 +664,26 @@ def _write_run_control(config: S40ReplayConfig, root: Path) -> None:
     _write_json(root / "config_snapshot.json", _config_payload(config))
     (root / "stop_go_criteria.md").write_text(
         "Green requires complete evidence, replay verification, restore success, "
-        "and no unresolved P0/P1 exceptions.\n",
+        "and no unresolved SEV0/SEV1 exceptions.\n",
         encoding="utf-8",
     )
-    shutil.copy2(config.licence_clearance_dir / "no_money_attestation.md", root)
+    shutil.copy2(config.run_control_dir / "no_money_attestation.md", root)
 
 
-def _write_entitlements(config: S40ReplayConfig, root: Path) -> None:
-    for name in (*_REQUIRED_CLEARANCE_FILES, *_OPTIONAL_CLEARANCE_FILES):
-        source = config.licence_clearance_dir / name
+def _write_data_source(config: S40ReplayConfig, root: Path) -> None:
+    _write_json(
+        root / "data_source_manifest.json",
+        {
+            "raw_feed_csv": str(config.raw_feed_csv),
+            "vendor": config.vendor,
+            "dataset": config.dataset,
+            "market_depth": config.market_depth,
+            "licensed_or_real_data_required": False,
+            "source_policy": "local/free/synthetic recorded replay accepted for S4-0",
+        },
+    )
+    for name in (*_REQUIRED_RUN_CONTROL_FILES, *_OPTIONAL_DATA_SOURCE_FILES):
+        source = config.run_control_dir / name
         if source.exists():
             shutil.copy2(source, root / name)
 
@@ -670,7 +696,7 @@ def _write_reference_data(config: S40ReplayConfig, root: Path) -> None:
             "next_symbol": config.next_symbol,
             "session_start": _utc_iso(config.session_start),
             "session_end": _utc_iso(config.session_end),
-            "roll_status": "must be confirmed from CME/vendor metadata before run",
+            "roll_status": "must be declared from run config or local metadata before run",
             "vendor": config.vendor,
             "dataset": config.dataset,
             "market_depth": config.market_depth,
@@ -724,7 +750,7 @@ def _write_normalized_events(events: list[MarketEvent], root: Path) -> None:
                 }
             )
     (root / "raw_to_normalized_mapping.md").write_text(
-        "S4-0 scaffold maps Databento-style CSV columns "
+        "S4-0 scaffold maps recorded-replay CSV columns "
         "`ts_event`, `ts_recv`, `symbol`, `price`, `size`, and `sequence` "
         "into the normalized replay event schema.\n",
         encoding="utf-8",
@@ -1049,7 +1075,7 @@ def _config_payload(config: S40ReplayConfig) -> dict[str, Any]:
         "run_id": config.run_id,
         "evidence_root": str(config.evidence_root),
         "raw_feed_csv": str(config.raw_feed_csv),
-        "licence_clearance_dir": str(config.licence_clearance_dir),
+        "run_control_dir": str(config.run_control_dir),
         "front_symbol": config.front_symbol,
         "next_symbol": config.next_symbol,
         "session_start": _utc_iso(config.session_start),

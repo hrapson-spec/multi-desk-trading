@@ -26,8 +26,8 @@ _MONTH_CODES = {
 class ExchangeCalendar:
     """Minimal business-day calendar for S4 roll fixtures.
 
-    Formal S4 should use vendor/exchange metadata. This class exists to make
-    the synthetic roll tests deterministic and explicit.
+    S4 can use local metadata for this phase. This class exists to make the
+    synthetic roll tests deterministic and explicit.
     """
 
     holidays: frozenset[date] = frozenset()

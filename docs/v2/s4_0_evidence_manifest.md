@@ -12,6 +12,10 @@ raw replay input to normalized input, feature generation, forecast, decision,
 simulated execution, ledger, incident status, replay result, restore result,
 and final run assessment.
 
+S4-0 may use local/free or synthetic replay data. Real or licensed market data
+is not a requirement for this phase; source limitations must be recorded in the
+data-source evidence and final report.
+
 ## 2. Evidence Root
 
 Use a dedicated run root:
@@ -32,7 +36,7 @@ s4_0_wti_20260504_001
 ```text
 evidence/s4_0/<run_id>/
   00_run_control/
-  01_entitlements/
+  01_data_source/
   02_reference_data/
   03_raw_feed/
   04_normalized_feed/
@@ -57,7 +61,7 @@ evidence/s4_0/<run_id>/
 | Folder | Required evidence |
 |---|---|
 | `00_run_control/` | Run declaration, session calendar, code commit, config snapshot, stop/go criteria. |
-| `01_entitlements/` | Data-source selection record, licence summary, entitlement evidence, unresolved caveats. |
+| `01_data_source/` | Data-source selection record, source manifest, source rights note if applicable, and known limitations. |
 | `02_reference_data/` | Instrument map, front/next mapping, contract-roll rule, trading session definition. |
 | `03_raw_feed/` | Raw replay files or raw API capture, source hashes, source metadata. |
 | `04_normalized_feed/` | Normalized events or bars, schema version, normalization log. |

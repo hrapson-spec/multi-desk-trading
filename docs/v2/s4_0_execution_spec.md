@@ -7,24 +7,24 @@
 
 ## 1. Purpose
 
-This slice turns the S4-0 research recommendation into an executable local
-recorded-replay runner. It does not download Databento/CME data and does not
-store credentials. The operator supplies a licensed local replay CSV and the
-required written clearance artefacts.
+This slice turns S4-0 into an executable local recorded-replay runner. It does
+not download Databento/CME data, does not store credentials, and no longer
+requires real or licensed market data. The operator supplies a local/free or
+synthetic replay CSV plus no-money run-control artefacts.
 
 ## 2. Execution Boundary
 
 The runner can execute once these local inputs exist:
 
-- Databento-style recorded replay CSV with `ts_event`, `symbol`, and `price`.
-- Written licence and no-money clearance files.
+- Recorded replay CSV with `ts_event`, `symbol`, and `price`.
+- Written owner approval and no-money attestation.
 - Run config YAML declaring run ID, evidence root, symbols, session window, and
   decision interval.
 
-The runner refuses to start if required clearance files are missing.
-It also refuses pending templates: `owner_clearance_decision.md` must have the
-S4-0 approval checkbox checked, and `no_money_attestation.md` must have all
-no-money attestations checked.
+The runner refuses to start if required run-control files are missing. It also
+refuses pending templates: `owner_clearance_decision.md` must have the S4-0
+approval checkbox checked, and `no_money_attestation.md` must have all no-money
+attestations checked.
 
 ## 3. Command
 
@@ -34,17 +34,19 @@ uv run python -m v2.governance.s4_0 --config <path-to-s4_0.yaml>
 
 Use `--overwrite` only to intentionally replace an existing evidence run root.
 
-## 4. Required Clearance Files
+## 4. Required Run-Control Files
 
-Place these in the configured `licence_clearance_dir`:
+Place these in the configured `run_control_dir`:
 
-- `licence_boundary_table.md`
-- `vendor_terms_summary.md`
 - `owner_clearance_decision.md`
 - `no_money_attestation.md`
 
 Optional but recommended:
 
+- `data_source_summary.md`
+- `source_rights_note.md`
+- `licence_boundary_table.md`
+- `vendor_terms_summary.md`
 - `exchange_route_summary.md`
 - `reviewer_access_model.md`
 - `unresolved_licence_questions.md`
@@ -54,7 +56,7 @@ Optional but recommended:
 The runner creates:
 
 - run declaration and config snapshot
-- copied entitlement/no-money artefacts
+- copied run-control and data-source artefacts
 - contract-selection receipt
 - raw source manifest and optional raw copy
 - normalized replay feed

@@ -27,14 +27,14 @@ real-capital claim.
 | Data mode | Recorded replay first |
 | First run duration | One full declared trading session |
 | Expansion condition | Move to one trading week only after a clean one-session rehearsal |
-| Data-source path | Databento CME Globex MDP 3.0 is the conditional preferred technical candidate |
+| Data-source path | Local/free or synthetic replay data is sufficient; real/licensed data is no longer required |
 | Evidence standard | Strict reviewer-grade evidence pack |
 
 ## 3. Scope
 
 In scope:
 
-- Recorded replay source selection and entitlement evidence.
+- Recorded replay source selection and source manifest evidence.
 - CL front-month and next-month symbol mapping.
 - Contract-roll reference data and roll-handling test records.
 - Raw feed capture from replay input.
@@ -61,9 +61,9 @@ S4-0 cannot start until all hard gates are satisfied:
 
 | Gate | Required evidence |
 |---|---|
-| Data licence clarity | Written summary covering non-display use, local storage, replay, retention, and reviewer access. |
-| Entitlement proof | Vendor or account evidence showing the dataset is available for the declared symbols and dates. |
-| Timestamp semantics | Documented exchange/vendor timestamp fields and timezone handling. |
+| Data-source declaration | Local/free/synthetic source, symbol mapping, source hash, and known limitations. |
+| No-money boundary | Owner approval and checked no-money attestation. |
+| Timestamp semantics | Documented source timestamp fields and timezone handling. |
 | Contract mapping | Declared front-month and next-month symbols plus roll rule for the chosen window. |
 | Run declaration | Fixed run ID, session date, session window, instruments, code commit, and evidence root. |
 | Stop criteria | Green/amber/red criteria accepted before the run starts. |
@@ -74,7 +74,7 @@ S4-0 has three execution steps:
 
 | Step | Purpose | Exit condition |
 |---|---|---|
-| S4-0A readiness | Select data source, licence path, symbols, session, and evidence root. | All hard gates satisfied. |
+| S4-0A readiness | Select local/free source, run-control path, symbols, session, and evidence root. | All hard gates satisfied. |
 | S4-0B one-session rehearsal | Run one declared recorded replay session end to end. | Report completed with stop/go assessment. |
 | S4-0C one-week expansion | Repeat across one trading week. | Allowed only after S4-0B has no unresolved blocker issue. |
 
@@ -90,23 +90,23 @@ Green:
 - Incident log exists and contains every manual drill or exception.
 - Replay reproduces the run or produces a documented, bounded divergence.
 - Restore drill completes and writes a restore report.
-- No open P0/P1 incident remains at assessment time.
+- No open SEV0/SEV1 incident remains at assessment time.
 
 Amber:
 
 - The run completes but has non-blocking exceptions.
 - Evidence is complete, but at least one reconciliation or replay divergence
   requires owner review.
-- A P2 incident remains open with a mitigation owner and explicit due date.
+- A SEV2 incident remains open with a mitigation owner and explicit due date.
 
 Red:
 
-- Data licence or entitlement position is unclear.
+- Data-source declaration or no-money attestation is missing.
 - Required evidence classes are missing.
 - Raw-to-normalized or decision-to-ledger reconciliation cannot be traced.
 - Replay fails without a bounded explanation.
 - Restore fails.
-- A P0/P1 incident remains unresolved.
+- A SEV0/SEV1 incident remains unresolved.
 - The run accidentally connects to a broker or real-money pathway.
 
 ## 7. Clean Run Definition
@@ -132,13 +132,9 @@ A one-session rehearsal is clean only if:
 - S4-0 reconciliation summary.
 - S4-0 post-run report.
 
-## 9. Next Blocking Decision
+## 9. Next Action
 
-The external research commission is complete. The next blocking decision is
-written licence and entitlement clearance for the conditional Databento CME
-Globex MDP 3.0 path, including non-display use, local storage, local replay,
-retention, internal review, external reviewer access if needed, and derived
-evidence handling.
-
-If Databento/CME clearance is not available, record the blocker and evaluate
-the alternate candidates in `s4_0_research_findings.md`.
+The S4-0 scope no longer waits for Databento/CME or any licensed real market
+feed. Execute S4-0 using local/free or synthetic replay data, preserve the same
+evidence discipline, and record source limitations as non-claims rather than
+blockers.

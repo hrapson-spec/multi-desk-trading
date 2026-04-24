@@ -23,7 +23,7 @@ def test_s4_0_recorded_replay_writes_reviewer_grade_evidence(tmp_path):
         run_id="s4_0_wti_20260424_001",
         evidence_root=tmp_path / "evidence",
         raw_feed_csv=raw,
-        licence_clearance_dir=clearance,
+        run_control_dir=clearance,
         front_symbol="CLM6",
         next_symbol="CLN6",
         session_start=datetime(2026, 4, 24, 13, 0, tzinfo=UTC),
@@ -42,6 +42,7 @@ def test_s4_0_recorded_replay_writes_reviewer_grade_evidence(tmp_path):
     assert report.manifest_path.exists()
     assert (report.run_root / "manifest.sha256").exists()
     assert (report.run_root / "03_raw_feed" / "raw_source_manifest.json").exists()
+    assert (report.run_root / "01_data_source" / "data_source_manifest.json").exists()
     assert (report.run_root / "04_normalized_feed" / "normalized_events.csv").exists()
     assert (
         report.run_root / "05_data_quality" / "timestamp_audit_report.json"
@@ -81,24 +82,27 @@ def test_s4_0_recorded_replay_writes_reviewer_grade_evidence(tmp_path):
     assert timestamp_audit["tick_quality"]["sequence_gap_count"] == 0
 
 
-def test_s4_0_recorded_replay_requires_licence_and_no_money_clearance(tmp_path):
+def test_s4_0_recorded_replay_requires_run_control_and_no_money_attestation(tmp_path):
     raw = _raw_feed(tmp_path)
     clearance = tmp_path / "clearance"
     clearance.mkdir()
-    (clearance / "licence_boundary_table.md").write_text("ok\n", encoding="utf-8")
+    (clearance / "owner_clearance_decision.md").write_text(
+        "- [x] Approved for S4-0 local/free recorded replay execution.\n",
+        encoding="utf-8",
+    )
 
     config = S40ReplayConfig(
         run_id="s4_0_wti_20260424_001",
         evidence_root=tmp_path / "evidence",
         raw_feed_csv=raw,
-        licence_clearance_dir=clearance,
+        run_control_dir=clearance,
         front_symbol="CLM6",
         next_symbol="CLN6",
         session_start=datetime(2026, 4, 24, 13, 0, tzinfo=UTC),
         session_end=datetime(2026, 4, 24, 16, 0, tzinfo=UTC),
     )
 
-    with pytest.raises(S40PreflightError, match="clearance files missing"):
+    with pytest.raises(S40PreflightError, match="run-control files missing"):
         run_s4_0_recorded_replay(config)
 
 
@@ -110,7 +114,7 @@ def test_s4_0_recorded_replay_rejects_unapproved_clearance_template(tmp_path):
         run_id="s4_0_wti_20260424_001",
         evidence_root=tmp_path / "evidence",
         raw_feed_csv=raw,
-        licence_clearance_dir=clearance,
+        run_control_dir=clearance,
         front_symbol="CLM6",
         next_symbol="CLN6",
         session_start=datetime(2026, 4, 24, 13, 0, tzinfo=UTC),
@@ -131,7 +135,7 @@ def test_s4_0_cli_runs_from_yaml_config(tmp_path, capsys):
                 "run_id": "s4_0_wti_20260424_001",
                 "evidence_root": "evidence",
                 "raw_feed_csv": str(raw),
-                "licence_clearance_dir": str(clearance),
+                "run_control_dir": str(clearance),
                 "front_symbol": "CLM6",
                 "next_symbol": "CLN6",
                 "session_start": "2026-04-24T13:00:00Z",
@@ -150,20 +154,20 @@ def test_s4_0_cli_runs_from_yaml_config(tmp_path, capsys):
     assert output["runtime_counts"] == {"execution_ledger": 6, "family_decisions": 3}
 
 
-def test_s4_0f_free_data_stage_label_and_approval_line(tmp_path):
-    clearance = _clearance_dir(tmp_path, approval_line="s4_0f")
+def test_s4_0_local_free_stage_label_and_approval_line(tmp_path):
+    clearance = _clearance_dir(tmp_path, approval_line="s4_0_free")
     raw = _raw_feed(tmp_path)
     config = S40ReplayConfig(
-        run_id="s4_0f_wti_free_data_001",
+        run_id="s4_0_wti_free_data_001",
         evidence_root=tmp_path / "evidence",
         raw_feed_csv=raw,
-        licence_clearance_dir=clearance,
+        run_control_dir=clearance,
         front_symbol="CLM6",
         next_symbol="CLN6",
         session_start=datetime(2026, 4, 24, 13, 0, tzinfo=UTC),
         session_end=datetime(2026, 4, 24, 16, 0, tzinfo=UTC),
         decision_interval_minutes=60,
-        stage="S4-0F free-data operational rehearsal",
+        stage="S4-0 local/free recorded replay",
     )
 
     report = run_s4_0_recorded_replay(config)
@@ -173,8 +177,35 @@ def test_s4_0f_free_data_stage_label_and_approval_line(tmp_path):
         report.run_root / "16_report" / "final_s4_0_report.md"
     ).read_text(encoding="utf-8")
     assert report.ok is True
-    assert manifest["stage"] == "S4-0F free-data operational rehearsal"
-    assert "# S4-0F free-data operational rehearsal run report" in final_report
+    assert manifest["stage"] == "S4-0 local/free recorded replay"
+    assert "# S4-0 local/free recorded replay run report" in final_report
+
+
+def test_s4_0_cli_accepts_legacy_licence_clearance_dir_key(tmp_path, capsys):
+    clearance = _clearance_dir(tmp_path)
+    raw = _raw_feed(tmp_path)
+    config_path = tmp_path / "s4_0_legacy.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "run_id": "s4_0_wti_legacy_001",
+                "evidence_root": "evidence",
+                "raw_feed_csv": str(raw),
+                "licence_clearance_dir": str(clearance),
+                "front_symbol": "CLM6",
+                "next_symbol": "CLN6",
+                "session_start": "2026-04-24T13:00:00Z",
+                "session_end": "2026-04-24T16:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = main(["--config", str(config_path)])
+
+    assert result == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["stop_go"] == "green"
 
 
 def _clearance_dir(tmp_path, *, approved: bool = True, approval_line: str = "s4_0"):
@@ -187,8 +218,8 @@ def _clearance_dir(tmp_path, *, approved: bool = True, approval_line: str = "s4_
         "vendor_terms_summary.md: cleared for test fixture\n", encoding="utf-8"
     )
     approval_text = (
-        "Approved for S4-0F no-money free-data rehearsal execution."
-        if approval_line == "s4_0f"
+        "Approved for S4-0 local/free recorded replay execution."
+        if approval_line == "s4_0_free"
         else "Approved for S4-0 no-money recorded replay execution."
     )
     owner_line = f"- [{'x' if approved else ' '}] {approval_text}"
@@ -214,7 +245,7 @@ def _clearance_dir(tmp_path, *, approved: bool = True, approval_line: str = "s4_
 
 
 def _raw_feed(tmp_path):
-    path = tmp_path / "databento_cl_fixture.csv"
+    path = tmp_path / "local_cl_fixture.csv"
     path.write_text(
         "\n".join(
             [

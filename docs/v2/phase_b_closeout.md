@@ -28,5 +28,5 @@
 
 ## Next Phase Candidate
 
-Prepare an S4 dry-run plan against real or recorded live feeds, with a
+Prepare an S4 dry-run plan against local/free or synthetic recorded replay, with a
 pre-registered Layer-5 drill plan and explicit evidence pack requirements.

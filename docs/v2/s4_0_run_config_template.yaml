@@ -1,18 +1,18 @@
-# Template for local licensed paths; keep filled configs outside the docs tree.
+# Template for local/free or synthetic replay paths; keep filled configs outside the docs tree.
 run_id: s4_0_wti_YYYYMMDD_001
 stage: S4-0 recorded replay
 evidence_root: /absolute/path/to/evidence/s4_0
-raw_feed_csv: /absolute/path/to/licensed/databento_cl_replay.csv
-licence_clearance_dir: /absolute/path/to/licence_clearance
+raw_feed_csv: /absolute/path/to/local_or_synthetic_replay.csv
+run_control_dir: /absolute/path/to/run_control
 
 front_symbol: CLM6
 next_symbol: CLN6
 session_start: "2026-04-24T13:00:00Z"
 session_end: "2026-04-24T20:00:00Z"
 
-vendor: Databento
-dataset: CME Globex MDP 3.0
-market_depth: mbp-10
+vendor: local
+dataset: local/free/synthetic recorded replay
+market_depth: trades
 decision_interval_minutes: 60
 market_vol_5d: 0.04
 reference_risk_5d_usd: 100000.0

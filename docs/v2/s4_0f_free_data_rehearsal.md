@@ -5,22 +5,23 @@
 - **Owner**: Henri Rapson
 - **Stage**: S4-0F free-data operational rehearsal
 - **Executor commit**: `08f95ce`
-- **Formal S4-0 status**: still blocked on licensed CL front/next recorded replay data
+- **Formal S4-0 status**: accepted as the current S4-0 local/free-data evidence run
 
-## 1. Downgrade Decision
+## 1. Scope Decision
 
-S4-0F is a scope downgrade from formal S4-0, not a downgrade in evidence
-discipline. It exists because the workspace does not currently contain licensed
-CL front/next tick or book replay data. The local Databento placeholder file is
-only a header row.
+S4-0 no longer requires real or licensed market data. The free-data run is
+therefore treated as the current accepted S4-0 operating-model rehearsal, not
+as a blocker-preserving downgrade. The evidence discipline remains unchanged:
+the run still needs source hashes, normalized output, receipts, replay,
+restore, reconciliation, incidents, and stop/go assessment.
 
 S4-0F uses free/local daily WTI futures data to prove the operating machinery:
 input manifesting, normalization, forecast receipts, decision receipts,
 simulated ledger, incidents, replay verification, restore, and stop/go
 reporting.
 
-Formal S4-0 remains reserved for a reviewer-grade CL front/next recorded replay
-run with clear data rights.
+Real or licensed CL front/next replay may be added later as stronger evidence,
+but it is no longer a requirement for this phase.
 
 ## 2. Input Data
 
@@ -68,14 +69,13 @@ S4-0F does not prove:
 - CL front/next contract replay.
 - Tick-level or order-book processing.
 - Contract-roll handling.
-- CME/Databento licence clearance.
+- Licensed-data handling.
 - Live-feed timing behavior.
 - Live execution quality.
 - Profitability or investment performance.
 
 ## 5. Next Gate
 
-The next formal gate is unchanged: obtain licensed CL front/next recorded replay
-data and written clearance for non-display use, local storage, local replay,
-retention, and reviewer access. Once that exists, run formal S4-0 using
-`docs/v2/s4_0_execution_spec.md`.
+The next gate is a repeatable S4-0 local/free replay run with the updated
+runner contract in `docs/v2/s4_0_execution_spec.md`, then a one-week expansion
+only if the one-session evidence pack remains green.

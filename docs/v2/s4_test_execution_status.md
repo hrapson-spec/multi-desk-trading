@@ -2,8 +2,8 @@
 
 - **Status**: executable test layer started
 - **Created**: 2026-04-24
-- **Scope**: tests that do not require licensed CL replay data
-- **Formal S4 status**: still blocked on licensed CL front/next recorded replay
+- **Scope**: tests for local/free or synthetic S4 replay data
+- **Formal S4 status**: no longer blocked on licensed or real data
 
 ## Implemented Now
 
@@ -23,8 +23,8 @@
 
 - Full MBO reconstructor.
 - PCAP/raw-feed replay.
-- Formal licensed CL front/next replay.
-- Licensed tick/order-book replay.
+- Real/licensed CL front/next replay.
+- Real/licensed tick/order-book replay.
 - Any profitability or production-readiness claim.
 
 ## Verification
@@ -40,9 +40,13 @@ Latest result:
 - `tests/v2/s4_0`: 19 passed
 - `ruff`: all checks passed
 - `tests/v2`: 254 passed
+- `tests/v2/s4_0`: 20 passed after removing the licensed-data gate
+- `tests/v2`: 255 passed after removing the licensed-data gate
 
 ## Interpretation
 
 This closes the first executable slice of the reviewer feedback. It proves the
 harness can test CL roll policy, replay ordering, lineage, and market-data depth
-claim limits before licensed data arrives. It does not close formal S4.
+claim limits without waiting for licensed data. Formal S4 can proceed on
+local/free or synthetic replay evidence, with source limitations recorded as
+non-claims.

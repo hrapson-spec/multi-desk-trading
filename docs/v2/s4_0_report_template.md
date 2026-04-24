@@ -27,9 +27,9 @@
 - Symbols.
 - Live/delayed/replay status.
 - Timestamp semantics.
-- Licensing summary.
-- Entitlement evidence.
-- Unresolved licence caveats.
+- Source rights note if applicable.
+- Source limitations and non-claims.
+- Statement that real/licensed data was not required for S4-0.
 
 ## 4. Architecture
 
@@ -95,7 +95,7 @@
 ## 10. Compliance and Boundary Notes
 
 - No-money evidence.
-- Data licence caveats.
+- Data-source caveats.
 - External communication restrictions.
 - Items requiring legal or compliance review before later stages.
 
