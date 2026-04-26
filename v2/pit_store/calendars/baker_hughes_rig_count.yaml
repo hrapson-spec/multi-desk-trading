@@ -1,0 +1,25 @@
+source: baker_hughes_rig_count
+description: "Baker Hughes North America Rig Count (weekly Friday afternoon)"
+publisher: "Baker Hughes Company"
+calendar_version: "1.0.0"
+release_cadence:
+  type: weekly
+  weekday: friday
+  earliest_release_time_et: "13:00"
+  holiday_rule: shift_prior_business_day
+observation_semantics:
+  reporting_period: "rigs_active_week_ending_friday"
+  lag_to_publication_days: 0
+revision_policy: "rare; archive XLSX is the source of truth and may be re-issued"
+pit_eligibility_rule: |
+  known_by_ts = COALESCE(revision_ts, release_ts)
+  Row eligible at ts iff release_ts <= ts AND known_by_ts <= ts.
+source_confidence:
+  baseline: 0.90
+  degradation_conditions:
+    - "publisher URL pattern change; manual-download fallback required"
+data_quality_multipliers:
+  fresh: 1.0
+  stale_1week: 0.80
+  stale_2week: 0.50
+  stale_over_2week: 0.0

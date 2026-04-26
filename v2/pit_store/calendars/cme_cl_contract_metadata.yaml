@@ -1,0 +1,22 @@
+source: cme_cl_contract_metadata
+description: "CME Light Sweet Crude Oil (CL) public contract specification metadata"
+publisher: "CME Group"
+calendar_version: "1.0.0"
+release_cadence:
+  type: irregular
+  holiday_rule: none
+observation_semantics:
+  reporting_period: "static_reference"
+  lag_to_publication_days: 0
+revision_policy: "exceptional; spec changes are publicly announced and rare"
+pit_eligibility_rule: |
+  known_by_ts = COALESCE(revision_ts, release_ts)
+  Static reference data; eligibility folds into the latest known revision.
+source_confidence:
+  baseline: 1.0
+  degradation_conditions: []
+data_quality_multipliers:
+  fresh: 1.0
+  stale_1week: 1.0
+  stale_2week: 1.0
+  stale_over_2week: 1.0

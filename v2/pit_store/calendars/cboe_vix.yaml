@@ -1,0 +1,24 @@
+source: cboe_vix
+description: "Cboe VIX historical close (resilience-fallback path; FRED VIXCLS is canonical)"
+publisher: "Cboe Global Markets"
+calendar_version: "1.0.0"
+release_cadence:
+  type: daily
+  earliest_release_time_et: "16:15"
+  holiday_rule: shift_prior_business_day
+observation_semantics:
+  reporting_period: "trading_day_close"
+  lag_to_publication_days: 0
+revision_policy: "rare; intra-day re-statement issued only on data-error correction"
+pit_eligibility_rule: |
+  known_by_ts = COALESCE(revision_ts, release_ts)
+  Row eligible at ts iff release_ts <= ts AND known_by_ts <= ts.
+source_confidence:
+  baseline: 0.95
+  degradation_conditions:
+    - "Cboe site outage; route via FRED VIXCLS"
+data_quality_multipliers:
+  fresh: 1.0
+  stale_1week: 0.85
+  stale_2week: 0.60
+  stale_over_2week: 0.0

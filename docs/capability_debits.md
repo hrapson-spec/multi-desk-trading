@@ -55,6 +55,18 @@ rerun of the S4-3 gate with positioning features.
 - `docs/v2/s4_3a_exogenous_feature_hook.md`
 - `docs/v2/s4_3b_cftc_cot_feature_normalizer.md`
 
+**Mitigation log.**
+
+- 2026-04-26: B2b public-data ingestion layer landed (tag `v2-public-wti-data-stack-0.1`):
+  EIA + CFTC + FRED + Baker Hughes + CME public metadata + Cboe VIX (FRED-routed). Under the
+  2026-04-25 revised diagnosis, D-S4-3 decomposes into mechanisms A (distribution shape),
+  B (σ-calibration), and C (centre-signal noise); closure requires resolving A+B+C, not
+  feature ingestion. B2b is reframed as the **H5 substrate** in the revised sequence
+  H1 (σ test) → H2 (shape) → H4 (horizon) → H5 (upstream features); H5 may not be reached
+  if A and B alone close the debit. Confound discipline: do **not** consume the H5 features
+  until H1 and H2 have isolated A and B, otherwise feature-quality and σ/shape failures
+  are confounded.
+
 ### D1. Phase A model weakness — v1.16 narrowed scope
 
 **v1.16 scope narrowing (2026-04-22).** Roster shrinks from 5 oil desks to 3

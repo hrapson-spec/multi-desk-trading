@@ -1,0 +1,67 @@
+v2-public-wti-data-stack-0.1 — receipts
+=========================================
+
+Tag landed: 2026-04-26
+Phase: B2b (public-data ingestion layer for WTI v2)
+Plan: ~/.claude/plans/engineering-instruction-obtain-all-shimmying-liskov.md
+Strategic context: H5 substrate per revised 2026-04-25 next-step sequence
+  (H1 σ test → H2 distribution shape → H4 horizon → H5 upstream features).
+  Do not consume features until H1+H2 isolate mechanisms A and B.
+
+Verification at landing:
+  .venv/bin/pytest tests/v2 -q                     -> 364 passed
+  .venv/bin/pytest tests -q                        -> 752 passed, 1 skipped
+  .venv/bin/ruff check v2/ingest tests/v2/ingest   -> All checks passed
+  .venv/bin/ruff check .                           -> All checks passed
+  Leakage gate (test_public_feature_join_pit.py)   -> 4/4 green
+  CME no-price guardrail (test_cme_metadata.py)    -> all forbidden patterns blocked
+
+Per-file SHA-256 (relative to repo root):
+
+# Modified ingester stubs (real fetch() implementations)
+007138144913a59815f362bb0271c73d2378c9b838386fd75fffa302678fa957  v2/ingest/cftc_cot.py
+2578061bf4c80e3e5ff37de39c69785db3d8599754edc754a4d6b2423748b8b6  v2/ingest/eia_wpsr.py
+13223a1cde15b57815e462986192cb46cb3dac0ff26f48c90c8c443b76ce728f  v2/ingest/fred_alfred.py
+e8d73fd80ecf629b5b0b39aa4928ab264570dd9e7e0456237e1ec11cbfa7cef2  v2/ingest/wti_prices.py
+
+# New ingest modules
+62e687b7723f111704da84daa2582248ae5a90fc6f4e4aa2cc20a6a55bc353f6  v2/ingest/_http.py
+37969c7779a0ef95b7fad1cdbf356aa75faa87608a1f37975feff58f0af7532c  v2/ingest/_secrets.py
+9a411d785c4f304a567ef3c50199f808dedc2676a7ca365ab051036f0fb86bf0  v2/ingest/baker_hughes_rig_count.py
+659d2a3dbaf083046fbd17305338bd09a0197eb67c48ee2c8ce3e16afc10c4a1  v2/ingest/cboe_vix.py
+1d22d48c360a0391b9ff01bd01576daf83efddd4e8e3927d4c7e30a989bf3d3b  v2/ingest/cli.py
+229bb656acde8b4b81e0474bd30fdf8ca7e68ef272ecacfc2e2dc82f45f1df59  v2/ingest/cme_contract_metadata_public.py
+54cacd795778110a36ccab3f16710e1e76930e04aee0fb1f14b72b29fbc4bbe7  v2/ingest/event_calendar.py
+e83a941e2f3fb2892684d6aa53ce932d6a44367cb45303df9916a6b522100557  v2/ingest/public_data_registry.py
+b7146318d888bd90af40311b90a421744b1b4e4395507de1ce4b4743b49b7087  v2/ingest/public_feature_join.py
+
+# Registry + calendars
+54d80b921ac9513880225dfd0e9a4c07958d407e7296962baae8d39f56d188b3  v2/ingest/registry/public_data_inventory.yaml
+2746908cf73489af44c542246bf52e357d9fd3556dafed94cc0b3f85a0edcbec  v2/pit_store/calendars/baker_hughes_rig_count.yaml
+755e547baea37600002fdafbb7ed8210de3e0749e49c957f3aa6b3329fa1125e  v2/pit_store/calendars/cboe_vix.yaml
+b5b2013ae0097af0cd845aaed6cd27038bb99bd0079aafe572d67066be5521c5  v2/pit_store/calendars/cme_cl_contract_metadata.yaml
+6bfb75c0886d95e04510748d2fecc98e841626655cf87a25cd1273ef0ba04029  v2/pit_store/calendars/event_calendar.yaml
+
+# New tests
+fc69607e2cffe6931bba6b92001862c81983cc8f78be2fa543e1e7f1d1add723  tests/v2/ingest/test_baker_hughes.py
+e0f16f06cec6419126d50fc4f7ca1f0442c3b438135915e029e88b7b13d24f8c  tests/v2/ingest/test_cboe_vix.py
+907911a81c0dfa21e43e122bcd671ce333d8604d2aa9018445695c24031b9217  tests/v2/ingest/test_cftc_cot_fetcher.py
+2c5538e2d867c377e0c08985d0b01d7c42da5651e566b0fb21569b62ea3e2257  tests/v2/ingest/test_cme_metadata.py
+c67a90963cf0966ec649508c46fef0578df7759f87ad915d58798bc2c532ad71  tests/v2/ingest/test_eia_wpsr_fetcher.py
+ce69ea036e95f1702ed20414c9de2404ae729b170374bc5455188f9a6d423a64  tests/v2/ingest/test_event_calendar.py
+8598dbb14c5d2cfa3732b64249877f8e93135b97f538e17857a8c0017c7b91e4  tests/v2/ingest/test_fred_alfred_fetcher.py
+b1c20389aba70f300f65a64d29e1d56fadc2bd7523734ccdbd23d1617c3bbaff  tests/v2/ingest/test_public_data_registry.py
+7470f8a73128acc355902b5d5657bc2ca145676b0d7afb1aa2c390cc28299f68  tests/v2/ingest/test_public_feature_join_pit.py
+ce493ace9544c82449df84ad7e4440fef19a3599241100daf3591fadc288c3d6  tests/v2/ingest/test_public_rights_check.py
+ab66f8bebc0be20712fe60aa5859b03b82fd59e7e65ea7c2bc7c65fd323ea801  tests/v2/ingest/test_secrets_loader.py
+d9608b7d4230b8d115c2d99e8fa92e4037ef4a971df07f899df1cd2a5558212c  tests/v2/ingest/test_wti_prices_fetcher.py
+
+# Modified test (renamed test asserting deferred-key constructor)
+fd1a4b41dcfeadd34af364265f8568d58ed82347e85f32fcf2e7ffe4525a5625  tests/v2/ingest/test_scheduler.py
+
+# New docs
+d688a210d39bb13746de1727e955bb55db259db0b5b5003f76c0cef1ec99171e  docs/v2/operator_runbook_public_data.md
+ce38bcedef759a5790a1d8cfa45f9d2e0220ff9b8969624895cae3fb629e79c9  docs/v2/public_data_ingestion_results.md
+6cd7ee3074779f714ff09b60c6a574e52b6815a7ff4fb706398085f2a10cdccd  docs/v2/public_data_inventory.md
+21e8f26b5d1e6acf9fc9ccd20526abbdfa7a173624791c648b31fdbd8874bd96  docs/v2/public_data_rights_and_limitations.md
+e006e5c187b3277102b64895348bc605bf9e81cb7741e987de37d4cbec774d34  docs/v2/public_feature_dictionary.md

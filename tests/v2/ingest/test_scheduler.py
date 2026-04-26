@@ -82,16 +82,18 @@ def test_disabled_ingester_is_skipped(tmp_path):
     m.close()
 
 
-def test_deferred_fetch_raises_not_implemented(tmp_path):
+def test_eia_ingester_instantiates_without_api_key(tmp_path, monkeypatch):
+    """B2b: EIA ingester (and the other public-data ingesters) must be
+    instantiable without an API key so they can be registered with the
+    scheduler in environments without secrets (dry-run audits, CI).
+    The key is resolved lazily on first ``fetch()`` call.
+    """
     from v2.ingest.eia_wpsr import EIAWPSRIngester
 
+    monkeypatch.setenv("V2_OPERATOR_CONFIG", str(tmp_path / "no_such_config.yaml"))
     m = open_manifest(tmp_path)
     w = PITWriter(tmp_path, m)
-    ing = EIAWPSRIngester(w, m)
-    try:
-        ing.fetch()
-    except NotImplementedError as exc:
-        assert "not implemented" in str(exc).lower()
-    else:
-        raise AssertionError("expected NotImplementedError from deferred ingester")
+    ing = EIAWPSRIngester(w, m, series_ids=["WCESTUS1"])
+    assert ing.source == "eia"
+    assert isinstance(ing, BaseIngester)
     m.close()
