@@ -14,9 +14,11 @@ import pandas as pd
 from scipy.stats import norm
 
 from v2.contracts.decision_unit import FIXED_QUANTILE_LEVELS
+from v2.eval.cost_model import CostParams, CostScenario, apply_costs
 from v2.eval.scoring import (
     approx_crps_from_quantiles,
     diebold_mariano_hac,
+    interval_coverage,
     mean_pinball_loss,
     pinball_loss,
 )
@@ -62,6 +64,19 @@ class WTIModelQualityReport:
     model_beats_empirical_crps: bool
     model_beats_zero_gaussian_crps: bool
     promoted_for_research: bool
+    # Calibration diagnostics (additive, not part of result_hash payload).
+    coverage_80: float
+    coverage_95: float
+    pinball_per_quantile: tuple[float, ...]
+    residual_sigma_mean: float
+    residual_sigma_p05: float
+    residual_sigma_p95: float
+    train_y_std_mean: float
+    sigma_ratio_residual_to_target_mean: float
+    centre_forecast_std: float
+    realised_abs_return_mean: float
+    # Cost projection under PESSIMISTIC scenario. Diagnostic only; see non_claims.
+    cost_projection_pessimistic: dict[str, float | str]
     non_claims: tuple[str, ...]
     result_hash: str
 
@@ -103,6 +118,19 @@ class WTIModelQualityReport:
             "model_beats_empirical_crps": self.model_beats_empirical_crps,
             "model_beats_zero_gaussian_crps": self.model_beats_zero_gaussian_crps,
             "promoted_for_research": self.promoted_for_research,
+            "coverage_80": self.coverage_80,
+            "coverage_95": self.coverage_95,
+            "pinball_per_quantile": list(self.pinball_per_quantile),
+            "residual_sigma_mean": self.residual_sigma_mean,
+            "residual_sigma_p05": self.residual_sigma_p05,
+            "residual_sigma_p95": self.residual_sigma_p95,
+            "train_y_std_mean": self.train_y_std_mean,
+            "sigma_ratio_residual_to_target_mean": (
+                self.sigma_ratio_residual_to_target_mean
+            ),
+            "centre_forecast_std": self.centre_forecast_std,
+            "realised_abs_return_mean": self.realised_abs_return_mean,
+            "cost_projection_pessimistic": dict(self.cost_projection_pessimistic),
             "non_claims": list(self.non_claims),
             "ok": self.ok,
             "result_hash": self.result_hash,
@@ -152,6 +180,8 @@ def run_wti_model_quality_diagnostic(
     realised: list[float] = []
     median_predictions: list[float] = []
     train_counts: list[int] = []
+    residual_sigmas: list[float] = []
+    train_y_stds: list[float] = []
 
     for decision_pos in range(params.warmup_days, len(frame) - params.horizon_days):
         decision_row = frame.iloc[decision_pos]
@@ -180,6 +210,8 @@ def run_wti_model_quality_diagnostic(
         realised.append(float(decision_row["target_5d"]))
         median_predictions.append(float(prediction))
         train_counts.append(len(train))
+        residual_sigmas.append(float(residual_sigma))
+        train_y_stds.append(float(zero_sigma))
 
     if not realised:
         raise ValueError("no walk-forward decisions generated")
@@ -196,7 +228,8 @@ def run_wti_model_quality_diagnostic(
     model_crps = approx_crps_from_quantiles(y, model, levels)
     empirical_crps = approx_crps_from_quantiles(y, empirical, levels)
     zero_crps = approx_crps_from_quantiles(y, zero, levels)
-    model_loss_series = pinball_loss(y, model, levels).mean(axis=1)
+    model_pinball_matrix = pinball_loss(y, model, levels)
+    model_loss_series = model_pinball_matrix.mean(axis=1)
     empirical_loss_series = pinball_loss(y, empirical, levels).mean(axis=1)
     zero_loss_series = pinball_loss(y, zero, levels).mean(axis=1)
     dm_empirical = diebold_mariano_hac(model_loss_series, empirical_loss_series)
@@ -208,6 +241,20 @@ def run_wti_model_quality_diagnostic(
         and model_crps < empirical_crps
         and model_crps < zero_crps
         and directional > 0.5
+    )
+
+    coverage_80 = interval_coverage(y, model, levels, nominal=0.80).empirical
+    coverage_95 = interval_coverage(y, model, levels, nominal=0.95).empirical
+    pinball_per_quantile = tuple(float(v) for v in model_pinball_matrix.mean(axis=0))
+
+    residual_sigma_arr = np.asarray(residual_sigmas, dtype=float)
+    train_y_std_arr = np.asarray(train_y_stds, dtype=float)
+    sigma_ratio = residual_sigma_arr / np.maximum(train_y_std_arr, 1e-12)
+
+    cost_projection = _project_pessimistic_cost(
+        median_pred=medians,
+        train_y_std=train_y_std_arr,
+        realised_5d=y,
     )
     payload = {
         "source_path": str(source_path),
@@ -258,11 +305,27 @@ def run_wti_model_quality_diagnostic(
         model_beats_empirical_crps=model_crps < empirical_crps,
         model_beats_zero_gaussian_crps=model_crps < zero_crps,
         promoted_for_research=promoted,
+        coverage_80=float(coverage_80),
+        coverage_95=float(coverage_95),
+        pinball_per_quantile=pinball_per_quantile,
+        residual_sigma_mean=float(residual_sigma_arr.mean()),
+        residual_sigma_p05=float(np.quantile(residual_sigma_arr, 0.05)),
+        residual_sigma_p95=float(np.quantile(residual_sigma_arr, 0.95)),
+        train_y_std_mean=float(train_y_std_arr.mean()),
+        sigma_ratio_residual_to_target_mean=float(sigma_ratio.mean()),
+        centre_forecast_std=float(medians.std(ddof=1)),
+        realised_abs_return_mean=float(np.abs(y).mean()),
+        cost_projection_pessimistic=cost_projection,
         non_claims=(
             "not a live trading result",
             "not an investment-performance result",
             "not a production-readiness result",
             "uses local/free WTI spot proxy data, not licensed CL order-book data",
+            (
+                "cost_projection_pessimistic uses sizing rule "
+                "b_t = clip(median_pred / std(y_train), -1, 1) on overlapping "
+                "5-day labels; it is a diagnostic projection, not a tradeable PnL"
+            ),
         ),
         result_hash=_sha256_json(payload),
     )
@@ -394,3 +457,51 @@ def _sha256_json(payload: Any) -> str:
             "utf-8"
         )
     ).hexdigest()
+
+
+def _project_pessimistic_cost(
+    *,
+    median_pred: np.ndarray,
+    train_y_std: np.ndarray,
+    realised_5d: np.ndarray,
+) -> dict[str, float]:
+    """Project a pessimistic cost-adjusted return under a fixed sizing rule.
+
+    Sizing: b_t = clip(median_pred_t / std(y_train)_t, -1, 1).
+    Returns are the realised 5-day forward log returns (overlapping labels:
+    this is a diagnostic projection, not a tradeable PnL — see non_claims).
+    Realised vol per tick is approximated by std(y_train) at decision t.
+
+    Cost params are kept in unitless return space (fee_per_contract=0) so
+    the resulting net_return_total is comparable to gross_return_total. The
+    pessimistic bps stack (4.5 fixed + 0.30·vol-scaled + 0.15·sqrt-impact)
+    is reused from CostParams.pessimistic_default to maintain provenance.
+    """
+    sigma = np.maximum(train_y_std, 1e-12)
+    b = np.clip(median_pred / sigma, -1.0, 1.0)
+    positions_after = b
+    positions_before = np.concatenate([[0.0], b[:-1]])
+    pess = CostParams.pessimistic_default()
+    unitless_pess = CostParams(
+        scenario=CostScenario.PESSIMISTIC,
+        fixed_bps_one_way=pess.fixed_bps_one_way,
+        exchange_fee_per_contract=0.0,
+        vol_scale_coeff=pess.vol_scale_coeff,
+        sqrt_size_impact_coeff=pess.sqrt_size_impact_coeff,
+    )
+    report = apply_costs(
+        positions_before=positions_before,
+        positions_after=positions_after,
+        gross_returns=realised_5d,
+        realised_vols=sigma,
+        params=unitless_pess,
+    )
+    return {
+        "scenario": str(report.scenario),
+        "gross_return_total": float(report.gross_return_total),
+        "cost_total": float(report.cost_total),
+        "net_return_total": float(report.net_return_total),
+        "turnover_total": float(report.turnover_total),
+        "n_ticks": float(b.size),
+        "sizing_rule": "clip(median_pred / std(y_train), -1, 1)",
+    }
