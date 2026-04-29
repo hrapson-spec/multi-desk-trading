@@ -1,6 +1,6 @@
 # WTI Lag 1d Forward Baselines
 
-**Updated**: 2026-04-29T17:33:58Z  
+**Updated**: 2026-04-29T18:43:36Z  
 
 | Metric | Value |
 | --- | ---: |
