@@ -6,6 +6,7 @@ import argparse
 import csv
 import hashlib
 import json
+import sys
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
@@ -28,6 +29,10 @@ from feasibility.scripts.audit_wti_lag_1d_phase3 import (
     build_event_features_and_labels,
 )
 from feasibility.scripts.lock_wti_lag_1d import FORWARD_ROOT, LOCK_JSON
+from feasibility.scripts.refresh_wti_spot_proxy import (
+    WTIRefreshError,
+    refresh_wti_spot_proxy,
+)
 from feasibility.tractability_v1 import (
     DEFAULT_FAMILY_REGISTRY,
     DEFAULT_PIT_ROOT,
@@ -59,6 +64,7 @@ OUTCOMES_CSV = FORWARD_ROOT / "outcomes.csv"
 MONITOR_REPORT = FORWARD_ROOT / "monitor_report.md"
 FORECAST_CHAIN_JSONL = FORWARD_ROOT / "forecast_chain.jsonl"
 FORWARD_BASELINE_REPORT = FORWARD_ROOT / "forward_baseline_report.md"
+WTI_SPOT_REFRESH_STATUS = FORWARD_ROOT / "wti_spot_refresh_status.json"
 FORECAST_CHAIN_SCHEMA_VERSION = "forecast_chain.v1"
 MAX_SCORING_LAG = timedelta(hours=6)
 MAX_FEATURE_PRICE_AGE_DAYS = 4
@@ -508,17 +514,32 @@ def _feature_with_metadata(
     }
 
 
-def score_due_events(as_of_ts: pd.Timestamp | None = None) -> list[dict[str, Any]]:
+def score_due_events(
+    as_of_ts: pd.Timestamp | None = None,
+    *,
+    refresh_wti_spot: bool = False,
+    wti_refresh_timeout_seconds: float = 30.0,
+) -> list[dict[str, Any]]:
     lock_integrity = verify_lock_integrity()
     verify_forecast_chain(bootstrap_if_missing=True)
     as_of = _utc_ts(as_of_ts or datetime.now(UTC))
+    target_def = _target_def()
+    if refresh_wti_spot:
+        refresh_wti_spot_proxy(
+            output_path=target_def.price_path,
+            status_path=WTI_SPOT_REFRESH_STATUS,
+            max_feature_age_days=MAX_FEATURE_PRICE_AGE_DAYS,
+            as_of_date=as_of.date(),
+            timeout_seconds=wti_refresh_timeout_seconds,
+        )
+
     if not QUEUE_CSV.exists():
         write_queue()
     queue = pd.read_csv(QUEUE_CSV)
     if queue.empty:
         return []
 
-    prices, _ = load_target_prices(_target_def(), DEFAULT_PIT_ROOT)
+    prices, _ = load_target_prices(target_def, DEFAULT_PIT_ROOT)
     model, mean, std, train_rows = _fit_forward_model(prices, as_of)
     lock = _load_lock()
     if lock_integrity.get("lock_id") != lock.get("lock_id"):
@@ -828,9 +849,19 @@ def write_monitor_report() -> None:
     MONITOR_REPORT.write_text("\n".join(lines))
 
 
-def run_all(days: int = 120, as_of_ts: pd.Timestamp | None = None) -> None:
+def run_all(
+    days: int = 120,
+    as_of_ts: pd.Timestamp | None = None,
+    *,
+    refresh_wti_spot: bool = False,
+    wti_refresh_timeout_seconds: float = 30.0,
+) -> None:
     write_queue(days=days)
-    score_due_events(as_of_ts=as_of_ts)
+    score_due_events(
+        as_of_ts=as_of_ts,
+        refresh_wti_spot=refresh_wti_spot,
+        wti_refresh_timeout_seconds=wti_refresh_timeout_seconds,
+    )
     resolve_outcomes()
     write_forward_baseline_report()
     write_monitor_report()
@@ -841,35 +872,52 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd")
     q = sub.add_parser("build-queue")
     q.add_argument("--days", type=int, default=120)
-    sub.add_parser("score")
+    s = sub.add_parser("score")
+    s.add_argument("--refresh-wti-spot", action="store_true")
+    s.add_argument("--wti-refresh-timeout-seconds", type=float, default=30.0)
     sub.add_parser("resolve")
     sub.add_parser("baselines")
     sub.add_parser("monitor")
     a = sub.add_parser("all")
     a.add_argument("--days", type=int, default=120)
+    a.add_argument("--refresh-wti-spot", action="store_true")
+    a.add_argument("--wti-refresh-timeout-seconds", type=float, default=30.0)
     args = parser.parse_args(argv)
 
-    if args.cmd == "build-queue":
-        queue = write_queue(days=args.days)
-        print(f"queued_events={len(queue)}")
-    elif args.cmd == "score":
-        print(f"forecasts_written={len(score_due_events())}")
-    elif args.cmd == "resolve":
-        print(f"outcomes_resolved={len(resolve_outcomes())}")
-    elif args.cmd == "baselines":
-        write_forward_baseline_report()
-        print(f"baseline_report={FORWARD_BASELINE_REPORT}")
-    elif args.cmd == "monitor":
-        write_monitor_report()
-        print(f"monitor_report={MONITOR_REPORT}")
-    else:
-        run_all(days=getattr(args, "days", 120))
-        print(f"queue={QUEUE_CSV}")
-        print(f"forecasts={FORECASTS_JSONL}")
-        print(f"outcomes={OUTCOMES_CSV}")
-        print(f"chain={FORECAST_CHAIN_JSONL}")
-        print(f"monitor={MONITOR_REPORT}")
-        print(f"baselines={FORWARD_BASELINE_REPORT}")
+    try:
+        if args.cmd == "build-queue":
+            queue = write_queue(days=args.days)
+            print(f"queued_events={len(queue)}")
+        elif args.cmd == "score":
+            forecasts = score_due_events(
+                refresh_wti_spot=args.refresh_wti_spot,
+                wti_refresh_timeout_seconds=args.wti_refresh_timeout_seconds,
+            )
+            print(f"forecasts_written={len(forecasts)}")
+        elif args.cmd == "resolve":
+            print(f"outcomes_resolved={len(resolve_outcomes())}")
+        elif args.cmd == "baselines":
+            write_forward_baseline_report()
+            print(f"baseline_report={FORWARD_BASELINE_REPORT}")
+        elif args.cmd == "monitor":
+            write_monitor_report()
+            print(f"monitor_report={MONITOR_REPORT}")
+        else:
+            run_all(
+                days=getattr(args, "days", 120),
+                refresh_wti_spot=getattr(args, "refresh_wti_spot", False),
+                wti_refresh_timeout_seconds=getattr(args, "wti_refresh_timeout_seconds", 30.0),
+            )
+            print(f"queue={QUEUE_CSV}")
+            print(f"forecasts={FORECASTS_JSONL}")
+            print(f"outcomes={OUTCOMES_CSV}")
+            print(f"chain={FORECAST_CHAIN_JSONL}")
+            print(f"monitor={MONITOR_REPORT}")
+            print(f"baselines={FORWARD_BASELINE_REPORT}")
+    except WTIRefreshError as exc:
+        print(f"wti_spot_refresh_failed={exc}", file=sys.stderr)
+        print(f"status={WTI_SPOT_REFRESH_STATUS}", file=sys.stderr)
+        return 2
     return 0
 
 

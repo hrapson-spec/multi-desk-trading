@@ -1,0 +1,13 @@
+{
+  "age_days": null,
+  "as_of_date": "2026-04-29",
+  "error": "The read operation timed out",
+  "latest_valid_date": null,
+  "max_feature_age_days": 4,
+  "output_path": "data/s4_0/free_source/raw/DCOILWTICO.csv",
+  "retrieved_at_utc": "2026-04-29T18:21:35Z",
+  "rows": 0,
+  "source_url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DCOILWTICO",
+  "status": "failed",
+  "valid_price_rows": 0
+}

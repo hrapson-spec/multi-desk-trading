@@ -144,6 +144,7 @@ def _patch_score_dependencies(monkeypatch, tmp_path, decision_ts: str) -> None:
     monkeypatch.setattr(forward, "QUEUE_CSV", queue)
     monkeypatch.setattr(forward, "FORECASTS_JSONL", forecasts)
     monkeypatch.setattr(forward, "FORECAST_CHAIN_JSONL", chain)
+    monkeypatch.setattr(forward, "WTI_SPOT_REFRESH_STATUS", tmp_path / "refresh.json")
     monkeypatch.setattr(forward, "verify_lock_integrity", lambda: {"lock_id": "lock"})
     monkeypatch.setattr(forward, "_load_lock", lambda: {"lock_id": "lock"})
     monkeypatch.setattr(
@@ -221,6 +222,51 @@ def test_score_due_events_skips_stale_feature_price(monkeypatch, tmp_path) -> No
 
     assert result == []
     assert forward.FORECASTS_JSONL.read_text() == ""
+
+
+def test_score_due_events_refreshes_wti_spot_when_requested(monkeypatch, tmp_path) -> None:
+    _patch_score_dependencies(
+        monkeypatch,
+        tmp_path,
+        decision_ts="2026-04-29T15:00:00Z",
+    )
+    calls = []
+
+    def refresh(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(forward, "refresh_wti_spot_proxy", refresh)
+
+    result = forward.score_due_events(
+        pd.Timestamp("2026-04-29T15:10:00Z"),
+        refresh_wti_spot=True,
+    )
+
+    assert len(result) == 1
+    assert len(calls) == 1
+    assert calls[0]["status_path"] == tmp_path / "refresh.json"
+    assert calls[0]["as_of_date"].isoformat() == "2026-04-29"
+
+
+def test_score_due_events_aborts_when_wti_refresh_fails(monkeypatch, tmp_path) -> None:
+    _patch_score_dependencies(
+        monkeypatch,
+        tmp_path,
+        decision_ts="2026-04-29T15:00:00Z",
+    )
+
+    def fail_refresh(**_kwargs):
+        raise forward.WTIRefreshError("refresh failed")
+
+    monkeypatch.setattr(forward, "refresh_wti_spot_proxy", fail_refresh)
+
+    with pytest.raises(forward.WTIRefreshError, match="refresh failed"):
+        forward.score_due_events(
+            pd.Timestamp("2026-04-29T15:10:00Z"),
+            refresh_wti_spot=True,
+        )
+
+    assert not forward.FORECASTS_JSONL.exists()
 
 
 def test_target_outcome_reports_waiting_and_resolved_states() -> None:
