@@ -166,12 +166,18 @@ class StooqMultiAssetIngester(BaseIngester):
             ],
             "target_variable": self._spec.target_variable,
         }
+        # latency_guard_minutes = 0 at v1.0 because stooq EOD is itself
+        # ~24h-lagged from CME settlement; an additional guard is redundant.
+        # The field is set explicitly so a non-zero guard added later
+        # propagates correctly through pit_manifest.usable_after_ts (matching
+        # the CL spine wrapper at v2/ingest/cl_front_eod_pit.py).
         return [
             FetchResult(
                 source=self._spec.pit_source,
                 dataset=self._spec.pit_dataset,
                 series=self._spec.pit_series,
                 release_ts=release_ts,
+                usable_after_ts=release_ts,
                 revision_ts=None,
                 data=df,
                 provenance=provenance,

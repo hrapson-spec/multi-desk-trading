@@ -959,10 +959,15 @@ def run_tractability_v1(
                 purge_days=purge_days,
                 embargo_days=embargo_days,
             )
+            # Spec v1 §5: reject only on strict decrease (delta < 0). Zero-delta
+            # families are no-ops, not violations — a family with non-overlapping
+            # calendar that adds zero events in the current window may add
+            # events as the post-2020 window grows. Per spec wording "reject
+            # the addition if N strictly decreases".
             negative_targets = {
                 tname: info
                 for tname, info in contrib.items()
-                if info["delta"] <= 0
+                if info["delta"] < 0
             }
             if negative_targets:
                 if candidate.name in _force_include:

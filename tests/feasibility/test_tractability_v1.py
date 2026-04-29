@@ -522,9 +522,9 @@ def test_compute_additive_n_contribution_negative_for_steo_at_5d_against_real_pi
         purge_days=5,
         embargo_days=5,
     )
-    any_non_additive = any(info["delta"] <= 0 for info in result.values())
-    assert any_non_additive, (
-        "Expected STEO to be non-additive (delta ≤ 0) for at least one target"
+    any_strictly_negative = any(info["delta"] < 0 for info in result.values())
+    assert any_strictly_negative, (
+        "Expected STEO to be strictly non-additive (delta < 0) for at least one target"
     )
 
 
@@ -574,38 +574,87 @@ def _make_pit_store_two_sources(
     return pit_root
 
 
-def test_reject_non_additive_raises_NonAdditiveFamilyError_on_negative_delta(tmp_path):
-    """B9-3: run_tractability_v1 raises NonAdditiveFamilyError when family is non-additive.
+@pytest.mark.skipif(
+    not (
+        Path("data/pit_store/pit.duckdb").exists()
+        and Path("data/s4_0/free_source/raw/DCOILWTICO.csv").exists()
+    ),
+    reason=(
+        "real PIT store + DCOILWTICO needed; "
+        "the empirical STEO non-additive case requires actual events"
+    ),
+)
+def test_reject_non_additive_raises_on_strictly_negative_delta_empirical():
+    """B9-3: run_tractability_v1 raises NonAdditiveFamilyError when a family
+    is strictly non-additive (delta < 0).
 
-    A candidate family with zero events produces delta=0 for all targets.
-    The guard fires on delta <= 0 (zero contribution = non-additive).
+    Per spec v1 §5: "reject the addition if N strictly decreases." Zero-delta
+    families are no-ops, not violations — only delta < 0 fires the guard.
+
+    Empirical: WPSR + FOMC base + STEO candidate produces delta=-9 for
+    return_sign at 5d (greedy thinning interaction of monthly STEO with
+    weekly WPSR + irregular FOMC). This test uses the real PIT store
+    rather than a synthetic 3-family interaction (which is hard to
+    construct in a small fixture).
     """
-    from feasibility.tractability_v1 import NonAdditiveFamilyError
-
-    # eia has events; eia_empty has none → candidate delta=0 for all targets
-    pit_root = _make_pit_store_two_sources(
-        tmp_path, weekly_events_a=80, weekly_events_b=0
+    from feasibility.tractability_v1 import (
+        NonAdditiveFamilyError,
+        _default_targets,
+        _resolve_families,
     )
-    wti = _make_wti_csv(tmp_path)
-    tgt = _make_target(wti)
 
-    fam_a = EventFamily(name="fam_a", sources=("eia",), datasets=("wpsr",))
-    # fam_b points at a source with no events → delta=0
-    fam_b = EventFamily(name="fam_b", sources=("eia_empty",), datasets=("wpsr_empty",))
+    families = _resolve_families(["wpsr", "fomc", "steo"])
+    targets = _default_targets()
 
-    with pytest.raises(NonAdditiveFamilyError, match="fam_b"):
+    with pytest.raises(NonAdditiveFamilyError, match="steo"):
         run_tractability_v1(
-            pit_root=pit_root,
-            families=[fam_a, fam_b],
-            targets=[tgt],
+            pit_root=Path("data/pit_store"),
+            families=families,
+            targets=targets,
             purge_days=5,
             embargo_days=5,
             reject_non_additive=True,
         )
 
 
-def test_force_include_admits_non_additive_with_justification(tmp_path):
+@pytest.mark.skipif(
+    not (
+        Path("data/pit_store/pit.duckdb").exists()
+        and Path("data/s4_0/free_source/raw/DCOILWTICO.csv").exists()
+    ),
+    reason="real PIT store + DCOILWTICO needed for empirical force-include test",
+)
+def test_force_include_admits_non_additive_with_justification_empirical():
     """B9-4: force_include overrides non-additive guard when justification provided."""
+    from feasibility.tractability_v1 import _default_targets, _resolve_families
+
+    families = _resolve_families(["wpsr", "fomc", "steo"])
+    targets = _default_targets()
+
+    result = run_tractability_v1(
+        pit_root=Path("data/pit_store"),
+        families=families,
+        targets=targets,
+        purge_days=5,
+        embargo_days=5,
+        reject_non_additive=True,
+        force_include=["steo"],
+        non_additive_justification=(
+            "STEO admitted as a feature-only family (not a decision-event family); "
+            "negative N delta acceptable in this audit context"
+        ),
+    )
+    forced = result["parameters"].get("forced_inclusions", [])
+    assert len(forced) >= 1
+    assert forced[0]["family"] == "steo"
+    assert "feature-only" in forced[0]["justification"]
+
+
+def test_zero_delta_does_not_trigger_guard(tmp_path):
+    """B9-5 (regression for major M1): a candidate with zero net contribution
+    (delta == 0 for all targets) is admissible per spec v1 §5 strict-decrease
+    wording. The guard fires only on delta < 0.
+    """
     pit_root = _make_pit_store_two_sources(
         tmp_path, weekly_events_a=80, weekly_events_b=0
     )
@@ -613,22 +662,21 @@ def test_force_include_admits_non_additive_with_justification(tmp_path):
     tgt = _make_target(wti)
 
     fam_a = EventFamily(name="fam_a", sources=("eia",), datasets=("wpsr",))
-    fam_b = EventFamily(name="fam_b", sources=("eia_empty",), datasets=("wpsr_empty",))
+    fam_b_empty = EventFamily(name="fam_b", sources=("eia_empty",), datasets=("wpsr_empty",))
 
+    # Should NOT raise — fam_b has zero events, delta=0, admissible per spec.
     result = run_tractability_v1(
         pit_root=pit_root,
-        families=[fam_a, fam_b],
+        families=[fam_a, fam_b_empty],
         targets=[tgt],
         purge_days=5,
         embargo_days=5,
         reject_non_additive=True,
-        force_include=["fam_b"],
-        non_additive_justification="deliberate zero-contribution for thesis test B9-4",
     )
-    forced = result["parameters"].get("forced_inclusions", [])
-    assert len(forced) >= 1
-    assert forced[0]["family"] == "fam_b"
-    assert "deliberate" in forced[0]["justification"]
+    # No forced_inclusions either — the family didn't need forcing
+    assert "forced_inclusions" not in result["parameters"] or not result[
+        "parameters"
+    ]["forced_inclusions"]
 
 
 # ─────────────────────────────────────────────────────────────────────────
