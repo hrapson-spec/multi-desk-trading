@@ -56,7 +56,10 @@ class WTIPricesIngester(BaseIngester):
         self._http = http if http is not None else HTTPClient()
         self._owns_http = http is None
         if source_priority is None:
-            source_priority = ["stooq", "yahoo"]
+            # Yahoo Finance v7 CSV endpoint decommissioned 2026-04-29 (HTTP 429).
+            # Stooq is the sole default source; "yahoo" may still be listed
+            # explicitly by operator subclasses using authenticated sessions.
+            source_priority = ["stooq"]
         self._source_priority = list(source_priority)
 
     def fetch(self, as_of_ts: datetime | None = None) -> list[FetchResult]:
@@ -125,6 +128,16 @@ class WTIPricesIngester(BaseIngester):
     def _fetch_yahoo(self, now_utc: datetime) -> FetchResult:
         # Default: pull a comfortable window. Operators can subclass and
         # override this method if they want a narrower or wider span.
+        #
+        # NOTE (2026-04-29): Yahoo Finance v7/finance/download now returns
+        # HTTP 429 with an HTML "Edge: Too Many Requests" body rather than a
+        # valid CSV.  This endpoint is considered decommissioned as a reliable
+        # fallback.  The source_priority default no longer includes "yahoo";
+        # this method is retained for operator subclasses that want to retry
+        # with custom session cookies or a different URL.  Any non-200
+        # response, or a body that cannot be parsed as a date-bearing CSV,
+        # raises _EmptyBodyError so the caller falls through to the next
+        # source (or surfaces a clean RuntimeError if no sources remain).
         period_end = int(now_utc.timestamp())
         period_start = int((now_utc - timedelta(days=365 * 5)).timestamp())
         resp = self._http.get(
@@ -135,10 +148,22 @@ class WTIPricesIngester(BaseIngester):
                 "interval": "1d",
             },
         )
+        if resp.status_code != 200:
+            raise _EmptyBodyError(
+                f"yahoo returned HTTP {resp.status_code} (decommissioned or rate-limited); "
+                "use stooq or override _fetch_yahoo with an authenticated session"
+            )
         if not resp.content or not resp.content.strip():
             raise _EmptyBodyError("yahoo returned empty body")
-        df = _parse_csv(resp.content)
-        df = _normalize_ohlcv(df, today_utc=now_utc)
+        try:
+            df = _parse_csv(resp.content)
+            df = _normalize_ohlcv(df, today_utc=now_utc)
+        except ValueError as exc:
+            # Malformed CSV or unexpected column layout — treat as empty source
+            # so the caller falls through to the next source in source_priority.
+            raise _EmptyBodyError(
+                f"yahoo CSV parse failed (unexpected column layout): {exc}"
+            ) from exc
         if df.empty:
             raise _EmptyBodyError("yahoo CSV had no admissible rows")
 
