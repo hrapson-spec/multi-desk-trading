@@ -299,9 +299,7 @@ def test_v1_with_wpsr_only_matches_v0_post2020_n():
     )
 
     families = _resolve_families(["wpsr"])
-    # Pin horizon=5 explicitly: the v0 invariant is 5d-specific, but the
-    # harness default flipped to 3d on 2026-04-29 (spec v1 §13 promotion).
-    targets = _default_targets(horizon_days=5)
+    targets = _default_targets()
     result = run_tractability_v1(
         pit_root=Path("data/pit_store"),
         families=families,
@@ -548,9 +546,7 @@ def test_compute_additive_n_contribution_steo_zero_delta_after_anchor_dedup():
     pit_root = Path("data/pit_store")
     base_fams = _resolve_families(["wpsr", "fomc"])
     cand_fam = _resolve_families(["steo"])[0]
-    # Pin horizon=5 explicitly: the empirical STEO zero-delta-after-anchor-dedup
-    # finding is 5d-specific; harness default flipped to 3d on 2026-04-29.
-    targets = _default_targets(horizon_days=5)
+    targets = _default_targets()
 
     result = compute_additive_n_contribution(
         pit_root,
@@ -1065,10 +1061,7 @@ def test_v0_invariant_preserved_with_csv_path():
     from feasibility.tractability_v1 import _default_targets, _resolve_families
 
     families = _resolve_families(["wpsr"])
-    # Pin horizon=5 explicitly: this test verifies the v0 5d invariant via
-    # the CSV dispatch path. Harness default flipped to 3d on 2026-04-29
-    # (spec v1 §13 promotion) so the v0 invariant requires explicit horizon.
-    targets = _default_targets(horizon_days=5)
+    targets = _default_targets()
     # All targets use price_path (CSV dispatch path), price_source=None
     for tgt in targets:
         assert tgt.price_source is None, "default targets must use CSV dispatch"

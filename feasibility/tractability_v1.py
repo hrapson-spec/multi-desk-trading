@@ -287,8 +287,8 @@ def compute_hac_effective_n(
     values: np.ndarray,
     *,
     K: int | str = "auto",
-    horizon_days: int = 3,
-    embargo_days: int = 3,
+    horizon_days: int = 5,
+    embargo_days: int = 5,
     event_spacing_days: float = 7.0,
 ) -> dict[str, Any]:
     """Newey-West HAC effective-N with Bartlett kernel.
@@ -1175,7 +1175,7 @@ def _utc_now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _default_targets(horizon_days: int = 3) -> list[TargetDef]:
+def _default_targets(horizon_days: int = 5) -> list[TargetDef]:
     wti_path = next((p for p in DEFAULT_WTI_PATHS if p.exists()), DEFAULT_WTI_PATHS[0])
     forbidden = (
         "executable_futures_replay",
@@ -1227,18 +1227,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="comma-separated event family names",
     )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--purge-days", type=int, default=3)
-    parser.add_argument("--embargo-days", type=int, default=3)
+    parser.add_argument("--purge-days", type=int, default=5)
+    parser.add_argument("--embargo-days", type=int, default=5)
     parser.add_argument(
         "--horizon-days",
         type=int,
-        default=3,
+        default=5,
         help=(
-            "forecast horizon for default targets. The default 3d horizon is "
-            "the spec v1 §13 operational baseline (promoted from variant "
-            "2026-04-29). Pass --horizon-days 5 --purge-days 5 --embargo-days 5 "
-            "to reproduce the locked v0 5d byte-identical result. Spec v1 §13 "
-            "is backed by docs/v2/dependence_analysis_3d_horizon.md."
+            "forecast horizon for default targets. Per spec §11, changes "
+            "to horizon require a written dependence analysis and a "
+            "versioned gate change (see Tier 3.A spec amendment)."
         ),
     )
     parser.add_argument("--alpha-family", type=float, default=0.05)
