@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 
 import pandas as pd
+import pytest
 
-from feasibility.scripts.forward_wti_lag_1d import build_queue
+import feasibility.scripts.forward_wti_lag_1d as forward
+from feasibility.scripts.forward_wti_lag_1d import (
+    LockIntegrityError,
+    build_queue,
+    verify_lock_integrity,
+)
 from feasibility.scripts.lock_wti_lag_1d import build_lock
 
 
@@ -40,3 +47,50 @@ def test_build_queue_is_deterministic() -> None:
     right = build_queue(start_ts=start, days=60)
 
     pd.testing.assert_frame_equal(left, right)
+
+
+def test_verify_lock_integrity_passes_for_matching_file(tmp_path) -> None:
+    locked = tmp_path / "locked.txt"
+    locked.write_text("frozen\n")
+    digest = hashlib.sha256(locked.read_bytes()).hexdigest()
+    payload = {
+        "lock_id": "test-lock",
+        "locked_files": {
+            "locked.txt": {
+                "sha256": digest,
+                "bytes": locked.stat().st_size,
+            }
+        },
+    }
+
+    result = verify_lock_integrity(payload, repo_root=tmp_path)
+
+    assert result == {"status": "ok", "lock_id": "test-lock", "checked_files": 1}
+
+
+def test_verify_lock_integrity_raises_for_hash_mismatch(tmp_path) -> None:
+    locked = tmp_path / "locked.txt"
+    locked.write_text("frozen\n")
+    payload = {
+        "lock_id": "test-lock",
+        "locked_files": {
+            "locked.txt": {
+                "sha256": hashlib.sha256(locked.read_bytes()).hexdigest(),
+                "bytes": locked.stat().st_size,
+            }
+        },
+    }
+    locked.write_text("changed\n")
+
+    with pytest.raises(LockIntegrityError, match="mismatched"):
+        verify_lock_integrity(payload, repo_root=tmp_path)
+
+
+def test_score_due_events_refuses_lock_drift(monkeypatch) -> None:
+    def fail_integrity() -> dict:
+        raise LockIntegrityError("forward lock integrity check failed")
+
+    monkeypatch.setattr(forward, "verify_lock_integrity", fail_integrity)
+
+    with pytest.raises(LockIntegrityError, match="integrity"):
+        forward.score_due_events(pd.Timestamp("2026-04-29T15:00:00Z"))

@@ -8,6 +8,8 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -18,6 +20,7 @@ from feasibility.candidates.wti_lag_1d.classical import (
     strict_previous_trading_day_log_return,
 )
 from feasibility.scripts.audit_wti_lag_1d_phase3 import (
+    EMBARGO_DAYS,
     FAMILY_NAMES,
     HORIZON_DAYS,
     MIN_TRAIN_EVENTS,
@@ -50,6 +53,7 @@ VIENNA = ZoneInfo("Europe/Vienna")
 WPSR_RELEASE_TIME_ET = time(10, 30)
 WPSR_LATENCY_GUARD_MINUTES = 5
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
 QUEUE_CSV = FORWARD_ROOT / "event_queue.csv"
 FORECASTS_JSONL = FORWARD_ROOT / "forecasts.jsonl"
 OUTCOMES_CSV = FORWARD_ROOT / "outcomes.csv"
@@ -63,6 +67,10 @@ class QueueEvent:
     event_type: str
     decision_ts: pd.Timestamp
     source_method: str
+
+
+class LockIntegrityError(RuntimeError):
+    """Raised when a forward scorer sees drift from the frozen lock files."""
 
 
 def _utc_ts(value: datetime | pd.Timestamp) -> pd.Timestamp:
@@ -192,17 +200,69 @@ def build_queue(
             "source_method": e.source_method,
             "target_horizon_days": HORIZON_DAYS,
             "purge_days": PURGE_DAYS,
-            "embargo_days": PURGE_DAYS,
+            "embargo_days": EMBARGO_DAYS,
         }
         for e in sorted(unique.values(), key=lambda event: event.decision_ts)
     ]
     return pd.DataFrame(rows)
 
 
-def _load_lock() -> dict:
+def _load_lock() -> dict[str, Any]:
     if not LOCK_JSON.exists():
         raise FileNotFoundError(f"forward lock missing: {LOCK_JSON}")
     return json.loads(LOCK_JSON.read_text())
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_lock_integrity(
+    lock: dict[str, Any] | None = None,
+    *,
+    repo_root: Path = REPO_ROOT,
+) -> dict[str, Any]:
+    """Verify every file frozen in lock.json still matches its SHA256 and size."""
+    lock_payload = lock if lock is not None else _load_lock()
+    locked_files = lock_payload.get("locked_files", {})
+    missing: list[str] = []
+    mismatched: list[dict[str, Any]] = []
+
+    for rel_path, expected in locked_files.items():
+        path = repo_root / rel_path
+        if not path.exists():
+            missing.append(rel_path)
+            continue
+        actual_sha = _sha256_file(path)
+        actual_bytes = path.stat().st_size
+        expected_sha = expected.get("sha256")
+        expected_bytes = expected.get("bytes")
+        if actual_sha != expected_sha or actual_bytes != expected_bytes:
+            mismatched.append(
+                {
+                    "path": rel_path,
+                    "expected_sha256": expected_sha,
+                    "actual_sha256": actual_sha,
+                    "expected_bytes": expected_bytes,
+                    "actual_bytes": actual_bytes,
+                }
+            )
+
+    if missing or mismatched:
+        detail = {"missing": missing, "mismatched": mismatched}
+        raise LockIntegrityError(
+            "forward lock integrity check failed: " + json.dumps(detail, sort_keys=True)
+        )
+
+    return {
+        "status": "ok",
+        "lock_id": lock_payload.get("lock_id"),
+        "checked_files": len(locked_files),
+    }
 
 
 def write_queue(days: int = 120) -> pd.DataFrame:
@@ -267,7 +327,8 @@ def _existing_forecast_ids() -> set[str]:
     return ids
 
 
-def score_due_events(as_of_ts: pd.Timestamp | None = None) -> list[dict]:
+def score_due_events(as_of_ts: pd.Timestamp | None = None) -> list[dict[str, Any]]:
+    lock_integrity = verify_lock_integrity()
     as_of = _utc_ts(as_of_ts or datetime.now(UTC))
     if not QUEUE_CSV.exists():
         write_queue()
@@ -278,8 +339,10 @@ def score_due_events(as_of_ts: pd.Timestamp | None = None) -> list[dict]:
     prices, _ = load_target_prices(_target_def(), DEFAULT_PIT_ROOT)
     model, mean, std, train_rows = _fit_forward_model(prices, as_of)
     lock = _load_lock()
+    if lock_integrity.get("lock_id") != lock.get("lock_id"):
+        raise LockIntegrityError("lock id changed during forward scoring")
     existing_ids = _existing_forecast_ids()
-    forecasts: list[dict] = []
+    forecasts: list[dict[str, Any]] = []
 
     for row in queue.to_dict("records"):
         event_id = str(row["event_id"])
@@ -315,7 +378,7 @@ def score_due_events(as_of_ts: pd.Timestamp | None = None) -> list[dict]:
     return forecasts
 
 
-def _load_forecasts() -> list[dict]:
+def _load_forecasts() -> list[dict[str, Any]]:
     if not FORECASTS_JSONL.exists():
         return []
     return [json.loads(line) for line in FORECASTS_JSONL.read_text().splitlines() if line]
@@ -333,7 +396,7 @@ def _target_outcome(decision_ts: pd.Timestamp, prices: pd.Series) -> tuple[int, 
     return (1 if ret > 0 else -1, ret)
 
 
-def resolve_outcomes() -> list[dict]:
+def resolve_outcomes() -> list[dict[str, Any]]:
     prices, _ = load_target_prices(_target_def(), DEFAULT_PIT_ROOT)
     existing: set[str] = set()
     if OUTCOMES_CSV.exists():
@@ -341,7 +404,7 @@ def resolve_outcomes() -> list[dict]:
             reader = csv.DictReader(fh)
             existing = {row["event_id"] for row in reader}
 
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     for forecast in _load_forecasts():
         event_id = forecast["event_id"]
         if event_id in existing:
@@ -383,17 +446,26 @@ def resolve_outcomes() -> list[dict]:
 
 def write_monitor_report() -> None:
     lock = _load_lock()
+    try:
+        lock_integrity = verify_lock_integrity(lock)
+    except LockIntegrityError as exc:
+        lock_integrity = {"status": "failed", "detail": str(exc)}
     queue = pd.read_csv(QUEUE_CSV) if QUEUE_CSV.exists() else pd.DataFrame()
     forecasts = _load_forecasts()
     outcomes = pd.read_csv(OUTCOMES_CSV) if OUTCOMES_CSV.exists() else pd.DataFrame()
-    next_events = queue.head(10).to_dict("records") if not queue.empty else []
+    forecasted_ids = {forecast["event_id"] for forecast in forecasts}
+    pending_queue = (
+        queue[~queue["event_id"].astype(str).isin(forecasted_ids)] if not queue.empty else queue
+    )
+    next_events = pending_queue.head(10).to_dict("records") if not pending_queue.empty else []
     metrics = lock["phase3_historical_metrics"]
     lines = [
         "# WTI Lag 1d Forward Monitor",
         "",
         f"**Lock id**: `{lock['lock_id']}`  ",
         f"**Updated**: {datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}  ",
-        "**Status**: forward holdout initialized; no tuning permitted.",
+        "**Status**: forward holdout initialized; no tuning permitted.  ",
+        f"**Lock integrity**: {lock_integrity['status']}  ",
         "",
         "## Counts",
         "",

@@ -1,15 +1,16 @@
 # WTI Lag 1d Forward Monitor
 
 **Lock id**: `dcc249c4d25a8890`  
-**Updated**: 2026-04-29T14:25:58Z  
-**Status**: forward holdout initialized; no tuning permitted.
+**Updated**: 2026-04-29T15:03:50Z  
+**Status**: forward holdout initialized; no tuning permitted.  
+**Lock integrity**: ok  
 
 ## Counts
 
 | Item | Count |
 | --- | ---: |
 | queued_events | 42 |
-| forecasts_written | 0 |
+| forecasts_written | 1 |
 | outcomes_resolved | 0 |
 
 ## Historical Lock Metrics
@@ -25,7 +26,6 @@
 
 | decision_ts | family | event_type | source_method |
 | --- | --- | --- | --- |
-| 2026-04-29T14:35:00Z | wpsr | weekly_release_rule_v1 | wednesday_1030_et_rule_plus_5m_guard |
 | 2026-05-01T13:05:00Z | gpr | gpr_weekly_release | weekly_friday_rule_v1 |
 | 2026-05-06T14:35:00Z | wpsr | weekly_release_rule_v1 | wednesday_1030_et_rule_plus_5m_guard |
 | 2026-05-08T13:05:00Z | gpr | gpr_weekly_release | weekly_friday_rule_v1 |
@@ -35,6 +35,7 @@
 | 2026-05-20T14:35:00Z | wpsr | weekly_release_rule_v1 | wednesday_1030_et_rule_plus_5m_guard |
 | 2026-05-22T13:05:00Z | gpr | gpr_weekly_release | weekly_friday_rule_v1 |
 | 2026-05-27T14:35:00Z | wpsr | weekly_release_rule_v1 | wednesday_1030_et_rule_plus_5m_guard |
+| 2026-05-29T13:05:00Z | gpr | gpr_weekly_release | weekly_friday_rule_v1 |
 
 ## Promotion Guard
 

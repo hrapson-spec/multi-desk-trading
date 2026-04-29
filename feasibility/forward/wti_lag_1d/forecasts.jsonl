@@ -1,0 +1,1 @@
+{"decision_ts": "2026-04-29T14:35:00Z", "event_id": "d6b7d8a603fc2934", "event_type": "weekly_release_rule_v1", "family": "wpsr", "feature_wti_prev_trading_day_1d_log_return": 0.05821839325667103, "lock_id": "dcc249c4d25a8890", "model_train_rows": 648, "predicted_sign": "positive", "probability_positive": 0.5478438571915499, "scored_at_utc": "2026-04-29T15:03:25Z"}
