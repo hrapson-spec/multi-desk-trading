@@ -1,0 +1,35 @@
+source: opec
+dataset: opec_ministerial
+description: "OPEC+ Ministerial Meetings and JMMC announcement events"
+publisher: "Organization of Petroleum Exporting Countries"
+calendar_version: "1.0.0"
+latency_guard_minutes: 30
+holiday_handling: "official_meeting_communique_time_no_shift"
+release_cadence:
+  type: irregular
+  earliest_release_time_et: "08:00"  # 14:00 CET ≈ 08:00 ET; loader expects ET-named field
+  holiday_rule: none
+observation_semantics:
+  reporting_period: "instantaneous_communique"
+  lag_to_publication_days: 0
+revision_policy: "communique_text_may_be_clarified_within_hours_no_dates_revision"
+pit_eligibility_rule: |
+  known_by_ts = release_ts
+  Row eligible at ts iff release_ts <= ts.
+source_confidence:
+  baseline: 0.85  # v1.0 dates and times are best-effort; not authoritative
+  degradation_conditions:
+    - "v1.0 dates not individually verified against publisher archive"
+    - "release time approximated as 14:00 CET; actual communique often later"
+data_quality_multipliers:
+  fresh: 1.0
+  stale_1week: 1.0  # event timestamp does not decay
+  stale_2week: 1.0
+  stale_over_2week: 1.0
+notes: |
+  v1.0 covers production-quota-changing announcements only:
+  OPEC+ Ministerial Meetings, Ordinary OPEC Conferences, and the
+  emergency JMMC announcements that produced production guidance.
+  Routine technical JMMCs without production effect are out of scope.
+  v1.1 will scrape opec.org/press_room for exact issue timestamps and
+  upgrade vintage_quality to true_first_release.

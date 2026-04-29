@@ -27,6 +27,24 @@ from __future__ import annotations
 WTI_FRONT_MONTH_CLOSE = "wti_front_month_close"
 WTI_FRONT_1W_LOG_RETURN = "wti_front_1w_log_return"
 
+# v1.x addition (data plan Tier 3.A) — 3-day horizon variants admitted
+# under feasibility/reports/n_requirement_spec_v1.md §13. Backed by the
+# dependence analysis at docs/v2/dependence_analysis_3d_horizon.md.
+# Magnitude variant is intentionally NOT registered: its HAC effective N
+# (133) falls below the Phase 3 floor of 250 due to volatility
+# clustering (see spec v1 §13.1).
+WTI_FRONT_3D_LOG_RETURN = "wti_front_3d_log_return"
+WTI_FRONT_3D_RETURN_SIGN = "wti_front_3d_return_sign"
+
+# v1.x addition (data plan Tier 3.B) — multi-asset target streams.
+# Per spec §11 forbidden #4 ("Borrowing N across targets"), each asset
+# is its own per-target N stream. Phase 0 source for prices is
+# stooq.com EOD redistribution (free-rehearsal only); see
+# data/s4_0/free_source/licence_clearance/owner_clearance_decision.md.
+BRENT_FRONT_5D_LOG_RETURN = "brent_front_5d_log_return"
+RBOB_FRONT_5D_LOG_RETURN = "rbob_front_5d_log_return"
+NG_FRONT_5D_LOG_RETURN = "ng_front_5d_log_return"
+
 
 # -----------------------------------------------------------------------------
 # Phase 2 domain instance: equity VRP (Speckle and Spot)
@@ -50,6 +68,11 @@ KNOWN_TARGETS: frozenset[str] = frozenset(
     {
         WTI_FRONT_MONTH_CLOSE,
         WTI_FRONT_1W_LOG_RETURN,
+        WTI_FRONT_3D_LOG_RETURN,
+        WTI_FRONT_3D_RETURN_SIGN,
+        BRENT_FRONT_5D_LOG_RETURN,
+        RBOB_FRONT_5D_LOG_RETURN,
+        NG_FRONT_5D_LOG_RETURN,
         VIX_30D_FORWARD,
         SPX_30D_IMPLIED_VOL,
         VIX_30D_FORWARD_3D_DELTA,

@@ -1,0 +1,115 @@
+prereg_version: "feasibility-v1.0"
+feasibility_audit_only: true
+
+identity:
+  family: oil_wti
+  desk: fomc_wti_3d_audit_candidate
+  target_state: S2  # tractability + null-program clearance only
+  decision_unit: log_return
+  target_variable: wti_front_3d_return_sign  # v1 registry; in contracts/target_variables.py
+  target_horizon: 3d
+
+contract_refs:
+  decision_contract_hash: TBD_AT_LOCK_TIME
+  data_contract_hash:     TBD_AT_LOCK_TIME
+  governance_hash:        TBD_AT_LOCK_TIME
+  feasibility_spec_v1_hash: TBD_AT_LOCK_TIME  # SHA256 of feasibility/reports/n_requirement_spec_v1.md
+  feasibility_dependence_analysis_hash: TBD_AT_LOCK_TIME  # SHA256 of docs/v2/dependence_analysis_3d_horizon.md
+
+model:
+  class: feasibility.candidates.fomc_wti_3d.classical.LogisticRegressionFeasibilityModel
+  version: "1.0.0"
+  features:
+    - name: fomc_event_indicator
+      source: fomc
+      transform: binary_indicator_event_in_window
+      quality_floor: 0.95
+    - name: wti_5d_lagged_return
+      source: fred_wti_spot_proxy
+      transform: log_return_5d_lagged
+      quality_floor: 0.85
+  hyperparameters:
+    penalty: l2
+    C: 1.0
+    fit_intercept: true
+    solver: lbfgs
+    max_iter: 100
+    random_state: 42
+  training_window:
+    start: 2020-01-01
+    end: 2024-12-31  # train_end strictly before outer-fold start
+  seed: 42
+
+baselines:
+  - name: zero_return_baseline  # per eval/data.py — Gate 1 scale-consistency for sign target
+    parameters: {}
+
+outer_protocol:
+  type: rolling_origin_walk_forward
+  warmup_weeks: 52
+  refit_cadence: monthly
+  forecast_cadence: per_fomc_event
+  horizon_days: 3
+  regime: A_fully_frozen
+
+challenger_protocol:
+  type: combinatorial_purged_cv
+  blocks: 6
+  test_blocks: 1
+  purge_days: 3
+  embargo_days: 3
+
+metrics:
+  primary:
+    - directional_accuracy
+  secondary:
+    - log_loss
+    - brier_score
+    - dm_hac_one_sided_ci
+    - moving_block_bootstrap_ci
+  shadow_rule:
+    form: feasibility_audit_only_no_capital_implication
+    diagnostics: [residual_autocorrelation_rho_1_2_3, hac_effective_n, block_bootstrap_effective_n]
+
+promotion_thresholds:
+  # This is an audit prereg; thresholds describe Phase-3 audit clearance,
+  # not v2 promotion gates.
+  directional_accuracy_min_vs_zero_return_baseline_pp: 5.0
+  dm_alpha: 0.05
+  hac_effective_n_floor: 250  # spec v1 §13 admits sign target if HAC N >= 250
+  block_bootstrap_effective_n_floor: 250
+
+abstention:
+  degradation_ladder:
+    n_soft: 3
+    decay_lambda: 0.20
+  hard_gates:
+    data: true
+    model: true
+    operational: false  # operational gates not enforced in audit-only mode
+
+allowed_deviations:
+  - data_vendor_outage_with_logged_exception
+  - federal_holiday_release_calendar_shift
+  - scraper_version_patch_bump_within_envelope
+
+forbidden_after_lock:
+  - change_features
+  - change_model_class
+  - change_hyperparameters
+  - change_thresholds
+  - peek_outer_oos
+  - adjust_baseline_configuration
+  - alter_shadow_rule
+  - register_as_v2_desk_without_promotion_review  # v1/v2 boundary marker
+
+operator:
+  role: author
+  ts: 2026-04-29T00:00:00Z
+  fingerprint: pending_v2.0
+  notes: |
+    Authored as part of post-data-plan follow-up. Audit-only; no production
+    desk implication. Promotion to v2 requires a separate operator-driven
+    cycle authoring a parallel v2 prereg under
+    v2/desks/<family>/<desk>/preregs/ and adding the v2 target spec to
+    v2/contracts/target_variables.py.

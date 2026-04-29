@@ -85,6 +85,14 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
 # lowercase is unreadable in linear-algebra-heavy files.
 "desks/**/classical.py" = ["N806"]
 "desks/common/ridge.py" = ["N803", "N806"]
+"feasibility/candidates/**/classical.py" = ["N803", "N806"]
+# tractability_v1 uses Newey-West K (lag count) and bootstrap B (replications) —
+# capital letters are standard statistical notation that maps directly to
+# spec v1 §6 wording; lowercase k/b would obscure the §6 cross-reference.
+"feasibility/tractability_v1.py" = ["N803", "N806"]
+# Test names with capital K (mirroring HAC-K parameter) and class names
+# (NonAdditiveFamilyError) intentionally preserve case for readability.
+"tests/feasibility/**/*.py" = ["N802", "N806"]
 # Shapley notation uses capital S for coalitions (set subscripts); the
 # lowercase alternative obscures the matching against spec §9.2 notation.
 "attribution/shapley.py" = ["N806"]

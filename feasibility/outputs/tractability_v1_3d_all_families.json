@@ -1,0 +1,285 @@
+{
+  "created_at_utc": "2026-04-29T09:29:47.606024Z",
+  "decision": {
+    "action": "continue_per_plan",
+    "min_effective_n": 360,
+    "rule": "continue"
+  },
+  "git_commit": "315ecbf6c30ee8d4a3e7c02690b7734811b57d88",
+  "input_status": {
+    "families": {
+      "fomc": {
+        "distinct_decision_ts": 102,
+        "manifest_rows_matched": 102,
+        "vintage_quality_distribution": {
+          "true_first_release": 102
+        }
+      },
+      "opec_ministerial": {
+        "distinct_decision_ts": 48,
+        "manifest_rows_matched": 48,
+        "vintage_quality_distribution": {
+          "release_lag_safe_revision_unknown": 48
+        }
+      },
+      "steo": {
+        "distinct_decision_ts": 76,
+        "manifest_rows_matched": 76,
+        "vintage_quality_distribution": {
+          "release_lag_safe_revision_unknown": 76
+        }
+      },
+      "wpsr": {
+        "distinct_decision_ts": 327,
+        "manifest_rows_matched": 3924,
+        "vintage_quality_distribution": {
+          "true_first_release": 3924
+        }
+      }
+    },
+    "targets": {
+      "wti_3d_mae_conditional": {
+        "available": true,
+        "end": "2026-04-20T00:00:00+00:00",
+        "forbidden_uses": [
+          "executable_futures_replay",
+          "CL_front_month_backtest",
+          "MCL_execution_replay"
+        ],
+        "path": "data/s4_0/free_source/raw/DCOILWTICO.csv",
+        "price_column": "DCOILWTICO",
+        "price_target_kind": "fred_wti_spot_proxy",
+        "rows": 10142,
+        "start": "1986-01-02T00:00:00+00:00"
+      },
+      "wti_3d_return_magnitude": {
+        "available": true,
+        "end": "2026-04-20T00:00:00+00:00",
+        "forbidden_uses": [
+          "executable_futures_replay",
+          "CL_front_month_backtest",
+          "MCL_execution_replay"
+        ],
+        "path": "data/s4_0/free_source/raw/DCOILWTICO.csv",
+        "price_column": "DCOILWTICO",
+        "price_target_kind": "fred_wti_spot_proxy",
+        "rows": 10142,
+        "start": "1986-01-02T00:00:00+00:00"
+      },
+      "wti_3d_return_sign": {
+        "available": true,
+        "end": "2026-04-20T00:00:00+00:00",
+        "forbidden_uses": [
+          "executable_futures_replay",
+          "CL_front_month_backtest",
+          "MCL_execution_replay"
+        ],
+        "path": "data/s4_0/free_source/raw/DCOILWTICO.csv",
+        "price_column": "DCOILWTICO",
+        "price_target_kind": "fred_wti_spot_proxy",
+        "rows": 10142,
+        "start": "1986-01-02T00:00:00+00:00"
+      }
+    }
+  },
+  "n_waterfall": {
+    "by_family": {
+      "fomc": {
+        "distinct_decision_ts": 102,
+        "manifest_rows_matched": 102
+      },
+      "opec_ministerial": {
+        "distinct_decision_ts": 48,
+        "manifest_rows_matched": 48
+      },
+      "steo": {
+        "distinct_decision_ts": 76,
+        "manifest_rows_matched": 76
+      },
+      "wpsr": {
+        "distinct_decision_ts": 327,
+        "manifest_rows_matched": 3924
+      }
+    },
+    "n_decision_timestamps": 553,
+    "n_manifest_rows": 4150
+  },
+  "parameters": {
+    "admissible_vintage_qualities": [
+      "release_lag_safe_revision_unknown",
+      "true_first_release"
+    ],
+    "alpha_family": 0.05,
+    "alpha_per_test": 0.05,
+    "embargo_days": 3,
+    "families": [
+      "wpsr",
+      "fomc",
+      "steo",
+      "opec_ministerial"
+    ],
+    "pit_root": "data/pit_store",
+    "post_2020_start": "2020-01-01T00:00:00+00:00",
+    "purge_days": 3,
+    "search_budget_runs": 1,
+    "targets": [
+      "wti_3d_return_sign",
+      "wti_3d_return_magnitude",
+      "wti_3d_mae_conditional"
+    ]
+  },
+  "schema_version": "tractability.v1.0",
+  "targets": {
+    "wti_3d_mae_conditional": {
+      "baseline_rate": null,
+      "horizon_days": 3,
+      "metric": "mae_conditional",
+      "minimum_detectable_effect_size_against_naive_50pct_baseline": null,
+      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": {
+        "raw_effect": 0.002092366181220061,
+        "standardized_effect": 0.14765650580494327
+      },
+      "n_after_purge_embargo": 360,
+      "n_after_quality_filter": 552,
+      "n_by_cost_bucket": {
+        "executable_paper": 0,
+        "free_proxy_no_friction": 360,
+        "free_proxy_with_roll_friction": 360,
+        "real_capital": 0
+      },
+      "n_by_regime": {
+        "unknown": 360
+      },
+      "n_hac_or_block_adjusted": {
+        "block_bootstrap": {
+          "B": 2000,
+          "block_length": 5,
+          "method": "circular_block_bootstrap_variance_ratio",
+          "point_estimate": 241
+        },
+        "newey_west": {
+          "K_used": 4,
+          "method": "newey_west_bartlett_capped_at_zero",
+          "point_estimate": 229,
+          "rho_sum_capped": 0.2831206590240878
+        },
+        "phase_0_disposition": "diagnostic_only_no_validation_score_series_yet (spec_\u00a76_paradox_at_phase_0_see_review_B8)",
+        "point_estimate": 229
+      },
+      "n_oos_by_fold": {},
+      "n_post2020_raw": 552,
+      "n_star": 360,
+      "n_star_strict_hac_phase3plus": 229,
+      "n_targetable_raw": 552,
+      "observed_positive_rate": null,
+      "price_target_forbidden_uses": [
+        "executable_futures_replay",
+        "CL_front_month_backtest",
+        "MCL_execution_replay"
+      ],
+      "price_target_kind": "fred_wti_spot_proxy",
+      "sample_std": 0.014170497736036854
+    },
+    "wti_3d_return_magnitude": {
+      "baseline_rate": null,
+      "horizon_days": 3,
+      "metric": "return_magnitude",
+      "minimum_detectable_effect_size_against_naive_50pct_baseline": null,
+      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": {
+        "raw_effect": 0.00625741555368199,
+        "standardized_effect": 0.14765650580494327
+      },
+      "n_after_purge_embargo": 360,
+      "n_after_quality_filter": 552,
+      "n_by_cost_bucket": {
+        "executable_paper": 0,
+        "free_proxy_no_friction": 360,
+        "free_proxy_with_roll_friction": 360,
+        "real_capital": 0
+      },
+      "n_by_regime": {
+        "unknown": 360
+      },
+      "n_hac_or_block_adjusted": {
+        "block_bootstrap": {
+          "B": 2000,
+          "block_length": 5,
+          "method": "circular_block_bootstrap_variance_ratio",
+          "point_estimate": 128
+        },
+        "newey_west": {
+          "K_used": 4,
+          "method": "newey_west_bartlett_capped_at_zero",
+          "point_estimate": 131,
+          "rho_sum_capped": 0.8640902338897227
+        },
+        "phase_0_disposition": "diagnostic_only_no_validation_score_series_yet (spec_\u00a76_paradox_at_phase_0_see_review_B8)",
+        "point_estimate": 128
+      },
+      "n_oos_by_fold": {},
+      "n_post2020_raw": 552,
+      "n_star": 360,
+      "n_star_strict_hac_phase3plus": 128,
+      "n_targetable_raw": 552,
+      "observed_positive_rate": null,
+      "price_target_forbidden_uses": [
+        "executable_futures_replay",
+        "CL_front_month_backtest",
+        "MCL_execution_replay"
+      ],
+      "price_target_kind": "fred_wti_spot_proxy",
+      "sample_std": 0.04237819064977835
+    },
+    "wti_3d_return_sign": {
+      "baseline_rate": 0.5527777777777778,
+      "horizon_days": 3,
+      "metric": "return_sign",
+      "minimum_detectable_effect_size_against_naive_50pct_baseline": 0.07358674261508968,
+      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": 0.07282848123134733,
+      "n_after_purge_embargo": 360,
+      "n_after_quality_filter": 552,
+      "n_by_cost_bucket": {
+        "executable_paper": 0,
+        "free_proxy_no_friction": 360,
+        "free_proxy_with_roll_friction": 360,
+        "real_capital": 0
+      },
+      "n_by_regime": {
+        "unknown": 360
+      },
+      "n_hac_or_block_adjusted": {
+        "block_bootstrap": {
+          "B": 2000,
+          "block_length": 5,
+          "method": "circular_block_bootstrap_variance_ratio",
+          "point_estimate": 277
+        },
+        "newey_west": {
+          "K_used": 4,
+          "method": "newey_west_bartlett_capped_at_zero",
+          "point_estimate": 272,
+          "rho_sum_capped": 0.16169848008905602
+        },
+        "phase_0_disposition": "diagnostic_only_no_validation_score_series_yet (spec_\u00a76_paradox_at_phase_0_see_review_B8)",
+        "point_estimate": 272
+      },
+      "n_oos_by_fold": {},
+      "n_post2020_raw": 552,
+      "n_star": 360,
+      "n_star_strict_hac_phase3plus": 272,
+      "n_targetable_raw": 552,
+      "observed_positive_rate": 0.5527777777777778,
+      "price_target_forbidden_uses": [
+        "executable_futures_replay",
+        "CL_front_month_backtest",
+        "MCL_execution_replay"
+      ],
+      "price_target_kind": "fred_wti_spot_proxy",
+      "sample_std": null
+    }
+  },
+  "vintage_quality_distribution": {
+    "release_lag_safe_revision_unknown": 124,
+    "true_first_release": 4026
+  }
+}

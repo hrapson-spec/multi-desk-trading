@@ -36,6 +36,15 @@ SOURCE_KEYS = (
     "baker_hughes",
     "cme_cl_metadata",
     "cboe_vix",
+    "fomc_calendar",
+    "eia_steo_calendar",
+    "opec_ministerial_calendar",
+    "eia_psm_calendar",
+    "gpr_calendar",
+    "cl_front_eod_pit",
+    "brent_front_eod_pit",
+    "rbob_front_eod_pit",
+    "ng_front_eod_pit",
 )
 
 
@@ -99,6 +108,110 @@ def _build_ingester(
         from v2.ingest.cboe_vix import CboeVIXIngester
 
         return CboeVIXIngester(writer=writer, manifest=manifest)
+    if source_key == "fomc_calendar":
+        from datetime import date
+
+        from v2.ingest.fomc_calendar import FOMCCalendarIngester
+
+        return FOMCCalendarIngester(
+            writer=writer,
+            manifest=manifest,
+            since=date.fromisoformat(since) if since is not None else None,
+            until=date.fromisoformat(until) if until is not None else None,
+        )
+    if source_key == "eia_steo_calendar":
+        from datetime import date
+
+        from v2.ingest.eia_steo_calendar import EIASTEOCalendarIngester
+
+        return EIASTEOCalendarIngester(
+            writer=writer,
+            manifest=manifest,
+            since=date.fromisoformat(since) if since is not None else None,
+            until=date.fromisoformat(until) if until is not None else None,
+        )
+    if source_key == "opec_ministerial_calendar":
+        from datetime import date
+
+        from v2.ingest.opec_ministerial_calendar import (
+            OPECMinisterialCalendarIngester,
+        )
+
+        return OPECMinisterialCalendarIngester(
+            writer=writer,
+            manifest=manifest,
+            since=date.fromisoformat(since) if since is not None else None,
+            until=date.fromisoformat(until) if until is not None else None,
+        )
+    if source_key == "eia_psm_calendar":
+        from datetime import date
+
+        from v2.ingest.eia_psm_calendar import EIAPSMCalendarIngester
+
+        return EIAPSMCalendarIngester(
+            writer=writer,
+            manifest=manifest,
+            since=date.fromisoformat(since) if since is not None else None,
+            until=date.fromisoformat(until) if until is not None else None,
+        )
+    if source_key == "gpr_calendar":
+        from datetime import date
+
+        from v2.ingest.gpr_calendar import GPRCalendarIngester
+
+        return GPRCalendarIngester(
+            writer=writer,
+            manifest=manifest,
+            since=date.fromisoformat(since) if since is not None else None,
+            until=date.fromisoformat(until) if until is not None else None,
+        )
+    if source_key == "cl_front_eod_pit":
+        from datetime import date
+
+        from v2.ingest.cl_front_eod_pit import CLFrontEODPITIngester
+
+        return CLFrontEODPITIngester(
+            writer=writer,
+            manifest=manifest,
+            since=date.fromisoformat(since) if since is not None else None,
+            until=date.fromisoformat(until) if until is not None else None,
+        )
+    if source_key == "brent_front_eod_pit":
+        from datetime import date
+
+        from v2.ingest.stooq_multi_asset import StooqMultiAssetIngester
+
+        return StooqMultiAssetIngester(
+            writer=writer,
+            manifest=manifest,
+            asset="brent",
+            since=date.fromisoformat(since) if since is not None else None,
+            until=date.fromisoformat(until) if until is not None else None,
+        )
+    if source_key == "rbob_front_eod_pit":
+        from datetime import date
+
+        from v2.ingest.stooq_multi_asset import StooqMultiAssetIngester
+
+        return StooqMultiAssetIngester(
+            writer=writer,
+            manifest=manifest,
+            asset="rbob",
+            since=date.fromisoformat(since) if since is not None else None,
+            until=date.fromisoformat(until) if until is not None else None,
+        )
+    if source_key == "ng_front_eod_pit":
+        from datetime import date
+
+        from v2.ingest.stooq_multi_asset import StooqMultiAssetIngester
+
+        return StooqMultiAssetIngester(
+            writer=writer,
+            manifest=manifest,
+            asset="ng",
+            since=date.fromisoformat(since) if since is not None else None,
+            until=date.fromisoformat(until) if until is not None else None,
+        )
     raise ValueError(f"unknown source key: {source_key!r}")
 
 
