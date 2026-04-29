@@ -1,0 +1,126 @@
+prereg_version: "feasibility-v1.0"
+feasibility_audit_only: true
+
+identity:
+  family: oil_wti
+  desk: opec_ministerial_wti_3d_audit_candidate
+  target_state: S2
+  decision_unit: sign
+  target_variable: wti_front_3d_return_sign
+  target_horizon: 3d
+
+contract_refs:
+  decision_contract_hash: TBD_AT_LOCK_TIME
+  data_contract_hash:     TBD_AT_LOCK_TIME
+  governance_hash:        TBD_AT_LOCK_TIME
+  feasibility_spec_v1_hash: TBD_AT_LOCK_TIME
+  feasibility_dependence_analysis_hash: TBD_AT_LOCK_TIME
+
+model:
+  class: feasibility.candidates.opec_ministerial_3d.classical.OPECMinisterialLogisticModel
+  version: "1.0.0"
+  features:
+    - name: tightening_indicator
+      source: opec_ministerial
+      transform: event_label_contains_cut_extension_or_delay
+      expected_sign: positive
+      quality_floor: 0.80
+    - name: easing_indicator
+      source: opec_ministerial
+      transform: event_label_contains_hike_phase_out_or_taper
+      expected_sign: negative
+      quality_floor: 0.80
+    - name: deadlock_indicator
+      source: opec_ministerial
+      transform: event_label_contains_deadlock_or_failed
+      expected_sign: negative
+      quality_floor: 0.80
+    - name: jmmc_indicator
+      source: opec_ministerial
+      transform: event_type_equals_jmmc_with_announcement
+      quality_floor: 0.80
+    - name: wti_5d_lagged_return
+      source: fred_wti_spot_proxy
+      transform: log_return_5d_lagged
+      quality_floor: 0.85
+  hyperparameters:
+    penalty: l2
+    C: 1.0
+    fit_intercept: true
+    solver: lbfgs
+    max_iter: 100
+    random_state: 42
+  seed: 42
+
+baselines:
+  - name: zero_return_baseline
+    parameters: {}
+
+outer_protocol:
+  type: rolling_origin_walk_forward
+  warmup_weeks: 52
+  refit_cadence: monthly
+  forecast_cadence: per_opec_ministerial_event
+  horizon_days: 3
+  regime: A_fully_frozen
+
+challenger_protocol:
+  type: combinatorial_purged_cv
+  blocks: 6
+  test_blocks: 1
+  purge_days: 3
+  embargo_days: 3
+
+metrics:
+  primary:
+    - directional_accuracy
+  secondary:
+    - log_loss
+    - brier_score
+    - dm_hac_one_sided_ci
+    - moving_block_bootstrap_ci
+  shadow_rule:
+    form: feasibility_audit_only_no_capital_implication
+    diagnostics: [residual_autocorrelation_rho_1_2_3, hac_effective_n, block_bootstrap_effective_n]
+
+promotion_thresholds:
+  directional_accuracy_min_vs_zero_return_baseline_pp: 5.0
+  dm_alpha: 0.05
+  hac_effective_n_floor: 250
+  block_bootstrap_effective_n_floor: 250
+
+abstention:
+  degradation_ladder:
+    n_soft: 3
+    decay_lambda: 0.20
+  hard_gates:
+    data: true
+    model: true
+    operational: false
+
+allowed_deviations:
+  - opec_release_timestamp_patch_with_logged_reason
+  - scraper_version_patch_bump_within_envelope
+  - fred_wti_proxy_lag_documented_in_manifest
+
+forbidden_after_lock:
+  - change_features
+  - change_model_class
+  - change_hyperparameters
+  - change_thresholds
+  - peek_outer_oos
+  - adjust_baseline_configuration
+  - alter_shadow_rule
+  - register_as_v2_desk_without_promotion_review
+
+operator:
+  role: author
+  ts: 2026-04-29T00:00:00Z
+  fingerprint: pending_v2.0
+  notes: |
+    Authored after the WPSR inventory-surprise candidate failed Phase 3
+    residual-N thresholds. Uses the curated OPEC v1.0 PIT calendar, whose
+    vintage_quality is release_lag_safe_revision_unknown; exact wire-level
+    timestamps remain a v1.1 data-quality improvement, not a permitted
+    post-lock tuning surface.
+
