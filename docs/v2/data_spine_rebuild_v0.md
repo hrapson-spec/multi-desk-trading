@@ -106,6 +106,6 @@ The rebuild must keep these tests green:
    post-2020 WPSR first-release vintages from official archive CSV tables.
 2. Run a sampled coverage check across 2020-2026 issue pages and table CSV
    links before a full backfill.
-3. Register `DCOILWTICO` as a `spot_proxy` for tractability only.
-4. Rerun tractability and write
+3. Rerun tractability using the registered `DCOILWTICO` tractability-only
+   spot proxy and write
    `feasibility/reports/terminal_YYYY-MM-DD_tractability_post_rebuild.md`.

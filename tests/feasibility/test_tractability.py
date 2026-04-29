@@ -6,6 +6,7 @@ from feasibility.tractability import (
     Observation,
     build_observations,
     effective_n,
+    load_wti_prices,
     min_detectable_continuous_effect,
     min_detectable_effect,
 )
@@ -56,3 +57,19 @@ def test_build_observations_uses_next_available_price_and_forward_mae():
     assert len(observations) == 1
     assert observations[0].return_5d > 0
     assert observations[0].mae_conditional_on_direction_5d == 0.0
+
+
+def test_dcoilwtico_is_registered_as_tractability_only_spot_proxy(tmp_path):
+    path = tmp_path / "DCOILWTICO.csv"
+    path.write_text(
+        "observation_date,DCOILWTICO\n"
+        "2026-01-02,70.00\n"
+        "2026-01-05,71.25\n",
+        encoding="utf-8",
+    )
+
+    _, status = load_wti_prices(path)
+
+    assert status["price_proxy_kind"] == "fred_wti_spot_proxy"
+    assert status["allowed_use"] == "tractability_count_only"
+    assert "CL_front_month_backtest" in status["forbidden_uses"]

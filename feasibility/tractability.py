@@ -27,8 +27,8 @@ from scipy.stats import norm
 
 DEFAULT_PIT_ROOT = Path("data/pit_store")
 DEFAULT_WTI_PATHS = (
-    Path("data/s4_0/free_source_wti_futures/raw/yfinance_wti_futures_replay.csv"),
     Path("data/s4_0/free_source/raw/DCOILWTICO.csv"),
+    Path("data/s4_0/free_source_wti_futures/raw/yfinance_wti_futures_replay.csv"),
 )
 DEFAULT_OUTPUT = Path("feasibility/outputs/tractability_v0.json")
 DEFAULT_TERMINAL_REPORT = Path("feasibility/reports/terminal_tractability_v0.md")
@@ -288,7 +288,7 @@ def load_wti_prices(path: Path) -> tuple[pd.Series, dict[str, Any]]:
     if prices.empty:
         raise ValueError(f"{path} produced no positive WTI prices")
 
-    return prices, {
+    status = {
         "available": True,
         "path": str(path),
         "rows": int(prices.size),
@@ -296,6 +296,19 @@ def load_wti_prices(path: Path) -> tuple[pd.Series, dict[str, Any]]:
         "start": prices.index.min().isoformat(),
         "end": prices.index.max().isoformat(),
     }
+    if price_column == "DCOILWTICO":
+        status.update(
+            {
+                "price_proxy_kind": "fred_wti_spot_proxy",
+                "allowed_use": "tractability_count_only",
+                "forbidden_uses": [
+                    "executable_futures_replay",
+                    "CL_front_month_backtest",
+                    "MCL_execution_replay",
+                ],
+            }
+        )
+    return prices, status
 
 
 def build_observations(
