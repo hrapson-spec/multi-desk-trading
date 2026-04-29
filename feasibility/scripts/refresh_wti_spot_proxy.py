@@ -150,10 +150,15 @@ def refresh_wti_spot_proxy(
     client = http_client or HTTPClient(timeout=timeout_seconds, max_retries=2)
     close_client = http_client is None
     try:
+        # NOTE 2026-04-29: do NOT pass a custom User-Agent to FRED's
+        # graph/fredgraph.csv endpoint. Empirically, FRED's CDN silently
+        # sinkholes (read-timeout) requests with non-mainstream UAs.
+        # The default httpx UA passes through; a custom UA does not.
+        # Diagnosed via direct probe: same URL/params/timeout, only
+        # difference is the User-Agent header → 200 OK vs 30s timeout.
         response = client.get(
             FRED_DCOILWTICO_CSV_URL,
             params=FRED_DCOILWTICO_PARAMS,
-            headers={"User-Agent": "multi-desk-trading-forward-evidence/1.0"},
         )
         if response.status_code != 200:
             raise WTIRefreshError(f"FRED DCOILWTICO returned HTTP {response.status_code}")
