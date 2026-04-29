@@ -39,7 +39,9 @@ def test_effective_n_v1_matches_v0_on_weekly_grid():
     v1_result = effective_n(decision_ts, purge_days=5, embargo_days=5)
     v0_observations = [
         v0.Observation(
-            decision_ts=ts, return_5d=0.0, magnitude_5d=0.0,
+            decision_ts=ts,
+            return_5d=0.0,
+            magnitude_5d=0.0,
             mae_conditional_on_direction_5d=0.0,
         )
         for ts in decision_ts
@@ -117,9 +119,7 @@ def test_hac_below_min_sample_returns_full_n():
 def test_block_bootstrap_iid_returns_close_to_full_n():
     rng = np.random.default_rng(42)
     values = rng.normal(0.0, 1.0, size=200)
-    result = compute_block_bootstrap_effective_n(
-        values, block_length=5, B=500, seed=42
-    )
+    result = compute_block_bootstrap_effective_n(values, block_length=5, B=500, seed=42)
     assert result["method"] == "circular_block_bootstrap_variance_ratio"
     assert result["point_estimate"] >= 100  # IID should give close to N=200
 
@@ -133,16 +133,12 @@ def test_block_bootstrap_autocorrelated_reduces_n():
     ar1[0] = eps[0]
     for i in range(1, n):
         ar1[i] = rho * ar1[i - 1] + eps[i]
-    result = compute_block_bootstrap_effective_n(
-        ar1, block_length=10, B=500, seed=42
-    )
+    result = compute_block_bootstrap_effective_n(ar1, block_length=10, B=500, seed=42)
     assert result["point_estimate"] < n
 
 
 def test_block_bootstrap_zero_variance_handled():
-    result = compute_block_bootstrap_effective_n(
-        np.zeros(50), block_length=5, B=100, seed=42
-    )
+    result = compute_block_bootstrap_effective_n(np.zeros(50), block_length=5, B=100, seed=42)
     assert result["method"] == "zero_variance"
 
 
@@ -170,6 +166,7 @@ def test_apply_quality_filter_drops_family_with_only_non_pit():
         FamilyDecisionEvents,
         TargetObservation,
     )
+
     events = [
         FamilyDecisionEvents(
             family="bad",
@@ -186,12 +183,18 @@ def test_apply_quality_filter_drops_family_with_only_non_pit():
     ]
     observations = [
         TargetObservation(
-            family="bad", decision_ts=_ts("2020-01-01"),
-            return_path=0.0, magnitude_path=0.0, mae=0.0,
+            family="bad",
+            decision_ts=_ts("2020-01-01"),
+            return_path=0.0,
+            magnitude_path=0.0,
+            mae=0.0,
         ),
         TargetObservation(
-            family="good", decision_ts=_ts("2020-01-08"),
-            return_path=0.01, magnitude_path=0.01, mae=0.0,
+            family="good",
+            decision_ts=_ts("2020-01-08"),
+            return_path=0.01,
+            magnitude_path=0.01,
+            mae=0.0,
         ),
     ]
     filtered = apply_quality_filter(observations, events)
@@ -206,6 +209,7 @@ def test_apply_quality_filter_drops_family_with_only_non_pit():
 
 def test_build_target_observations_uses_searchsorted_left():
     from feasibility.tractability_v1 import FamilyDecisionEvents
+
     idx = pd.date_range("2020-01-01", periods=20, freq="D", tz="UTC")
     prices = pd.Series(np.linspace(100.0, 110.0, 20), index=idx)
     family = FamilyDecisionEvents(
@@ -221,6 +225,7 @@ def test_build_target_observations_uses_searchsorted_left():
 
 def test_build_target_observations_skips_too_close_to_data_end():
     from feasibility.tractability_v1 import FamilyDecisionEvents
+
     idx = pd.date_range("2020-01-01", periods=10, freq="D", tz="UTC")
     prices = pd.Series(np.linspace(100.0, 110.0, 10), index=idx)
     family = FamilyDecisionEvents(
@@ -233,6 +238,45 @@ def test_build_target_observations_skips_too_close_to_data_end():
     assert observations == []
 
 
+def test_compute_target_result_dedupes_duplicate_target_anchor_timestamps():
+    from feasibility.tractability_v1 import FamilyDecisionEvents, compute_target_result
+
+    idx = pd.date_range("2020-01-01", periods=20, freq="D", tz="UTC")
+    prices = pd.Series(np.linspace(100.0, 110.0, 20), index=idx)
+    family_events = [
+        FamilyDecisionEvents(
+            family="a",
+            decision_ts=[_ts("2020-01-03T10:00:00")],
+            manifest_rows_matched=1,
+            vintage_quality_distribution={"true_first_release": 1},
+        ),
+        FamilyDecisionEvents(
+            family="b",
+            decision_ts=[_ts("2020-01-03T12:00:00")],
+            manifest_rows_matched=1,
+            vintage_quality_distribution={"true_first_release": 1},
+        ),
+    ]
+    target = TargetDef(
+        name="wti_3d_return_sign",
+        price_path=Path("unused.csv"),
+        horizon_days=3,
+        metric="return_sign",
+    )
+
+    result = compute_target_result(
+        target,
+        family_events,
+        prices,
+        purge_days=0,
+        embargo_days=0,
+    )
+
+    assert result.n_post2020_raw == 2
+    assert result.n_after_purge_embargo == 1
+    assert len(result.observations) == 1
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # End-to-end: invariant against v0 on real PIT store
 # ─────────────────────────────────────────────────────────────────────────
@@ -241,9 +285,7 @@ def test_build_target_observations_skips_too_close_to_data_end():
 @pytest.mark.skipif(
     not (
         __import__("pathlib").Path("data/pit_store/pit.duckdb").exists()
-        and __import__("pathlib").Path(
-            "data/s4_0/free_source/raw/DCOILWTICO.csv"
-        ).exists()
+        and __import__("pathlib").Path("data/s4_0/free_source/raw/DCOILWTICO.csv").exists()
     ),
     reason="real PIT store and DCOILWTICO needed for invariant test",
 )
@@ -271,9 +313,9 @@ def test_v1_with_wpsr_only_matches_v0_post2020_n():
         "wti_5d_return_magnitude",
         "wti_5d_mae_conditional",
     ):
-        assert (
-            result["targets"][tname]["n_after_purge_embargo"] == 163
-        ), f"v1 N for {tname} differs from v0 N=163"
+        assert result["targets"][tname]["n_after_purge_embargo"] == 163, (
+            f"v1 N for {tname} differs from v0 N=163"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -285,6 +327,7 @@ def test_v1_manifest_schema_includes_all_required_fields(tmp_path):
     """Smoke test: synthetic minimal harness run produces all §12 fields."""
     # Create a stub PIT store
     import duckdb
+
     pit_root = tmp_path / "pit_store"
     pit_root.mkdir(parents=True, exist_ok=True)
     conn = duckdb.connect(str(pit_root / "pit.duckdb"))
@@ -305,12 +348,8 @@ def test_v1_manifest_schema_includes_all_required_fields(tmp_path):
     rows = []
     for w in range(0, 200):  # 200 weekly events ~3.8yrs
         ts = base + pd.Timedelta(days=7 * w)
-        rows.append(
-            (f"mf_{w}", "eia", "wpsr", "WCESTUS1", ts, ts, "true_first_release")
-        )
-    conn.executemany(
-        "INSERT INTO pit_manifest VALUES (?, ?, ?, ?, ?, ?, ?)", rows
-    )
+        rows.append((f"mf_{w}", "eia", "wpsr", "WCESTUS1", ts, ts, "true_first_release"))
+    conn.executemany("INSERT INTO pit_manifest VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
     conn.close()
 
     # Create a stub WTI prices CSV
@@ -369,9 +408,7 @@ def test_v1_manifest_schema_includes_all_required_fields(tmp_path):
         "alpha_per_test",
         "search_budget_runs",
     ):
-        assert required in result["parameters"], (
-            f"missing §12 parameter field: {required}"
-        )
+        assert required in result["parameters"], f"missing §12 parameter field: {required}"
 
     # vintage_quality_distribution at top level
     assert "vintage_quality_distribution" in result
@@ -394,6 +431,7 @@ def test_v1_decision_rule_thresholds():
     # This is covered by the synthetic full-run test above; here we just assert
     # the constant labels exist in the imported namespace.
     import feasibility.tractability_v1 as mod
+
     src = __import__("inspect").getsource(mod.run_tractability_v1)
     for label in (
         '"stop"',
@@ -435,13 +473,9 @@ def _make_pit_store(tmp_path: Path, *, sources: list[str], weekly_events: int = 
     for src in sources:
         for w in range(weekly_events):
             ts = base + pd.Timedelta(days=7 * w)
-            rows.append(
-                (f"mf_{src}_{w}", src, "wpsr", "WCESTUS1", ts, ts, "true_first_release")
-            )
+            rows.append((f"mf_{src}_{w}", src, "wpsr", "WCESTUS1", ts, ts, "true_first_release"))
             i += 1
-    conn.executemany(
-        "INSERT INTO pit_manifest VALUES (?, ?, ?, ?, ?, ?, ?)", rows
-    )
+    conn.executemany("INSERT INTO pit_manifest VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
     conn.close()
     return pit_root
 
@@ -499,8 +533,8 @@ def test_compute_additive_n_contribution_returns_per_target_dict(tmp_path):
     not __import__("pathlib").Path("data/pit_store/pit.duckdb").exists(),
     reason="real PIT store needed",
 )
-def test_compute_additive_n_contribution_negative_for_steo_at_5d_against_real_pit():
-    """B9-2: WPSR+FOMC base, STEO candidate; at least one target drops."""
+def test_compute_additive_n_contribution_steo_zero_delta_after_anchor_dedup():
+    """B9-2: corrected target-anchor dedup removes the old STEO negative artifact."""
     from pathlib import Path
 
     from feasibility.tractability_v1 import (
@@ -522,10 +556,8 @@ def test_compute_additive_n_contribution_negative_for_steo_at_5d_against_real_pi
         purge_days=5,
         embargo_days=5,
     )
-    any_strictly_negative = any(info["delta"] < 0 for info in result.values())
-    assert any_strictly_negative, (
-        "Expected STEO to be strictly non-additive (delta < 0) for at least one target"
-    )
+    assert result
+    assert all(info["delta"] == 0 for info in result.values())
 
 
 def _make_pit_store_two_sources(
@@ -561,92 +593,85 @@ def _make_pit_store_two_sources(
     rows = []
     for w in range(weekly_events_a):
         ts = base + pd.Timedelta(days=7 * w)
-        rows.append(
-            (f"a_{w}", "eia", "wpsr", "WCESTUS1", ts, ts, "true_first_release")
-        )
+        rows.append((f"a_{w}", "eia", "wpsr", "WCESTUS1", ts, ts, "true_first_release"))
     for w in range(weekly_events_b):
         ts = base + pd.Timedelta(days=7 * w)
-        rows.append(
-            (f"b_{w}", "eia_empty", "wpsr_empty", "WCESTUS1", ts, ts, "true_first_release")
-        )
+        rows.append((f"b_{w}", "eia_empty", "wpsr_empty", "WCESTUS1", ts, ts, "true_first_release"))
     conn.executemany("INSERT INTO pit_manifest VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
     conn.close()
     return pit_root
 
 
-@pytest.mark.skipif(
-    not (
-        Path("data/pit_store/pit.duckdb").exists()
-        and Path("data/s4_0/free_source/raw/DCOILWTICO.csv").exists()
-    ),
-    reason=(
-        "real PIT store + DCOILWTICO needed; "
-        "the empirical STEO non-additive case requires actual events"
-    ),
-)
-def test_reject_non_additive_raises_on_strictly_negative_delta_empirical():
+def test_reject_non_additive_raises_on_synthetic_negative_delta(monkeypatch, tmp_path):
     """B9-3: run_tractability_v1 raises NonAdditiveFamilyError when a family
     is strictly non-additive (delta < 0).
 
     Per spec v1 §5: "reject the addition if N strictly decreases." Zero-delta
     families are no-ops, not violations — only delta < 0 fires the guard.
-
-    Empirical: WPSR + FOMC base + STEO candidate produces delta=-9 for
-    return_sign at 5d (greedy thinning interaction of monthly STEO with
-    weekly WPSR + irregular FOMC). This test uses the real PIT store
-    rather than a synthetic 3-family interaction (which is hard to
-    construct in a small fixture).
     """
     from feasibility.tractability_v1 import (
         NonAdditiveFamilyError,
-        _default_targets,
-        _resolve_families,
     )
 
-    families = _resolve_families(["wpsr", "fomc", "steo"])
-    targets = _default_targets()
+    pit_root = _make_pit_store_two_sources(tmp_path, weekly_events_a=20, weekly_events_b=0)
+    wti = _make_wti_csv(tmp_path)
+    target = _make_target(wti)
+    fam_a = EventFamily(name="fam_a", sources=("eia",), datasets=("wpsr",))
+    fam_b = EventFamily(name="fam_b", sources=("eia_empty",), datasets=("wpsr_empty",))
 
-    with pytest.raises(NonAdditiveFamilyError, match="steo"):
+    def fake_contribution(*args, **kwargs):
+        del args, kwargs
+        return {target.name: {"base": 10, "with_candidate": 9, "delta": -1}}
+
+    monkeypatch.setattr(
+        "feasibility.tractability_v1.compute_additive_n_contribution",
+        fake_contribution,
+    )
+
+    with pytest.raises(NonAdditiveFamilyError, match="fam_b"):
         run_tractability_v1(
-            pit_root=Path("data/pit_store"),
-            families=families,
-            targets=targets,
+            pit_root=pit_root,
+            families=[fam_a, fam_b],
+            targets=[target],
             purge_days=5,
             embargo_days=5,
             reject_non_additive=True,
         )
 
 
-@pytest.mark.skipif(
-    not (
-        Path("data/pit_store/pit.duckdb").exists()
-        and Path("data/s4_0/free_source/raw/DCOILWTICO.csv").exists()
-    ),
-    reason="real PIT store + DCOILWTICO needed for empirical force-include test",
-)
-def test_force_include_admits_non_additive_with_justification_empirical():
+def test_force_include_admits_synthetic_negative_with_justification(monkeypatch, tmp_path):
     """B9-4: force_include overrides non-additive guard when justification provided."""
-    from feasibility.tractability_v1 import _default_targets, _resolve_families
+    pit_root = _make_pit_store_two_sources(tmp_path, weekly_events_a=20, weekly_events_b=0)
+    wti = _make_wti_csv(tmp_path)
+    target = _make_target(wti)
+    fam_a = EventFamily(name="fam_a", sources=("eia",), datasets=("wpsr",))
+    fam_b = EventFamily(name="fam_b", sources=("eia_empty",), datasets=("wpsr_empty",))
 
-    families = _resolve_families(["wpsr", "fomc", "steo"])
-    targets = _default_targets()
+    def fake_contribution(*args, **kwargs):
+        del args, kwargs
+        return {target.name: {"base": 10, "with_candidate": 9, "delta": -1}}
+
+    monkeypatch.setattr(
+        "feasibility.tractability_v1.compute_additive_n_contribution",
+        fake_contribution,
+    )
 
     result = run_tractability_v1(
-        pit_root=Path("data/pit_store"),
-        families=families,
-        targets=targets,
+        pit_root=pit_root,
+        families=[fam_a, fam_b],
+        targets=[target],
         purge_days=5,
         embargo_days=5,
         reject_non_additive=True,
-        force_include=["steo"],
+        force_include=["fam_b"],
         non_additive_justification=(
-            "STEO admitted as a feature-only family (not a decision-event family); "
+            "fam_b admitted as a feature-only family (not a decision-event family); "
             "negative N delta acceptable in this audit context"
         ),
     )
     forced = result["parameters"].get("forced_inclusions", [])
     assert len(forced) >= 1
-    assert forced[0]["family"] == "steo"
+    assert forced[0]["family"] == "fam_b"
     assert "feature-only" in forced[0]["justification"]
 
 
@@ -655,9 +680,7 @@ def test_zero_delta_does_not_trigger_guard(tmp_path):
     (delta == 0 for all targets) is admissible per spec v1 §5 strict-decrease
     wording. The guard fires only on delta < 0.
     """
-    pit_root = _make_pit_store_two_sources(
-        tmp_path, weekly_events_a=80, weekly_events_b=0
-    )
+    pit_root = _make_pit_store_two_sources(tmp_path, weekly_events_a=80, weekly_events_b=0)
     wti = _make_wti_csv(tmp_path)
     tgt = _make_target(wti)
 
@@ -674,9 +697,10 @@ def test_zero_delta_does_not_trigger_guard(tmp_path):
         reject_non_additive=True,
     )
     # No forced_inclusions either — the family didn't need forcing
-    assert "forced_inclusions" not in result["parameters"] or not result[
-        "parameters"
-    ]["forced_inclusions"]
+    assert (
+        "forced_inclusions" not in result["parameters"]
+        or not result["parameters"]["forced_inclusions"]
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -742,16 +766,18 @@ def test_residual_mode_updates_n_star_and_decision(tmp_path):
         ar1[i] = 0.7 * ar1[i - 1] + eps[i]
 
     prices = pd.read_csv(wti)
-    prices_s = pd.Series(
-        prices["DCOILWTICO"].to_numpy(dtype=float),
-        index=pd.DatetimeIndex(pd.to_datetime(prices["observation_date"], utc=True)),
-    ).dropna().sort_index()
+    prices_s = (
+        pd.Series(
+            prices["DCOILWTICO"].to_numpy(dtype=float),
+            index=pd.DatetimeIndex(pd.to_datetime(prices["observation_date"], utc=True)),
+        )
+        .dropna()
+        .sort_index()
+    )
     prices_s = prices_s[prices_s > 0]
 
     # First get n_after_purge_embargo with no residuals (baseline)
-    tr_baseline = compute_target_result(
-        tgt, family_events, prices_s, purge_days=5, embargo_days=5
-    )
+    tr_baseline = compute_target_result(tgt, family_events, prices_s, purge_days=5, embargo_days=5)
     n_purge = tr_baseline.n_after_purge_embargo
 
     # Build residuals for kept observations
@@ -765,8 +791,11 @@ def test_residual_mode_updates_n_star_and_decision(tmp_path):
     )
 
     tr_residual = compute_target_result(
-        tgt, family_events, prices_s,
-        purge_days=5, embargo_days=5,
+        tgt,
+        family_events,
+        prices_s,
+        purge_days=5,
+        embargo_days=5,
         residuals=residuals_series,
     )
 
@@ -811,15 +840,17 @@ def test_phase_0_default_does_not_propagate_hac_to_n_star(tmp_path):
     family_events = [load_family_decision_events(pit_root, fam)]
 
     prices = pd.read_csv(wti)
-    prices_s = pd.Series(
-        prices["DCOILWTICO"].to_numpy(dtype=float),
-        index=pd.DatetimeIndex(pd.to_datetime(prices["observation_date"], utc=True)),
-    ).dropna().sort_index()
+    prices_s = (
+        pd.Series(
+            prices["DCOILWTICO"].to_numpy(dtype=float),
+            index=pd.DatetimeIndex(pd.to_datetime(prices["observation_date"], utc=True)),
+        )
+        .dropna()
+        .sort_index()
+    )
     prices_s = prices_s[prices_s > 0]
 
-    tr = compute_target_result(
-        tgt, family_events, prices_s, purge_days=5, embargo_days=5
-    )
+    tr = compute_target_result(tgt, family_events, prices_s, purge_days=5, embargo_days=5)
     # Phase 0: n_star must equal n_after_purge_embargo (no HAC propagation)
     assert tr.n_star == tr.n_after_purge_embargo, (
         f"Phase 0 n_star={tr.n_star} != n_after_purge_embargo={tr.n_after_purge_embargo}"
@@ -838,17 +869,19 @@ def test_residual_mode_manifest_disposition_is_phase_3(tmp_path):
     family_events = [load_family_decision_events(pit_root, fam)]
 
     prices = pd.read_csv(wti)
-    prices_s = pd.Series(
-        prices["DCOILWTICO"].to_numpy(dtype=float),
-        index=pd.DatetimeIndex(pd.to_datetime(prices["observation_date"], utc=True)),
-    ).dropna().sort_index()
+    prices_s = (
+        pd.Series(
+            prices["DCOILWTICO"].to_numpy(dtype=float),
+            index=pd.DatetimeIndex(pd.to_datetime(prices["observation_date"], utc=True)),
+        )
+        .dropna()
+        .sort_index()
+    )
     prices_s = prices_s[prices_s > 0]
 
     from feasibility.tractability_v1 import compute_target_result
 
-    tr_base = compute_target_result(
-        tgt, family_events, prices_s, purge_days=5, embargo_days=5
-    )
+    tr_base = compute_target_result(tgt, family_events, prices_s, purge_days=5, embargo_days=5)
     kept_ts = [o.decision_ts for o in tr_base.observations]
     residuals_series = pd.Series(
         np.random.default_rng(0).normal(size=len(kept_ts)),
@@ -898,8 +931,7 @@ def _build_pit_with_prices(tmp_path: Path) -> tuple[Path, Path]:
 
     # Write a parquet payload
     parquet_rel = (
-        "raw/src_test/dataset=ds_test/series=PRICE/"
-        "release_ts=2020-01-10T00-00-00Z/data.parquet"
+        "raw/src_test/dataset=ds_test/series=PRICE/release_ts=2020-01-10T00-00-00Z/data.parquet"
     )
     parquet_abs = pit_root / parquet_rel
     parquet_abs.parent.mkdir(parents=True, exist_ok=True)
@@ -920,8 +952,7 @@ def _build_pit_with_prices(tmp_path: Path) -> tuple[Path, Path]:
     )
     conn.execute(
         "INSERT INTO pit_manifest VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ["mf_001", "src_test", "ds_test", "PRICE",
-         "2020-01-10T00:00:00", None, parquet_rel],
+        ["mf_001", "src_test", "ds_test", "PRICE", "2020-01-10T00:00:00", None, parquet_rel],
     )
     conn.close()
     return pit_root, parquet_abs
@@ -954,9 +985,7 @@ def test_pit_price_source_takes_latest_revision_per_observation_date(tmp_path):
     def write_parquet(rel_path: str, price_val: float) -> None:
         abs_path = pit_root / rel_path
         abs_path.parent.mkdir(parents=True, exist_ok=True)
-        df = pd.DataFrame(
-            {"observation_date": ["2020-06-01"], "close": [price_val]}
-        )
+        df = pd.DataFrame({"observation_date": ["2020-06-01"], "close": [price_val]})
         pq.write_table(pa.Table.from_pandas(df, preserve_index=False), abs_path)
 
     rel_v1 = "raw/src/dataset=ds/series=SER/release_ts=2020-01-01T00-00-00Z/data.parquet"
@@ -1021,9 +1050,7 @@ def test_target_def_dispatches_csv_vs_pit_loader(tmp_path):
 @pytest.mark.skipif(
     not (
         __import__("pathlib").Path("data/pit_store/pit.duckdb").exists()
-        and __import__("pathlib").Path(
-            "data/s4_0/free_source/raw/DCOILWTICO.csv"
-        ).exists()
+        and __import__("pathlib").Path("data/s4_0/free_source/raw/DCOILWTICO.csv").exists()
     ),
     reason="real PIT store and DCOILWTICO needed for invariant test",
 )

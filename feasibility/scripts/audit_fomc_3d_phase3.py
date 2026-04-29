@@ -6,6 +6,7 @@ Audit-only — does NOT register the candidate as a v1/v2 desk.
 Requires harness flags --phase3-residual-mode and --candidate-residuals-csv
 (delivered in Wave 2 of post-data-plan execution).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,7 +39,7 @@ HORIZON_DAYS = 3
 PURGE_DAYS = 3
 EMBARGO_DAYS = 3
 WARMUP_WEEKS = 52  # per prereg outer_protocol
-REFIT_MONTHS = 1   # per prereg outer_protocol
+REFIT_MONTHS = 1  # per prereg outer_protocol
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RESIDUALS_CSV = REPO_ROOT / "feasibility" / "outputs" / "fomc_3d_residuals.csv"
@@ -111,6 +112,17 @@ def build_event_features_and_labels(
     label_arr = np.array(label_rows, dtype=int)
     ts_index = pd.DatetimeIndex(ts_rows, tz="UTC")
     return feat_mat, label_arr, ts_index
+
+
+def _select_kept_observations(
+    observations: list[TargetObservation],
+    kept_ts: list[pd.Timestamp],
+) -> list[TargetObservation]:
+    """Return one observation per retained target-anchor timestamp."""
+    first_by_ts: dict[pd.Timestamp, TargetObservation] = {}
+    for obs in observations:
+        first_by_ts.setdefault(obs.decision_ts, obs)
+    return [first_by_ts[ts] for ts in kept_ts if ts in first_by_ts]
 
 
 def walk_forward_residuals(
@@ -386,8 +398,7 @@ def main(argv: list[str] | None = None) -> int:
         purge_days=PURGE_DAYS,
         embargo_days=EMBARGO_DAYS,
     )
-    kept_set = set(kept_ts)
-    kept_obs = [o for o in obs_post if o.decision_ts in kept_set]
+    kept_obs = _select_kept_observations(obs_post, kept_ts)
 
     print(
         f"Events: {len(obs)} total, {len(obs_post)} post-2020, "
@@ -398,8 +409,7 @@ def main(argv: list[str] | None = None) -> int:
     feat_mat, label_arr, decision_ts = build_event_features_and_labels(kept_obs, prices)
     n_dropped = len(kept_obs) - feat_mat.shape[0]
     print(
-        f"Feature matrix: {feat_mat.shape[0]} rows "
-        f"(dropped {n_dropped} for missing lagged return)"
+        f"Feature matrix: {feat_mat.shape[0]} rows (dropped {n_dropped} for missing lagged return)"
     )
 
     # --- Step 6: Walk-forward residuals ---
@@ -411,8 +421,7 @@ def main(argv: list[str] | None = None) -> int:
         refit_months=REFIT_MONTHS,
     )
     print(
-        f"Walk-forward residuals: {len(residuals)} events "
-        f"(warmup skips first {WARMUP_WEEKS} weeks)"
+        f"Walk-forward residuals: {len(residuals)} events (warmup skips first {WARMUP_WEEKS} weeks)"
     )
 
     # --- Step 7: Write residuals CSV ---

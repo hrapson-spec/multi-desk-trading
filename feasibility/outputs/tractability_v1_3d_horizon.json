@@ -1,11 +1,11 @@
 {
-  "created_at_utc": "2026-04-29T09:47:47.600508Z",
+  "created_at_utc": "2026-04-29T13:34:41.335635Z",
   "decision": {
     "action": "continue_per_plan",
-    "min_effective_n": 365,
+    "min_effective_n": 285,
     "rule": "continue"
   },
-  "git_commit": "315ecbf6c30ee8d4a3e7c02690b7734811b57d88",
+  "git_commit": "8040950b4e696e13d31b1acf54d8ca9b1206fcf9",
   "input_status": {
     "families": {
       "fomc": {
@@ -23,10 +23,10 @@
         }
       },
       "wpsr": {
-        "distinct_decision_ts": 327,
-        "manifest_rows_matched": 3924,
+        "distinct_decision_ts": 742,
+        "manifest_rows_matched": 8904,
         "vintage_quality_distribution": {
-          "true_first_release": 3924
+          "true_first_release": 8904
         }
       }
     },
@@ -86,12 +86,12 @@
         "manifest_rows_matched": 48
       },
       "wpsr": {
-        "distinct_decision_ts": 327,
-        "manifest_rows_matched": 3924
+        "distinct_decision_ts": 742,
+        "manifest_rows_matched": 8904
       }
     },
-    "n_decision_timestamps": 477,
-    "n_manifest_rows": 4074
+    "n_decision_timestamps": 892,
+    "n_manifest_rows": 9054
   },
   "parameters": {
     "admissible_vintage_qualities": [
@@ -124,41 +124,41 @@
       "metric": "mae_conditional",
       "minimum_detectable_effect_size_against_naive_50pct_baseline": null,
       "minimum_detectable_effect_size_for_5pct_significance_80pct_power": {
-        "raw_effect": 0.002053686288515873,
-        "standardized_effect": 0.14664167243354495
+        "raw_effect": 0.0025166462678158064,
+        "standardized_effect": 0.16595158598956786
       },
-      "n_after_purge_embargo": 365,
-      "n_after_quality_filter": 476,
+      "n_after_purge_embargo": 285,
+      "n_after_quality_filter": 891,
       "n_by_cost_bucket": {
         "executable_paper": 0,
-        "free_proxy_no_friction": 365,
-        "free_proxy_with_roll_friction": 365,
+        "free_proxy_no_friction": 285,
+        "free_proxy_with_roll_friction": 285,
         "real_capital": 0
       },
       "n_by_regime": {
-        "unknown": 365
+        "unknown": 285
       },
       "n_hac_or_block_adjusted": {
         "block_bootstrap": {
           "B": 2000,
           "block_length": 5,
           "method": "circular_block_bootstrap_variance_ratio",
-          "point_estimate": 244
+          "point_estimate": 188
         },
         "newey_west": {
           "K_used": 4,
           "method": "newey_west_bartlett_capped_at_zero",
-          "point_estimate": 233,
-          "rho_sum_capped": 0.2808745060614337
+          "point_estimate": 189,
+          "rho_sum_capped": 0.25301153071798
         },
         "phase_0_disposition": "diagnostic_only_no_validation_score_series_yet (spec_\u00a76_paradox_at_phase_0_see_review_B8)",
-        "point_estimate": 233
+        "point_estimate": 188
       },
       "n_oos_by_fold": {},
       "n_post2020_raw": 476,
-      "n_star": 365,
-      "n_star_strict_hac_phase3plus": 233,
-      "n_targetable_raw": 476,
+      "n_star": 285,
+      "n_star_strict_hac_phase3plus": 188,
+      "n_targetable_raw": 891,
       "observed_positive_rate": null,
       "price_target_forbidden_uses": [
         "executable_futures_replay",
@@ -166,7 +166,7 @@
         "MCL_execution_replay"
       ],
       "price_target_kind": "fred_wti_spot_proxy",
-      "sample_std": 0.014004793142594322
+      "sample_std": 0.01516494255122099
     },
     "wti_3d_return_magnitude": {
       "baseline_rate": null,
@@ -174,41 +174,41 @@
       "metric": "return_magnitude",
       "minimum_detectable_effect_size_against_naive_50pct_baseline": null,
       "minimum_detectable_effect_size_for_5pct_significance_80pct_power": {
-        "raw_effect": 0.00623605843093385,
-        "standardized_effect": 0.14664167243354495
+        "raw_effect": 0.007358687372173098,
+        "standardized_effect": 0.16595158598956786
       },
-      "n_after_purge_embargo": 365,
-      "n_after_quality_filter": 476,
+      "n_after_purge_embargo": 285,
+      "n_after_quality_filter": 891,
       "n_by_cost_bucket": {
         "executable_paper": 0,
-        "free_proxy_no_friction": 365,
-        "free_proxy_with_roll_friction": 365,
+        "free_proxy_no_friction": 285,
+        "free_proxy_with_roll_friction": 285,
         "real_capital": 0
       },
       "n_by_regime": {
-        "unknown": 365
+        "unknown": 285
       },
       "n_hac_or_block_adjusted": {
         "block_bootstrap": {
           "B": 2000,
           "block_length": 5,
           "method": "circular_block_bootstrap_variance_ratio",
-          "point_estimate": 130
+          "point_estimate": 110
         },
         "newey_west": {
           "K_used": 4,
           "method": "newey_west_bartlett_capped_at_zero",
-          "point_estimate": 133,
-          "rho_sum_capped": 0.8694130878106595
+          "point_estimate": 111,
+          "rho_sum_capped": 0.7744144479609079
         },
         "phase_0_disposition": "diagnostic_only_no_validation_score_series_yet (spec_\u00a76_paradox_at_phase_0_see_review_B8)",
-        "point_estimate": 130
+        "point_estimate": 110
       },
       "n_oos_by_fold": {},
       "n_post2020_raw": 476,
-      "n_star": 365,
-      "n_star_strict_hac_phase3plus": 130,
-      "n_targetable_raw": 476,
+      "n_star": 285,
+      "n_star_strict_hac_phase3plus": 110,
+      "n_targetable_raw": 891,
       "observed_positive_rate": null,
       "price_target_forbidden_uses": [
         "executable_futures_replay",
@@ -216,47 +216,47 @@
         "MCL_execution_replay"
       ],
       "price_target_kind": "fred_wti_spot_proxy",
-      "sample_std": 0.042525827259368626
+      "sample_std": 0.04434237448405997
     },
     "wti_3d_return_sign": {
-      "baseline_rate": 0.5561643835616439,
+      "baseline_rate": 0.5508771929824562,
       "horizon_days": 3,
       "metric": "return_sign",
-      "minimum_detectable_effect_size_against_naive_50pct_baseline": 0.07308426790846068,
-      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": 0.07225728468016357,
-      "n_after_purge_embargo": 365,
-      "n_after_quality_filter": 476,
+      "minimum_detectable_effect_size_against_naive_50pct_baseline": 0.08263302688435326,
+      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": 0.08178115313049861,
+      "n_after_purge_embargo": 285,
+      "n_after_quality_filter": 891,
       "n_by_cost_bucket": {
         "executable_paper": 0,
-        "free_proxy_no_friction": 365,
-        "free_proxy_with_roll_friction": 365,
+        "free_proxy_no_friction": 285,
+        "free_proxy_with_roll_friction": 285,
         "real_capital": 0
       },
       "n_by_regime": {
-        "unknown": 365
+        "unknown": 285
       },
       "n_hac_or_block_adjusted": {
         "block_bootstrap": {
           "B": 2000,
           "block_length": 5,
           "method": "circular_block_bootstrap_variance_ratio",
-          "point_estimate": 257
+          "point_estimate": 266
         },
         "newey_west": {
           "K_used": 4,
           "method": "newey_west_bartlett_capped_at_zero",
-          "point_estimate": 268,
-          "rho_sum_capped": 0.17844964438248756
+          "point_estimate": 265,
+          "rho_sum_capped": 0.037108157485976595
         },
         "phase_0_disposition": "diagnostic_only_no_validation_score_series_yet (spec_\u00a76_paradox_at_phase_0_see_review_B8)",
-        "point_estimate": 257
+        "point_estimate": 265
       },
       "n_oos_by_fold": {},
       "n_post2020_raw": 476,
-      "n_star": 365,
-      "n_star_strict_hac_phase3plus": 257,
-      "n_targetable_raw": 476,
-      "observed_positive_rate": 0.5561643835616439,
+      "n_star": 285,
+      "n_star_strict_hac_phase3plus": 265,
+      "n_targetable_raw": 891,
+      "observed_positive_rate": 0.5508771929824562,
       "price_target_forbidden_uses": [
         "executable_futures_replay",
         "CL_front_month_backtest",
@@ -268,6 +268,6 @@
   },
   "vintage_quality_distribution": {
     "release_lag_safe_revision_unknown": 48,
-    "true_first_release": 4026
+    "true_first_release": 9006
   }
 }

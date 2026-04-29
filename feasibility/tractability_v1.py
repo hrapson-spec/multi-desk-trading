@@ -185,8 +185,7 @@ def load_residuals_csv(path: Path) -> pd.Series:
     df = pd.read_csv(path)
     if not {"decision_ts", "residual"} <= set(df.columns):
         raise ValueError(
-            f"residuals CSV {path} must have columns decision_ts, residual; "
-            f"got {list(df.columns)}"
+            f"residuals CSV {path} must have columns decision_ts, residual; got {list(df.columns)}"
         )
     ts = pd.to_datetime(df["decision_ts"], utc=True)
     ser = pd.Series(
@@ -198,14 +197,11 @@ def load_residuals_csv(path: Path) -> pd.Series:
     dup_mask = ser.index.duplicated(keep=False)
     if dup_mask.any():
         dup_ser = ser[dup_mask]
-        groups_inconsistent = (
-            dup_ser.groupby(level=0).std(ddof=0).fillna(0.0) > 1e-9
-        )
+        groups_inconsistent = dup_ser.groupby(level=0).std(ddof=0).fillna(0.0) > 1e-9
         if groups_inconsistent.any():
             bad = groups_inconsistent[groups_inconsistent].index.tolist()
             raise ValueError(
-                f"residuals CSV has duplicate timestamps with inconsistent values "
-                f"at: {bad[:5]}"
+                f"residuals CSV has duplicate timestamps with inconsistent values at: {bad[:5]}"
             )
         ser = ser[~ser.index.duplicated(keep="first")]
     return ser
@@ -475,25 +471,18 @@ def load_family_decision_events(
     conn = duckdb.connect(str(db_path), read_only=True)
     try:
         manifest_cols = {
-            str(row[1])
-            for row in conn.execute("PRAGMA table_info('pit_manifest')").fetchall()
+            str(row[1]) for row in conn.execute("PRAGMA table_info('pit_manifest')").fetchall()
         }
-        ts_col = (
-            "usable_after_ts"
-            if "usable_after_ts" in manifest_cols
-            else "release_ts"
-        )
+        ts_col = "usable_after_ts" if "usable_after_ts" in manifest_cols else "release_ts"
 
-        source_clause = " OR ".join(
-            "source = ?" for _ in family.sources
-        )
+        source_clause = " OR ".join("source = ?" for _ in family.sources)
         params: list[str] = list(family.sources)
 
         dataset_clause = ""
         if family.datasets and "dataset" in manifest_cols:
-            dataset_clause = " AND (" + " OR ".join(
-                "lower(dataset) = ?" for _ in family.datasets
-            ) + ")"
+            dataset_clause = (
+                " AND (" + " OR ".join("lower(dataset) = ?" for _ in family.datasets) + ")"
+            )
             params.extend([d.lower() for d in family.datasets])
 
         vintage_select = "vintage_quality" if "vintage_quality" in manifest_cols else "NULL"
@@ -561,8 +550,7 @@ def load_target_prices_from_pit(
         conn.close()
     if not rows:
         raise ValueError(
-            f"No PIT vintages for ({spec.source}, {spec.dataset}, {spec.series})"
-            f" under {pit_root}"
+            f"No PIT vintages for ({spec.source}, {spec.dataset}, {spec.series}) under {pit_root}"
         )
     frames = []
     for parquet_path, release_ts, revision_ts in rows:
@@ -748,6 +736,23 @@ def median_event_spacing_days(decision_ts: Sequence[pd.Timestamp]) -> float:
     return float(np.median([g for g in gaps if g > 0])) or 7.0
 
 
+def _select_kept_observations(
+    observations: list[TargetObservation],
+    kept_ts: Sequence[pd.Timestamp],
+) -> list[TargetObservation]:
+    """Return one observation per retained target-anchor timestamp.
+
+    Multiple event rows can map to the same target price timestamp, especially
+    when weekend/holiday releases anchor to the same next WTI observation. The
+    thinning step works on timestamps, so the selected observation stream must
+    preserve that one-per-anchor contract instead of re-expanding duplicates.
+    """
+    first_by_ts: dict[pd.Timestamp, TargetObservation] = {}
+    for obs in observations:
+        first_by_ts.setdefault(obs.decision_ts, obs)
+    return [first_by_ts[ts] for ts in kept_ts if ts in first_by_ts]
+
+
 def compute_target_result(
     target: TargetDef,
     family_events: list[FamilyDecisionEvents],
@@ -761,9 +766,7 @@ def compute_target_result(
         family_events, prices, horizon_days=target.horizon_days
     )
     n_targetable_raw = len(raw_observations)
-    n_post2020_raw = sum(
-        1 for o in raw_observations if o.decision_ts >= POST_2020_START
-    )
+    n_post2020_raw = sum(1 for o in raw_observations if o.decision_ts >= POST_2020_START)
 
     quality_filtered = apply_quality_filter(raw_observations, family_events)
     n_after_quality_filter = len(quality_filtered)
@@ -774,8 +777,7 @@ def compute_target_result(
         purge_days=purge_days,
         embargo_days=embargo_days,
     )
-    kept_set = set(kept_ts)
-    kept_obs = [o for o in post2020 if o.decision_ts in kept_set]
+    kept_obs = _select_kept_observations(post2020, kept_ts)
     n_after_purge_embargo = len(kept_obs)
 
     residual_mode_active = residuals is not None
@@ -787,9 +789,7 @@ def compute_target_result(
         kept_obs_res = [o for o in kept_obs if o.decision_ts in residual_index_set]
         kept_obs_res.sort(key=lambda o: o.decision_ts)
         # Build values from residuals ordered by decision_ts
-        values = np.array(
-            [float(residuals.loc[o.decision_ts]) for o in kept_obs_res]
-        )
+        values = np.array([float(residuals.loc[o.decision_ts]) for o in kept_obs_res])
         positive_rate = None
         baseline_rate = None
         sample_std = float(np.std(values, ddof=1)) if values.size > 1 else None
@@ -824,13 +824,9 @@ def compute_target_result(
         event_spacing_days=spacing,
     )
 
-    spec_block_lower = int(
-        math.ceil((target.horizon_days + embargo_days) / max(spacing, 1.0))
-    )
+    spec_block_lower = int(math.ceil((target.horizon_days + embargo_days) / max(spacing, 1.0)))
     block_len = max(spec_block_lower, 5)
-    bootstrap = compute_block_bootstrap_effective_n(
-        values, block_length=block_len, B=2000, seed=42
-    )
+    bootstrap = compute_block_bootstrap_effective_n(values, block_length=block_len, B=2000, seed=42)
 
     if residual_mode_active:
         # Phase 3: n_star incorporates HAC and bootstrap (CRITICAL: n_star itself,
@@ -984,11 +980,7 @@ def run_tractability_v1(
             # calendar that adds zero events in the current window may add
             # events as the post-2020 window grows. Per spec wording "reject
             # the addition if N strictly decreases".
-            negative_targets = {
-                tname: info
-                for tname, info in contrib.items()
-                if info["delta"] < 0
-            }
+            negative_targets = {tname: info for tname, info in contrib.items() if info["delta"] < 0}
             if negative_targets:
                 if candidate.name in _force_include:
                     if not non_additive_justification:
@@ -1002,8 +994,7 @@ def run_tractability_v1(
                             "family": candidate.name,
                             "justification": non_additive_justification,
                             "delta_per_target": {
-                                tname: info["delta"]
-                                for tname, info in negative_targets.items()
+                                tname: info["delta"] for tname, info in negative_targets.items()
                             },
                         }
                     )
@@ -1049,9 +1040,7 @@ def run_tractability_v1(
             )
         )
 
-    n_star_overall = (
-        min(tr.n_star for tr in target_results) if target_results else 0
-    )
+    n_star_overall = min(tr.n_star for tr in target_results) if target_results else 0
 
     if n_star_overall < 100:
         rule = "stop"
@@ -1187,9 +1176,7 @@ def _utc_now() -> str:
 
 
 def _default_targets(horizon_days: int = 5) -> list[TargetDef]:
-    wti_path = next(
-        (p for p in DEFAULT_WTI_PATHS if p.exists()), DEFAULT_WTI_PATHS[0]
-    )
+    wti_path = next((p for p in DEFAULT_WTI_PATHS if p.exists()), DEFAULT_WTI_PATHS[0])
     forbidden = (
         "executable_futures_replay",
         "CL_front_month_backtest",
@@ -1225,10 +1212,7 @@ def _resolve_families(names: list[str]) -> list[EventFamily]:
     resolved: list[EventFamily] = []
     for n in names:
         if n not in DEFAULT_FAMILY_REGISTRY:
-            raise ValueError(
-                f"unknown family {n!r}; known: "
-                f"{sorted(DEFAULT_FAMILY_REGISTRY)}"
-            )
+            raise ValueError(f"unknown family {n!r}; known: {sorted(DEFAULT_FAMILY_REGISTRY)}")
         resolved.append(DEFAULT_FAMILY_REGISTRY[n])
     return resolved
 
@@ -1321,9 +1305,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    families = _resolve_families(
-        [s.strip() for s in args.families.split(",") if s.strip()]
-    )
+    families = _resolve_families([s.strip() for s in args.families.split(",") if s.strip()])
     force_include = (
         [s.strip() for s in args.force_include.split(",") if s.strip()]
         if args.force_include

@@ -1,11 +1,11 @@
 {
-  "created_at_utc": "2026-04-29T10:09:05.271191Z",
+  "created_at_utc": "2026-04-29T13:34:32.601560Z",
   "decision": {
     "action": "remove_foundation_models_from_harness",
-    "min_effective_n": 207,
+    "min_effective_n": 167,
     "rule": "continue_small_model_only"
   },
-  "git_commit": "315ecbf6c30ee8d4a3e7c02690b7734811b57d88",
+  "git_commit": "8040950b4e696e13d31b1acf54d8ca9b1206fcf9",
   "input_status": {
     "families": {
       "fomc": {
@@ -30,10 +30,10 @@
         }
       },
       "wpsr": {
-        "distinct_decision_ts": 327,
-        "manifest_rows_matched": 3924,
+        "distinct_decision_ts": 742,
+        "manifest_rows_matched": 8904,
         "vintage_quality_distribution": {
-          "true_first_release": 3924
+          "true_first_release": 8904
         }
       }
     },
@@ -97,12 +97,12 @@
         "manifest_rows_matched": 76
       },
       "wpsr": {
-        "distinct_decision_ts": 327,
-        "manifest_rows_matched": 3924
+        "distinct_decision_ts": 742,
+        "manifest_rows_matched": 8904
       }
     },
-    "n_decision_timestamps": 553,
-    "n_manifest_rows": 4150
+    "n_decision_timestamps": 968,
+    "n_manifest_rows": 9130
   },
   "parameters": {
     "admissible_vintage_qualities": [
@@ -136,41 +136,41 @@
       "metric": "mae_conditional",
       "minimum_detectable_effect_size_against_naive_50pct_baseline": null,
       "minimum_detectable_effect_size_for_5pct_significance_80pct_power": {
-        "raw_effect": 0.0022505487345485797,
-        "standardized_effect": 0.19472363339526252
+        "raw_effect": 0.002435523711145316,
+        "standardized_effect": 0.2167931729700032
       },
-      "n_after_purge_embargo": 207,
-      "n_after_quality_filter": 551,
+      "n_after_purge_embargo": 167,
+      "n_after_quality_filter": 966,
       "n_by_cost_bucket": {
         "executable_paper": 0,
-        "free_proxy_no_friction": 207,
-        "free_proxy_with_roll_friction": 207,
+        "free_proxy_no_friction": 167,
+        "free_proxy_with_roll_friction": 167,
         "real_capital": 0
       },
       "n_by_regime": {
-        "unknown": 207
+        "unknown": 167
       },
       "n_hac_or_block_adjusted": {
         "block_bootstrap": {
           "B": 2000,
           "block_length": 5,
           "method": "circular_block_bootstrap_variance_ratio",
-          "point_estimate": 134
+          "point_estimate": 141
         },
         "newey_west": {
           "K_used": 4,
           "method": "newey_west_bartlett_capped_at_zero",
-          "point_estimate": 128,
-          "rho_sum_capped": 0.3055929875296013
+          "point_estimate": 135,
+          "rho_sum_capped": 0.11490738356325912
         },
         "phase_0_disposition": "diagnostic_only_no_validation_score_series_yet (spec_\u00a76_paradox_at_phase_0_see_review_B8)",
-        "point_estimate": 128
+        "point_estimate": 135
       },
       "n_oos_by_fold": {},
       "n_post2020_raw": 551,
-      "n_star": 207,
-      "n_star_strict_hac_phase3plus": 128,
-      "n_targetable_raw": 551,
+      "n_star": 167,
+      "n_star_strict_hac_phase3plus": 135,
+      "n_targetable_raw": 966,
       "observed_positive_rate": null,
       "price_target_forbidden_uses": [
         "executable_futures_replay",
@@ -178,7 +178,7 @@
         "MCL_execution_replay"
       ],
       "price_target_kind": "fred_wti_spot_proxy",
-      "sample_std": 0.011557655818697011
+      "sample_std": 0.011234319225920964
     },
     "wti_5d_return_magnitude": {
       "baseline_rate": null,
@@ -186,41 +186,41 @@
       "metric": "return_magnitude",
       "minimum_detectable_effect_size_against_naive_50pct_baseline": null,
       "minimum_detectable_effect_size_for_5pct_significance_80pct_power": {
-        "raw_effect": 0.021580014049501613,
-        "standardized_effect": 0.19472363339526252
+        "raw_effect": 0.022119489326075426,
+        "standardized_effect": 0.2167931729700032
       },
-      "n_after_purge_embargo": 207,
-      "n_after_quality_filter": 551,
+      "n_after_purge_embargo": 167,
+      "n_after_quality_filter": 966,
       "n_by_cost_bucket": {
         "executable_paper": 0,
-        "free_proxy_no_friction": 207,
-        "free_proxy_with_roll_friction": 207,
+        "free_proxy_no_friction": 167,
+        "free_proxy_with_roll_friction": 167,
         "real_capital": 0
       },
       "n_by_regime": {
-        "unknown": 207
+        "unknown": 167
       },
       "n_hac_or_block_adjusted": {
         "block_bootstrap": {
           "B": 2000,
           "block_length": 5,
           "method": "circular_block_bootstrap_variance_ratio",
-          "point_estimate": 60
+          "point_estimate": 54
         },
         "newey_west": {
           "K_used": 4,
           "method": "newey_west_bartlett_capped_at_zero",
-          "point_estimate": 61,
-          "rho_sum_capped": 1.1886012050708514
+          "point_estimate": 55,
+          "rho_sum_capped": 1.0012129580206648
         },
         "phase_0_disposition": "diagnostic_only_no_validation_score_series_yet (spec_\u00a76_paradox_at_phase_0_see_review_B8)",
-        "point_estimate": 60
+        "point_estimate": 54
       },
       "n_oos_by_fold": {},
       "n_post2020_raw": 551,
-      "n_star": 207,
-      "n_star_strict_hac_phase3plus": 60,
-      "n_targetable_raw": 551,
+      "n_star": 167,
+      "n_star_strict_hac_phase3plus": 54,
+      "n_targetable_raw": 966,
       "observed_positive_rate": null,
       "price_target_forbidden_uses": [
         "executable_futures_replay",
@@ -228,47 +228,47 @@
         "MCL_execution_replay"
       ],
       "price_target_kind": "fred_wti_spot_proxy",
-      "sample_std": 0.11082380537598698
+      "sample_std": 0.10203037772382256
     },
     "wti_5d_return_sign": {
-      "baseline_rate": 0.5700483091787439,
+      "baseline_rate": 0.562874251497006,
       "horizon_days": 5,
       "metric": "return_sign",
-      "minimum_detectable_effect_size_against_naive_50pct_baseline": 0.09680835725965797,
-      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": 0.09504960197504486,
-      "n_after_purge_embargo": 207,
-      "n_after_quality_filter": 551,
+      "minimum_detectable_effect_size_against_naive_50pct_baseline": 0.10763315234701087,
+      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": 0.10588381055903351,
+      "n_after_purge_embargo": 167,
+      "n_after_quality_filter": 966,
       "n_by_cost_bucket": {
         "executable_paper": 0,
-        "free_proxy_no_friction": 207,
-        "free_proxy_with_roll_friction": 207,
+        "free_proxy_no_friction": 167,
+        "free_proxy_with_roll_friction": 167,
         "real_capital": 0
       },
       "n_by_regime": {
-        "unknown": 207
+        "unknown": 167
       },
       "n_hac_or_block_adjusted": {
         "block_bootstrap": {
           "B": 2000,
           "block_length": 5,
           "method": "circular_block_bootstrap_variance_ratio",
-          "point_estimate": 178
+          "point_estimate": 167
         },
         "newey_west": {
           "K_used": 4,
           "method": "newey_west_bartlett_capped_at_zero",
-          "point_estimate": 164,
-          "rho_sum_capped": 0.12972058467904024
+          "point_estimate": 156,
+          "rho_sum_capped": 0.03498483921843092
         },
         "phase_0_disposition": "diagnostic_only_no_validation_score_series_yet (spec_\u00a76_paradox_at_phase_0_see_review_B8)",
-        "point_estimate": 164
+        "point_estimate": 156
       },
       "n_oos_by_fold": {},
       "n_post2020_raw": 551,
-      "n_star": 207,
-      "n_star_strict_hac_phase3plus": 164,
-      "n_targetable_raw": 551,
-      "observed_positive_rate": 0.5700483091787439,
+      "n_star": 167,
+      "n_star_strict_hac_phase3plus": 156,
+      "n_targetable_raw": 966,
+      "observed_positive_rate": 0.562874251497006,
       "price_target_forbidden_uses": [
         "executable_futures_replay",
         "CL_front_month_backtest",
@@ -280,6 +280,6 @@
   },
   "vintage_quality_distribution": {
     "release_lag_safe_revision_unknown": 124,
-    "true_first_release": 4026
+    "true_first_release": 9006
   }
 }

@@ -32,14 +32,27 @@ are committed; working tree clean.
 | Configuration | N effective | Verdict |
 |---|---:|---|
 | 5d / WPSR alone (locked v0 baseline) | 163 | small_model_only |
-| 5d / WPSR + FOMC | 207 | small_model_only |
-| 5d / WPSR + FOMC + OPEC + PSM + GPR | **240** | small_model_only |
-| **3d / WPSR + FOMC + OPEC** | **365** | **continue** |
-| **3d / 6 calendar families (incl. PSM, GPR)** | **401** | **continue** |
+| 5d / WPSR + FOMC | 163 | small_model_only |
+| 5d / WPSR + FOMC + OPEC + PSM + GPR | **180** | small_model_only |
+| **3d / WPSR + FOMC + OPEC** | **285** | **continue** |
+| **3d / 6 calendar families (incl. STEO, PSM, GPR)** | **310** | **continue** |
 
 5d horizon is structurally infeasible for Phase 3 (≥250). 3d horizon
-variant clears Phase 3 by 151 events for return_sign / signed return
-targets. Magnitude target HAC=133, intentionally NOT admitted (B8).
+variant clears Phase 3 by 60 events for return_sign / signed return
+targets. Magnitude target HAC remains intentionally NOT admitted (B8).
+
+**2026-04-29 correction**: a follow-up candidate audit found and fixed a
+duplicate target-anchor expansion in `compute_target_result`: greedy thinning
+returned one timestamp per target anchor, but the observation list was
+re-expanded when multiple family rows landed on the same WTI price timestamp.
+The corrected counts above replace the earlier inflated 3d values (365/401)
+and 5d multi-family value (240). The strategic conclusion is unchanged: 5d is
+below the Phase 3 floor, while 3d remains viable.
+
+**2026-04-29 candidate-audit extension**: all registered 3d follow-on
+candidates have now been audited in residual mode. None clear Phase 3.
+Consolidated matrix:
+`feasibility/reports/terminal_2026-04-29_candidate_audits_complete.md`.
 
 ## Code review findings (Phase D)
 
@@ -60,15 +73,16 @@ The cumulative diff (`git diff 315ecbf..HEAD`) was reviewed by the
   the current sample window but may contribute as the post-2020 window
   grows).
 - Tests updated:
-  - `test_reject_non_additive_raises_on_strictly_negative_delta_empirical`
-    replaces the old synthetic-delta=0 test with an empirical real-PIT
-    test (WPSR + FOMC base + STEO candidate; STEO produces delta=-9
-    for return_sign at 5d; guard fires).
-  - `test_force_include_admits_non_additive_with_justification_empirical`
-    similarly switches to real-PIT data.
-  - **NEW** `test_zero_delta_does_not_trigger_guard` (regression for M1):
-    a candidate with zero net contribution does NOT fire the guard;
-    no `forced_inclusions` entry is required.
+  - `test_compute_additive_n_contribution_steo_zero_delta_after_anchor_dedup`
+    documents the corrected empirical behavior: after target-anchor
+    deduplication, WPSR + FOMC + STEO is zero-delta at 5d, not negative.
+  - `test_reject_non_additive_raises_on_synthetic_negative_delta` and
+    `test_force_include_admits_synthetic_negative_with_justification` cover
+    the strict negative branch without depending on the old duplicate-anchor
+    artifact.
+  - `test_zero_delta_does_not_trigger_guard` (regression for M1): a candidate
+    with zero net contribution does NOT fire the guard; no
+    `forced_inclusions` entry is required.
 
 **M2 — `StooqMultiAssetIngester.fetch()` dropped `usable_after_ts` from `FetchResult`**
 
