@@ -17,7 +17,6 @@ import pandas as pd
 
 from feasibility.candidates.wti_lag_1d.classical import (
     WTILag1DLogisticModel,
-    strict_previous_trading_day_log_return,
 )
 from feasibility.scripts.audit_wti_lag_1d_phase3 import (
     EMBARGO_DAYS,
@@ -58,6 +57,11 @@ QUEUE_CSV = FORWARD_ROOT / "event_queue.csv"
 FORECASTS_JSONL = FORWARD_ROOT / "forecasts.jsonl"
 OUTCOMES_CSV = FORWARD_ROOT / "outcomes.csv"
 MONITOR_REPORT = FORWARD_ROOT / "monitor_report.md"
+FORECAST_CHAIN_JSONL = FORWARD_ROOT / "forecast_chain.jsonl"
+FORWARD_BASELINE_REPORT = FORWARD_ROOT / "forward_baseline_report.md"
+FORECAST_CHAIN_SCHEMA_VERSION = "forecast_chain.v1"
+MAX_SCORING_LAG = timedelta(hours=6)
+MAX_FEATURE_PRICE_AGE_DAYS = 4
 
 
 @dataclass(frozen=True)
@@ -73,6 +77,10 @@ class LockIntegrityError(RuntimeError):
     """Raised when a forward scorer sees drift from the frozen lock files."""
 
 
+class ForecastLedgerError(RuntimeError):
+    """Raised when the append-only forecast ledger chain is invalid."""
+
+
 def _utc_ts(value: datetime | pd.Timestamp) -> pd.Timestamp:
     ts = pd.Timestamp(value)
     return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
@@ -81,6 +89,14 @@ def _utc_ts(value: datetime | pd.Timestamp) -> pd.Timestamp:
 def _event_id(family: str, event_type: str, decision_ts: pd.Timestamp) -> str:
     raw = f"{family}|{event_type}|{decision_ts.isoformat()}".encode()
     return hashlib.sha1(raw).hexdigest()[:16]
+
+
+def _canonical_json(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _queue_event(
@@ -327,8 +343,174 @@ def _existing_forecast_ids() -> set[str]:
     return ids
 
 
+def _forecast_lines() -> list[str]:
+    if not FORECASTS_JSONL.exists():
+        return []
+    return [line for line in FORECASTS_JSONL.read_text().splitlines() if line.strip()]
+
+
+def _chain_lines() -> list[str]:
+    if not FORECAST_CHAIN_JSONL.exists():
+        return []
+    return [line for line in FORECAST_CHAIN_JSONL.read_text().splitlines() if line.strip()]
+
+
+def _chain_entry(
+    *,
+    sequence: int,
+    forecast: dict[str, Any],
+    forecast_line: str,
+    previous_chain_hash: str,
+) -> dict[str, Any]:
+    payload = {
+        "schema_version": FORECAST_CHAIN_SCHEMA_VERSION,
+        "sequence": sequence,
+        "event_id": forecast["event_id"],
+        "lock_id": forecast["lock_id"],
+        "forecast_sha256": _sha256_text(forecast_line),
+        "previous_chain_hash": previous_chain_hash,
+    }
+    payload["chain_hash"] = _sha256_text(_canonical_json(payload))
+    return payload
+
+
+def _build_forecast_chain_entries(forecast_lines: list[str]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    previous = "GENESIS"
+    for sequence, line in enumerate(forecast_lines, start=1):
+        forecast = json.loads(line)
+        entry = _chain_entry(
+            sequence=sequence,
+            forecast=forecast,
+            forecast_line=line,
+            previous_chain_hash=previous,
+        )
+        entries.append(entry)
+        previous = str(entry["chain_hash"])
+    return entries
+
+
+def _write_forecast_chain(entries: list[dict[str, Any]]) -> None:
+    FORECAST_CHAIN_JSONL.parent.mkdir(parents=True, exist_ok=True)
+    text = "".join(_canonical_json(entry) + "\n" for entry in entries)
+    FORECAST_CHAIN_JSONL.write_text(text)
+
+
+def verify_forecast_chain(*, bootstrap_if_missing: bool = False) -> dict[str, Any]:
+    """Verify forecasts.jsonl is protected by an append-only hash chain."""
+    forecast_lines = _forecast_lines()
+    chain_lines = _chain_lines()
+    if forecast_lines and not chain_lines and bootstrap_if_missing:
+        _write_forecast_chain(_build_forecast_chain_entries(forecast_lines))
+        chain_lines = _chain_lines()
+    if not forecast_lines:
+        if chain_lines:
+            raise ForecastLedgerError("forecast chain exists but forecasts.jsonl is empty")
+        return {"status": "ok", "forecast_count": 0, "last_chain_hash": "GENESIS"}
+    if len(forecast_lines) != len(chain_lines):
+        raise ForecastLedgerError(
+            f"forecast ledger length mismatch: forecasts={len(forecast_lines)}, "
+            f"chain={len(chain_lines)}"
+        )
+
+    previous = "GENESIS"
+    event_ids: set[str] = set()
+    last_hash = previous
+    for sequence, (forecast_line, chain_line) in enumerate(
+        zip(forecast_lines, chain_lines, strict=True),
+        start=1,
+    ):
+        forecast = json.loads(forecast_line)
+        entry = json.loads(chain_line)
+        expected_entry = _chain_entry(
+            sequence=sequence,
+            forecast=forecast,
+            forecast_line=forecast_line,
+            previous_chain_hash=previous,
+        )
+        if entry != expected_entry:
+            raise ForecastLedgerError(f"forecast chain mismatch at sequence {sequence}")
+        event_id = str(forecast["event_id"])
+        if event_id in event_ids:
+            raise ForecastLedgerError(f"duplicate forecast event_id in ledger: {event_id}")
+        event_ids.add(event_id)
+        previous = str(entry["chain_hash"])
+        last_hash = previous
+
+    return {
+        "status": "ok",
+        "forecast_count": len(forecast_lines),
+        "last_chain_hash": last_hash,
+    }
+
+
+def _append_forecasts(forecasts: list[dict[str, Any]]) -> None:
+    if not forecasts:
+        if not FORECASTS_JSONL.exists():
+            FORECASTS_JSONL.write_text("")
+        verify_forecast_chain(bootstrap_if_missing=True)
+        return
+
+    chain_status = verify_forecast_chain(bootstrap_if_missing=True)
+    previous = str(chain_status["last_chain_hash"])
+    start_sequence = int(chain_status["forecast_count"]) + 1
+    forecast_lines = [_canonical_json(forecast) for forecast in forecasts]
+    chain_entries: list[dict[str, Any]] = []
+    for offset, (forecast, forecast_line) in enumerate(zip(forecasts, forecast_lines, strict=True)):
+        entry = _chain_entry(
+            sequence=start_sequence + offset,
+            forecast=forecast,
+            forecast_line=forecast_line,
+            previous_chain_hash=previous,
+        )
+        chain_entries.append(entry)
+        previous = str(entry["chain_hash"])
+
+    FORWARD_ROOT.mkdir(parents=True, exist_ok=True)
+    with FORECASTS_JSONL.open("a") as fh:
+        for line in forecast_lines:
+            fh.write(line + "\n")
+    with FORECAST_CHAIN_JSONL.open("a") as fh:
+        for entry in chain_entries:
+            fh.write(_canonical_json(entry) + "\n")
+    verify_forecast_chain()
+
+
+def _feature_with_metadata(
+    decision_ts: pd.Timestamp,
+    prices: pd.Series,
+) -> dict[str, Any] | None:
+    """Return strict previous-trading-day feature and its freshness metadata."""
+    if prices.empty:
+        return None
+    idx = prices.index
+    ts = _utc_ts(decision_ts)
+    day_start = pd.Timestamp(ts.date(), tz="UTC")
+    pos = int(idx.searchsorted(day_start, side="left")) - 1
+    prior_pos = pos - 1
+    if pos < 0 or prior_pos < 0:
+        return None
+    p_t = float(prices.iloc[pos])
+    p_lag = float(prices.iloc[prior_pos])
+    if p_t <= 0 or p_lag <= 0:
+        return None
+    anchor_ts = pd.Timestamp(idx[pos]).tz_convert("UTC")
+    prior_anchor_ts = pd.Timestamp(idx[prior_pos]).tz_convert("UTC")
+    age_days = int((day_start.date() - anchor_ts.date()).days)
+    return {
+        "feature_value": float(np.log(p_t / p_lag)),
+        "feature_price_anchor_ts": anchor_ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "feature_lag_price_anchor_ts": prior_anchor_ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "feature_price_age_days": age_days,
+        "feature_quality_status": (
+            "ok" if age_days <= MAX_FEATURE_PRICE_AGE_DAYS else "stale_feature_price"
+        ),
+    }
+
+
 def score_due_events(as_of_ts: pd.Timestamp | None = None) -> list[dict[str, Any]]:
     lock_integrity = verify_lock_integrity()
+    verify_forecast_chain(bootstrap_if_missing=True)
     as_of = _utc_ts(as_of_ts or datetime.now(UTC))
     if not QUEUE_CSV.exists():
         write_queue()
@@ -349,9 +531,12 @@ def score_due_events(as_of_ts: pd.Timestamp | None = None) -> list[dict[str, Any
         decision_ts = _utc_ts(pd.Timestamp(row["decision_ts"]))
         if event_id in existing_ids or decision_ts > as_of:
             continue
-        feature = strict_previous_trading_day_log_return(decision_ts, prices, lag_days=1)
-        if feature is None:
+        if as_of > decision_ts + MAX_SCORING_LAG:
             continue
+        feature_meta = _feature_with_metadata(decision_ts, prices)
+        if feature_meta is None or feature_meta["feature_quality_status"] != "ok":
+            continue
+        feature = float(feature_meta["feature_value"])
         proba = float(model.predict_proba((np.array([[feature]]) - mean) / std)[0])
         forecasts.append(
             {
@@ -362,19 +547,16 @@ def score_due_events(as_of_ts: pd.Timestamp | None = None) -> list[dict[str, Any
                 "family": row["family"],
                 "event_type": row["event_type"],
                 "feature_wti_prev_trading_day_1d_log_return": feature,
+                "feature_price_anchor_ts": feature_meta["feature_price_anchor_ts"],
+                "feature_lag_price_anchor_ts": feature_meta["feature_lag_price_anchor_ts"],
+                "feature_price_age_days": feature_meta["feature_price_age_days"],
                 "probability_positive": proba,
                 "predicted_sign": "positive" if proba > 0.5 else "negative",
                 "model_train_rows": train_rows,
             }
         )
 
-    if forecasts:
-        FORWARD_ROOT.mkdir(parents=True, exist_ok=True)
-        with FORECASTS_JSONL.open("a") as fh:
-            for forecast in forecasts:
-                fh.write(json.dumps(forecast, sort_keys=True) + "\n")
-    elif not FORECASTS_JSONL.exists():
-        FORECASTS_JSONL.write_text("")
+    _append_forecasts(forecasts)
     return forecasts
 
 
@@ -384,64 +566,164 @@ def _load_forecasts() -> list[dict[str, Any]]:
     return [json.loads(line) for line in FORECASTS_JSONL.read_text().splitlines() if line]
 
 
-def _target_outcome(decision_ts: pd.Timestamp, prices: pd.Series) -> tuple[int, float] | None:
+def _target_outcome(decision_ts: pd.Timestamp, prices: pd.Series) -> dict[str, Any]:
     index = prices.index
     pos = int(index.searchsorted(decision_ts, side="left"))
     if pos >= len(index):
-        return None
+        return {"status": "waiting_for_target_price"}
     end_pos = pos + HORIZON_DAYS
     if end_pos >= len(index):
-        return None
+        return {
+            "status": "waiting_for_target_price",
+            "target_start_ts": pd.Timestamp(index[pos]).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
     ret = float(np.log(float(prices.iloc[end_pos]) / float(prices.iloc[pos])))
-    return (1 if ret > 0 else -1, ret)
+    return {
+        "status": "resolved",
+        "true_sign": "positive" if ret > 0 else "negative",
+        "wti_1d_log_return": ret,
+        "target_start_ts": pd.Timestamp(index[pos]).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "target_end_ts": pd.Timestamp(index[end_pos]).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "target_start_price": float(prices.iloc[pos]),
+        "target_end_price": float(prices.iloc[end_pos]),
+    }
 
 
 def resolve_outcomes() -> list[dict[str, Any]]:
-    prices, _ = load_target_prices(_target_def(), DEFAULT_PIT_ROOT)
-    existing: set[str] = set()
-    if OUTCOMES_CSV.exists():
+    prices, price_status = load_target_prices(_target_def(), DEFAULT_PIT_ROOT)
+    existing_by_id: dict[str, dict[str, str]] = {}
+    if OUTCOMES_CSV.exists() and OUTCOMES_CSV.stat().st_size > 0:
         with OUTCOMES_CSV.open() as fh:
             reader = csv.DictReader(fh)
-            existing = {row["event_id"] for row in reader}
+            existing_by_id = {row["event_id"]: row for row in reader}
 
     rows: list[dict[str, Any]] = []
     for forecast in _load_forecasts():
         event_id = forecast["event_id"]
-        if event_id in existing:
+        existing = existing_by_id.get(event_id)
+        if existing is not None and existing.get("outcome_status") == "resolved":
+            rows.append(existing)
             continue
         outcome = _target_outcome(_utc_ts(pd.Timestamp(forecast["decision_ts"])), prices)
-        if outcome is None:
-            continue
-        true_sign, log_return = outcome
-        pred_sign = 1 if forecast["predicted_sign"] == "positive" else -1
+        feature_meta = _feature_with_metadata(
+            _utc_ts(pd.Timestamp(forecast["decision_ts"])),
+            prices,
+        ) or {
+            "feature_quality_status": "missing_feature_price",
+            "feature_price_anchor_ts": "",
+            "feature_lag_price_anchor_ts": "",
+            "feature_price_age_days": "",
+        }
+        pred_sign_text = str(forecast["predicted_sign"])
+        true_sign_text = str(outcome.get("true_sign", ""))
+        correct = int(pred_sign_text == true_sign_text) if outcome["status"] == "resolved" else ""
         rows.append(
             {
                 "event_id": event_id,
                 "decision_ts": forecast["decision_ts"],
                 "family": forecast["family"],
-                "predicted_sign": forecast["predicted_sign"],
-                "true_sign": "positive" if true_sign == 1 else "negative",
-                "correct": int(pred_sign == true_sign),
-                "wti_1d_log_return": log_return,
+                "predicted_sign": pred_sign_text,
+                "feature_quality_status": feature_meta["feature_quality_status"],
+                "feature_price_anchor_ts": feature_meta["feature_price_anchor_ts"],
+                "feature_lag_price_anchor_ts": feature_meta["feature_lag_price_anchor_ts"],
+                "feature_price_age_days": feature_meta["feature_price_age_days"],
+                "outcome_status": outcome["status"],
+                "true_sign": true_sign_text,
+                "correct": correct,
+                "wti_1d_log_return": outcome.get("wti_1d_log_return", ""),
+                "target_start_ts": outcome.get("target_start_ts", ""),
+                "target_end_ts": outcome.get("target_end_ts", ""),
+                "target_start_price": outcome.get("target_start_price", ""),
+                "target_end_price": outcome.get("target_end_price", ""),
+                "resolved_at_utc": (
+                    datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    if outcome["status"] == "resolved"
+                    else ""
+                ),
+                "price_source_metadata": _canonical_json(price_status),
             }
         )
 
-    write_header = not OUTCOMES_CSV.exists()
-    with OUTCOMES_CSV.open("a", newline="") as fh:
+    with OUTCOMES_CSV.open("w", newline="") as fh:
         fieldnames = [
             "event_id",
             "decision_ts",
             "family",
             "predicted_sign",
+            "feature_quality_status",
+            "feature_price_anchor_ts",
+            "feature_lag_price_anchor_ts",
+            "feature_price_age_days",
+            "outcome_status",
             "true_sign",
             "correct",
             "wti_1d_log_return",
+            "target_start_ts",
+            "target_end_ts",
+            "target_start_price",
+            "target_end_price",
+            "resolved_at_utc",
+            "price_source_metadata",
         ]
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
-        if write_header:
-            writer.writeheader()
+        writer.writeheader()
         writer.writerows(rows)
     return rows
+
+
+def _forward_baseline_metrics(outcomes: pd.DataFrame) -> dict[str, Any]:
+    if outcomes.empty or "outcome_status" not in outcomes.columns:
+        return {"resolved_n": 0}
+    resolved = outcomes[outcomes["outcome_status"] == "resolved"]
+    if "feature_quality_status" in resolved.columns:
+        resolved = resolved[resolved["feature_quality_status"] == "ok"]
+    if resolved.empty:
+        return {"resolved_n": 0}
+    correct = pd.to_numeric(resolved["correct"], errors="coerce")
+    true_sign = resolved["true_sign"].astype(str)
+    model_accuracy = float(correct.mean())
+    zero_accuracy = float((true_sign == "negative").mean())
+    positive_rate = float((true_sign == "positive").mean())
+    majority_accuracy = max(positive_rate, 1.0 - positive_rate)
+    return {
+        "resolved_n": int(len(resolved)),
+        "model_accuracy": model_accuracy,
+        "zero_return_baseline_accuracy": zero_accuracy,
+        "majority_baseline_accuracy": majority_accuracy,
+        "gain_vs_zero_pp": 100.0 * (model_accuracy - zero_accuracy),
+        "gain_vs_majority_pp": 100.0 * (model_accuracy - majority_accuracy),
+    }
+
+
+def write_forward_baseline_report() -> None:
+    outcomes = pd.read_csv(OUTCOMES_CSV) if OUTCOMES_CSV.exists() else pd.DataFrame()
+    metrics = _forward_baseline_metrics(outcomes)
+    resolved_n = metrics["resolved_n"]
+    lines = [
+        "# WTI Lag 1d Forward Baselines",
+        "",
+        f"**Updated**: {datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}  ",
+        "",
+        "| Metric | Value |",
+        "| --- | ---: |",
+        f"| resolved_events | {resolved_n} |",
+    ]
+    if resolved_n:
+        lines.extend(
+            [
+                f"| model_accuracy | {100.0 * metrics['model_accuracy']:.2f}% |",
+                "| zero_return_baseline_accuracy | "
+                f"{100.0 * metrics['zero_return_baseline_accuracy']:.2f}% |",
+                "| majority_baseline_accuracy | "
+                f"{100.0 * metrics['majority_baseline_accuracy']:.2f}% |",
+                f"| gain_vs_zero_return_baseline | {metrics['gain_vs_zero_pp']:.2f} pp |",
+                f"| gain_vs_majority_baseline | {metrics['gain_vs_majority_pp']:.2f} pp |",
+            ]
+        )
+    else:
+        lines.append("| status | waiting_for_resolved_forward_outcomes |")
+    lines.append("")
+    FORWARD_BASELINE_REPORT.write_text("\n".join(lines))
 
 
 def write_monitor_report() -> None:
@@ -453,11 +735,25 @@ def write_monitor_report() -> None:
     queue = pd.read_csv(QUEUE_CSV) if QUEUE_CSV.exists() else pd.DataFrame()
     forecasts = _load_forecasts()
     outcomes = pd.read_csv(OUTCOMES_CSV) if OUTCOMES_CSV.exists() else pd.DataFrame()
+    baseline_metrics = _forward_baseline_metrics(outcomes)
+    stale_feature_forecasts = 0
+    if not outcomes.empty and "feature_quality_status" in outcomes.columns:
+        stale_feature_forecasts = int((outcomes["feature_quality_status"] != "ok").sum())
     forecasted_ids = {forecast["event_id"] for forecast in forecasts}
     pending_queue = (
         queue[~queue["event_id"].astype(str).isin(forecasted_ids)] if not queue.empty else queue
     )
     next_events = pending_queue.head(10).to_dict("records") if not pending_queue.empty else []
+    now = pd.Timestamp(datetime.now(UTC))
+    missed_unscored = 0
+    if not pending_queue.empty:
+        missed_unscored = int(
+            (
+                pd.to_datetime(pending_queue["decision_ts"], utc=True)
+                + pd.Timedelta(MAX_SCORING_LAG)
+                < now
+            ).sum()
+        )
     metrics = lock["phase3_historical_metrics"]
     lines = [
         "# WTI Lag 1d Forward Monitor",
@@ -473,22 +769,43 @@ def write_monitor_report() -> None:
         "| --- | ---: |",
         f"| queued_events | {len(queue)} |",
         f"| forecasts_written | {len(forecasts)} |",
-        f"| outcomes_resolved | {len(outcomes)} |",
+        f"| feature_stale_or_missing_forecasts | {stale_feature_forecasts} |",
+        f"| outcomes_resolved | {baseline_metrics['resolved_n']} |",
+        f"| missed_unscored_events | {missed_unscored} |",
         "",
-        "## Historical Lock Metrics",
+        "## Forward Baselines",
         "",
         "| Metric | Value |",
         "| --- | ---: |",
-        f"| HAC effective N | {metrics['hac_effective_n']} |",
-        f"| block-bootstrap effective N | {metrics['block_bootstrap_effective_n']} |",
-        f"| gain_vs_zero_return_baseline | {metrics['gain_vs_zero_return_baseline_pp']:.2f} pp |",
-        f"| gain_vs_majority_baseline | {metrics['gain_vs_majority_baseline_pp']:.2f} pp |",
-        "",
-        "## Next Queue Events",
-        "",
-        "| decision_ts | family | event_type | source_method |",
-        "| --- | --- | --- | --- |",
+        f"| resolved_events | {baseline_metrics['resolved_n']} |",
     ]
+    if baseline_metrics["resolved_n"]:
+        lines.extend(
+            [
+                f"| model_accuracy | {100.0 * baseline_metrics['model_accuracy']:.2f}% |",
+                f"| gain_vs_zero_return_baseline | {baseline_metrics['gain_vs_zero_pp']:.2f} pp |",
+                f"| gain_vs_majority_baseline | {baseline_metrics['gain_vs_majority_pp']:.2f} pp |",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Historical Lock Metrics",
+            "",
+            "| Metric | Value |",
+            "| --- | ---: |",
+            f"| HAC effective N | {metrics['hac_effective_n']} |",
+            f"| block-bootstrap effective N | {metrics['block_bootstrap_effective_n']} |",
+            "| gain_vs_zero_return_baseline | "
+            f"{metrics['gain_vs_zero_return_baseline_pp']:.2f} pp |",
+            f"| gain_vs_majority_baseline | {metrics['gain_vs_majority_baseline_pp']:.2f} pp |",
+            "",
+            "## Next Queue Events",
+            "",
+            "| decision_ts | family | event_type | source_method |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
     for event in next_events:
         lines.append(
             "| {decision_ts} | {family} | {event_type} | {source_method} |".format(**event)
@@ -515,6 +832,7 @@ def run_all(days: int = 120, as_of_ts: pd.Timestamp | None = None) -> None:
     write_queue(days=days)
     score_due_events(as_of_ts=as_of_ts)
     resolve_outcomes()
+    write_forward_baseline_report()
     write_monitor_report()
 
 
@@ -525,6 +843,7 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("--days", type=int, default=120)
     sub.add_parser("score")
     sub.add_parser("resolve")
+    sub.add_parser("baselines")
     sub.add_parser("monitor")
     a = sub.add_parser("all")
     a.add_argument("--days", type=int, default=120)
@@ -537,6 +856,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"forecasts_written={len(score_due_events())}")
     elif args.cmd == "resolve":
         print(f"outcomes_resolved={len(resolve_outcomes())}")
+    elif args.cmd == "baselines":
+        write_forward_baseline_report()
+        print(f"baseline_report={FORWARD_BASELINE_REPORT}")
     elif args.cmd == "monitor":
         write_monitor_report()
         print(f"monitor_report={MONITOR_REPORT}")
@@ -545,7 +867,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"queue={QUEUE_CSV}")
         print(f"forecasts={FORECASTS_JSONL}")
         print(f"outcomes={OUTCOMES_CSV}")
+        print(f"chain={FORECAST_CHAIN_JSONL}")
         print(f"monitor={MONITOR_REPORT}")
+        print(f"baselines={FORWARD_BASELINE_REPORT}")
     return 0
 
 
