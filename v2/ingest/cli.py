@@ -38,6 +38,7 @@ SOURCE_KEYS = (
     "cboe_vix",
     "fomc_calendar",
     "eia_steo_calendar",
+    "eia_steo_value_archive",
     "opec_ministerial_calendar",
     "eia_psm_calendar",
     "gpr_calendar",
@@ -125,6 +126,17 @@ def _build_ingester(
         from v2.ingest.eia_steo_calendar import EIASTEOCalendarIngester
 
         return EIASTEOCalendarIngester(
+            writer=writer,
+            manifest=manifest,
+            since=date.fromisoformat(since) if since is not None else None,
+            until=date.fromisoformat(until) if until is not None else None,
+        )
+    if source_key == "eia_steo_value_archive":
+        from datetime import date
+
+        from v2.ingest.eia_steo_value_archive import EIASTEOValueArchiveIngester
+
+        return EIASTEOValueArchiveIngester(
             writer=writer,
             manifest=manifest,
             since=date.fromisoformat(since) if since is not None else None,
