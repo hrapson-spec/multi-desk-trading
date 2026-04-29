@@ -29,6 +29,7 @@ DEFAULT_FEATURE_DIR = Path("data/public/feature_sets")
 
 SOURCE_KEYS = (
     "eia",
+    "eia_wpsr_archive",
     "fred",
     "cftc_cot",
     "wti_prices",
@@ -38,7 +39,14 @@ SOURCE_KEYS = (
 )
 
 
-def _build_ingester(source_key: str, writer: PITWriter, manifest, *, since: str | None = None):
+def _build_ingester(
+    source_key: str,
+    writer: PITWriter,
+    manifest,
+    *,
+    since: str | None = None,
+    until: str | None = None,
+):
     """Wire a source key to its ingester with default arguments.
 
     Imports are lazy so that a missing optional API key (FRED/EIA) only
@@ -48,6 +56,17 @@ def _build_ingester(source_key: str, writer: PITWriter, manifest, *, since: str 
         from v2.ingest.eia_wpsr import EIAWPSRIngester
 
         return EIAWPSRIngester(writer=writer, manifest=manifest)
+    if source_key == "eia_wpsr_archive":
+        from datetime import date
+
+        from v2.ingest.eia_wpsr_archive import EIAWPSRArchiveIngester
+
+        return EIAWPSRArchiveIngester(
+            writer=writer,
+            manifest=manifest,
+            since=date.fromisoformat(since) if since is not None else None,
+            until=date.fromisoformat(until) if until is not None else None,
+        )
     if source_key == "fred":
         from v2.ingest.fred_alfred import FREDAlfredIngester
 
@@ -89,7 +108,13 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
     manifest = open_manifest(pit_root)
     writer = PITWriter(pit_root, manifest)
     try:
-        ingester = _build_ingester(args.source, writer, manifest, since=args.since)
+        ingester = _build_ingester(
+            args.source,
+            writer,
+            manifest,
+            since=args.since,
+            until=args.until,
+        )
         try:
             results = ingester.ingest()
         except MissingAPIKeyError as e:
@@ -149,8 +174,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "optional ISO date lower bound where supported; currently used "
-            "to bound CFTC annual backfill years"
+            "to bound CFTC annual backfill years and WPSR archive issues"
         ),
+    )
+    bf.add_argument(
+        "--until",
+        default=None,
+        help="optional ISO date upper bound where supported",
     )
     bf.set_defaults(func=_cmd_backfill)
 

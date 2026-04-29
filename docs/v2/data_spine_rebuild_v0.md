@@ -102,10 +102,10 @@ The rebuild must keep these tests green:
 
 ## Next Implementation Slice
 
-1. Enumerate post-2020 WPSR archive issue URLs.
-2. Verify CSV table availability across sampled 2020-2026 issues.
-3. Build an archive restoration ingester that writes one PIT vintage per
-   release/table/series with `vintage_quality=true_first_release`.
-4. Register `DCOILWTICO` as a `spot_proxy` for tractability only.
-5. Rerun tractability and write
+1. Use `v2.ingest.eia_wpsr_archive.EIAWPSRArchiveIngester` to populate
+   post-2020 WPSR first-release vintages from official archive CSV tables.
+2. Run a sampled coverage check across 2020-2026 issue pages and table CSV
+   links before a full backfill.
+3. Register `DCOILWTICO` as a `spot_proxy` for tractability only.
+4. Rerun tractability and write
    `feasibility/reports/terminal_YYYY-MM-DD_tractability_post_rebuild.md`.

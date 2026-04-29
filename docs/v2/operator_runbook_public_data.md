@@ -63,6 +63,7 @@ Run each source separately so manifest writes are atomic per source:
 ```bash
 python -m v2.ingest.cli backfill --source fred --since 2000-01-01
 python -m v2.ingest.cli backfill --source eia --since 2000-01-01
+python -m v2.ingest.cli backfill --source eia_wpsr_archive --since 2020-01-01 --until <today>
 python -m v2.ingest.cli backfill --source cftc_cot --since 2009-09-01
 python -m v2.ingest.cli backfill --source wti_prices
 python -m v2.ingest.cli backfill --source baker_hughes
@@ -112,6 +113,12 @@ The current API ingester writes `vintage_quality=latest_snapshot_not_pit`.
 Those rows are suitable for connectivity checks but are rejected by the
 feature-admissibility gate. First-release WPSR research data must come from
 the official WPSR archive restoration path.
+
+The archive restoration ingester is `--source eia_wpsr_archive`. It reads
+official issue pages under EIA's WPSR archive, uses the issue page's release
+date as authoritative, applies the 10:30 ET release time plus the 5-minute
+latency guard, and writes `source=eia`, `dataset=wpsr`,
+`vintage_quality=true_first_release`.
 
 ## 8. Cross-references
 
