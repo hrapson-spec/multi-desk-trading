@@ -5,7 +5,7 @@
   "latest_valid_date": "2026-04-27",
   "max_feature_age_days": 4,
   "output_path": "data/s4_0/free_source/raw/DCOILWTICO.csv",
-  "retrieved_at_utc": "2026-04-29T18:41:43Z",
+  "retrieved_at_utc": "2026-04-29T18:52:18Z",
   "rows": 10518,
   "source_url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DCOILWTICO",
   "status": "refreshed",
