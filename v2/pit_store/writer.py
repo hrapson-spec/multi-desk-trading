@@ -5,9 +5,11 @@ Each `write_vintage` call atomically:
     2. Computes SHA-256 over the on-disk Parquet bytes.
     3. Computes a schema_hash over the sorted dtype map.
     4. Inserts a manifest row.
-    5. If a first-release vintage for the same (source, series, release_ts)
-       already exists, the new write is treated as a revision, its
-       `revision_ts` is set, and the older row is marked superseded.
+    5. If a first-release vintage for the same
+       (source, dataset, series, release_ts, observation_start,
+       observation_end) already exists, the new write is treated as a
+       revision, its `revision_ts` is set, and the older row is marked
+       superseded.
 
 The canonical path is stable: re-ingesting an identical vintage byte-for-byte
 overwrites the same file and the checksum stays constant. Re-ingesting with
@@ -120,13 +122,18 @@ class PITWriter:
         #     current first-release if one exists).
         #
         #   - If caller did NOT provide revision_ts, the target slot is the
-        #     first-release (revision_ts IS NULL).
+        #     first-release (revision_ts IS NULL) for this observation period.
         #     If no first-release exists: first write; insert with revision_ts=NULL.
         #     If first-release exists with matching checksum: idempotent no-op.
         #     If first-release exists with different checksum: this is a
         #     revision; auto-assign revision_ts=ingest_ts and insert as revision.
         existing_first = self.manifest.find_first_release(
-            source, series, release_ts_utc, dataset=dataset
+            source,
+            series,
+            release_ts_utc,
+            dataset=dataset,
+            observation_start=observation_start,
+            observation_end=observation_end,
         )
 
         if revision_ts is None:
@@ -156,7 +163,13 @@ class PITWriter:
             revision_ts_utc = _to_utc(revision_ts)
             is_revision = True
             existing_slot = self._find_exact_slot(
-                source, dataset, series, release_ts_utc, revision_ts_utc
+                source,
+                dataset,
+                series,
+                release_ts_utc,
+                revision_ts_utc,
+                observation_start=observation_start,
+                observation_end=observation_end,
             )
             if existing_slot is not None:
                 if existing_slot.checksum == checksum:
@@ -238,10 +251,17 @@ class PITWriter:
         series: str | None,
         release_ts: datetime,
         revision_ts: datetime | None,
+        observation_start: date | None = None,
+        observation_end: date | None = None,
     ) -> ManifestRow | None:
         if revision_ts is None:
             return self.manifest.find_first_release(
-                source, series, release_ts, dataset=dataset
+                source,
+                series,
+                release_ts,
+                dataset=dataset,
+                observation_start=observation_start,
+                observation_end=observation_end,
             )
         rows = self.manifest.conn.execute(
             f"""
@@ -250,6 +270,8 @@ class PITWriter:
               AND ((? IS NULL AND dataset IS NULL) OR dataset = ?)
               AND ((? IS NULL AND series IS NULL) OR series = ?)
               AND release_ts = ?
+              AND (? IS NULL OR observation_start = ?)
+              AND (? IS NULL OR observation_end = ?)
               AND revision_ts = ?
             """,
             [
@@ -259,6 +281,10 @@ class PITWriter:
                 series,
                 series,
                 _naive_utc(release_ts),
+                observation_start,
+                observation_start,
+                observation_end,
+                observation_end,
                 _naive_utc(revision_ts),
             ],
         ).fetchone()

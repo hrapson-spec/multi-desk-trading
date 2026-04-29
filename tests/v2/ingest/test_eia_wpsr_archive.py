@@ -184,6 +184,43 @@ def test_archive_ingester_fetches_true_first_release_series(writer_and_manifest)
     assert by_series["WPULEUS3"].data["value"].iloc[0] == pytest.approx(93.5)
 
 
+def test_archive_ingester_skips_duplicate_issue_metadata(writer_and_manifest):
+    writer, manifest, _ = writer_and_manifest
+    duplicate_url = (
+        "https://www.eia.gov/petroleum/supply/weekly/archive/2024/"
+        "2024_06_21/wpsr_2024_06_21.php"
+    )
+    http = _http_client(
+        {
+            ISSUE_URL: ISSUE_HTML,
+            duplicate_url: ISSUE_HTML,
+            (
+                "https://www.eia.gov/petroleum/supply/weekly/archive/2024/"
+                "2024_06_20/csv/table4.csv"
+            ): TABLE4,
+        }
+    )
+    ingester = EIAWPSRArchiveIngester(
+        writer,
+        manifest,
+        issue_urls=[ISSUE_URL, duplicate_url],
+        series_ids=["WCESTUS1"],
+        http=http,
+    )
+
+    results = ingester.fetch()
+
+    assert len(results) == 1
+    assert results[0].series == "WCESTUS1"
+    assert ingester.last_run_failed_issues == [
+        (
+            duplicate_url,
+            "duplicate_issue_metadata_skipped:"
+            "release_date=2024-06-20,week_ending=2024-06-14",
+        )
+    ]
+
+
 def test_archive_ingest_writes_pit_vintage_with_latency_guard(writer_and_manifest):
     writer, manifest, pit_root = writer_and_manifest
     http = _http_client(

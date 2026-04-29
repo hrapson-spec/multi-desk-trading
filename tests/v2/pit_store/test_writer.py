@@ -131,6 +131,41 @@ def test_reingest_different_payload_is_revision(writer_and_manifest):
     assert revision.revision_ts is not None
 
 
+def test_same_release_ts_different_observation_period_is_not_revision(writer_and_manifest):
+    w, m = writer_and_manifest
+    release_ts = datetime(2026, 1, 14, 15, 30, tzinfo=UTC)
+    first = w.write_vintage(
+        source="eia",
+        dataset="wpsr",
+        series="WCESTUS1",
+        release_ts=release_ts,
+        data=pd.DataFrame({"value": [425_000.0]}),
+        provenance={"source": "eia.gov", "method": "archive_csv"},
+        observation_start=date(2026, 1, 3),
+        observation_end=date(2026, 1, 9),
+    )
+    second = w.write_vintage(
+        source="eia",
+        dataset="wpsr",
+        series="WCESTUS1",
+        release_ts=release_ts,
+        data=pd.DataFrame({"value": [430_000.0]}),
+        provenance={"source": "eia.gov", "method": "archive_csv"},
+        observation_start=date(2026, 1, 10),
+        observation_end=date(2026, 1, 16),
+    )
+
+    assert first.was_revision is False
+    assert second.was_revision is False
+    assert first.manifest_id != second.manifest_id
+    rows = m.list_all("eia", dataset="wpsr")
+    assert len(rows) == 2
+    assert {row.observation_end for row in rows} == {
+        date(2026, 1, 9),
+        date(2026, 1, 16),
+    }
+
+
 def test_reingest_with_explicit_revision_ts_does_not_collide(writer_and_manifest):
     w, m = writer_and_manifest
     release_ts = datetime(2026, 1, 14, 15, 30, tzinfo=UTC)

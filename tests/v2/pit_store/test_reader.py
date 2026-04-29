@@ -122,6 +122,42 @@ def test_as_of_respects_usable_after_latency_guard(store):
     assert res.data["value"].iloc[0] == 425_000.0
 
 
+def test_as_of_same_release_ts_prefers_latest_observation_period(store):
+    _, w, r, _ = store
+    release_ts = datetime(2026, 1, 14, 15, 30, tzinfo=UTC)
+    w.write_vintage(
+        source="eia",
+        dataset="wpsr",
+        series="WCESTUS1",
+        release_ts=release_ts,
+        data=pd.DataFrame({"value": [425_000.0]}),
+        provenance={"source": "eia.gov", "method": "archive_csv"},
+        observation_start=date(2026, 1, 3),
+        observation_end=date(2026, 1, 9),
+    )
+    w.write_vintage(
+        source="eia",
+        dataset="wpsr",
+        series="WCESTUS1",
+        release_ts=release_ts,
+        data=pd.DataFrame({"value": [430_000.0]}),
+        provenance={"source": "eia.gov", "method": "archive_csv"},
+        observation_start=date(2026, 1, 10),
+        observation_end=date(2026, 1, 16),
+    )
+
+    res = r.as_of(
+        "eia",
+        "WCESTUS1",
+        datetime(2026, 1, 14, 15, 31, tzinfo=UTC),
+        dataset="wpsr",
+    )
+
+    assert res is not None
+    assert res.manifest.observation_end == date(2026, 1, 16)
+    assert res.data["value"].iloc[0] == 430_000.0
+
+
 def test_latest_available_before_ignores_supersession(store):
     _, w, r, _ = store
     first, rev = _ingest_two_vintages(w)

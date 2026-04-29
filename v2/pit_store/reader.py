@@ -98,19 +98,24 @@ class PITReader:
                   AND m.usable_after_ts <= ?
                   AND COALESCE(m.revision_ts, m.usable_after_ts) <= ?
             ),
-            per_period_winner AS (
+            per_observation_winner AS (
                 SELECT e.*
                 FROM eligible e
                 JOIN (
-                    SELECT release_ts, MAX(known_by_ts) AS best
+                    SELECT release_ts, observation_end, MAX(known_by_ts) AS best
                     FROM eligible
-                    GROUP BY release_ts
+                    GROUP BY release_ts, observation_end
                 ) g
-                  ON e.release_ts = g.release_ts AND e.known_by_ts = g.best
+                  ON e.release_ts = g.release_ts
+                 AND (
+                     (e.observation_end IS NULL AND g.observation_end IS NULL)
+                     OR e.observation_end = g.observation_end
+                 )
+                 AND e.known_by_ts = g.best
             )
             SELECT {MANIFEST_SELECT}
-            FROM per_period_winner
-            ORDER BY release_ts DESC, known_by_ts DESC
+            FROM per_observation_winner
+            ORDER BY release_ts DESC, observation_end DESC NULLS LAST, known_by_ts DESC
             LIMIT 1
             """,
             [source, dataset, dataset, series, series, ts_naive, ts_naive],
@@ -144,7 +149,7 @@ class PITReader:
               AND (? IS NULL OR dataset = ?)
               AND ((? IS NULL AND series IS NULL) OR series = ?)
               AND release_ts < ?
-            ORDER BY release_ts DESC, revision_ts DESC NULLS LAST
+            ORDER BY release_ts DESC, observation_end DESC NULLS LAST, revision_ts DESC NULLS LAST
             LIMIT 1
             """,
             [source, dataset, dataset, series, series, ts_naive],

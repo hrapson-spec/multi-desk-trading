@@ -224,6 +224,8 @@ class PITManifest:
         series: str | None,
         release_ts: datetime,
         dataset: str | None = None,
+        observation_start: date | None = None,
+        observation_end: date | None = None,
     ) -> ManifestRow | None:
         """Find the first-release row (revision_ts IS NULL) for a vintage slot."""
         row = self.conn.execute(
@@ -233,9 +235,22 @@ class PITManifest:
               AND ((? IS NULL AND dataset IS NULL) OR dataset = ?)
               AND ((? IS NULL AND series IS NULL) OR series = ?)
               AND release_ts = ?
+              AND (? IS NULL OR observation_start = ?)
+              AND (? IS NULL OR observation_end = ?)
               AND revision_ts IS NULL
             """,
-            [source, dataset, dataset, series, series, _to_utc_naive(release_ts)],
+            [
+                source,
+                dataset,
+                dataset,
+                series,
+                series,
+                _to_utc_naive(release_ts),
+                observation_start,
+                observation_start,
+                observation_end,
+                observation_end,
+            ],
         ).fetchone()
         return ManifestRow.from_row(row) if row is not None else None
 

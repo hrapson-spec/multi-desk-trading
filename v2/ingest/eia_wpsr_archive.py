@@ -129,6 +129,7 @@ class EIAWPSRArchiveIngester(BaseIngester):
     def fetch(self, as_of_ts: datetime | None = None) -> list[FetchResult]:
         del as_of_ts
         results: list[FetchResult] = []
+        seen_issue_keys: set[tuple[date, date]] = set()
         for issue_url in self._issue_urls_to_fetch():
             issue = self._fetch_issue(issue_url)
             if issue is None:
@@ -137,6 +138,18 @@ class EIAWPSRArchiveIngester(BaseIngester):
                 continue
             if self._until is not None and issue.release_date > self._until:
                 continue
+            issue_key = (issue.release_date, issue.week_ending)
+            if issue_key in seen_issue_keys:
+                self.last_run_failed_issues.append(
+                    (
+                        issue.issue_url,
+                        "duplicate_issue_metadata_skipped:"
+                        f"release_date={issue.release_date.isoformat()},"
+                        f"week_ending={issue.week_ending.isoformat()}",
+                    )
+                )
+                continue
+            seen_issue_keys.add(issue_key)
             tables = self._fetch_required_tables(issue)
             results.extend(self._results_for_issue(issue, tables))
         return results
