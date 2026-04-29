@@ -1,7 +1,7 @@
 # WTI Lag 1d Forward Monitor
 
 **Lock id**: `dcc249c4d25a8890`  
-**Updated**: 2026-04-29T18:52:19Z  
+**Updated**: 2026-04-29T19:29:55Z  
 **Status**: forward holdout initialized; no tuning permitted.  
 **Lock integrity**: ok  
 
