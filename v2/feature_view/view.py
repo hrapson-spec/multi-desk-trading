@@ -23,6 +23,10 @@ class FeatureView:
     manifest_ids: dict[str, str | None]  # feature_name -> vintage manifest_id used
     forward_fill_used: dict[str, bool]  # feature_name -> True iff transform forward-filled
     view_hash: str
+    vintage_quality: dict[str, str] = field(default_factory=dict)
+    degraded_inputs: tuple[str, ...] = ()
+    worst_vintage_quality: str = "true_first_release"
+    data_quality_warning: bool = False
 
     @property
     def any_required_missing(self) -> bool:
@@ -42,6 +46,7 @@ class FeatureView:
                 "missing": self.missingness.get(name, False),
                 "stale": self.stale_flags.get(name),
                 "manifest_id": self.manifest_ids.get(name),
+                "vintage_quality": self.vintage_quality.get(name),
             }
             for name in (s.name for s in self.specs)
         }

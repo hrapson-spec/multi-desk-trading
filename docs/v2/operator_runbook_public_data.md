@@ -101,11 +101,17 @@ Confirm each manifest has `last_run_failed_series: []` (or reconcile against the
 - **CME ingester raises on forbidden column.** Means the upstream HTML changed shape and a price/quote column appeared in the parsed metadata. **Do not bypass the regex.** Update the parser to drop the new column at the source, then re-run.
 - **Empty FRED `SP500` history.** FRED limits this series to a ~10y trailing window; the registry pins `history_start: 2013-01-02` but the actual floor floats. Verify by re-checking https://fred.stlouisfed.org/series/SP500 and adjust the backfill `--since` accordingly.
 
-## 7. Calendar mismatch carry-over (operator-visible)
+## 7. EIA WPSR source contract
 
-The release calendar at `v2/pit_store/calendars/eia_wpsr.yaml` declares `source: eia_wpsr`, but the EIA ingester writes manifests with `source: eia`. **This is intentional at v2.0.** Calendar-keyed lookups for non-WPSR EIA series will not find the WPSR calendar; that is expected, since non-WPSR EIA series have different cadences and would need their own calendars.
+The release calendar at `v2/pit_store/calendars/eia_wpsr.yaml` now declares
+`source: eia` and `dataset: wpsr`. WPSR is a dataset under EIA, not an atomic
+source. Feature specs should use `source="eia", dataset="wpsr",
+series="<series_id>"`.
 
-**v2.1 follow-up:** split the EIA calendar by cadence (weekly WPSR, monthly STEO, etc.) and align the calendar `source` field to the manifest `source`.
+The current API ingester writes `vintage_quality=latest_snapshot_not_pit`.
+Those rows are suitable for connectivity checks but are rejected by the
+feature-admissibility gate. First-release WPSR research data must come from
+the official WPSR archive restoration path.
 
 ## 8. Cross-references
 

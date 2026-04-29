@@ -68,7 +68,11 @@ def _value_columns(df: pd.DataFrame) -> list[str]:
 
 
 def _latest_value_for(
-    reader: PITReader, source: str, series: str | None, ts: pd.Timestamp
+    reader: PITReader,
+    source: str,
+    dataset: str | None,
+    series: str | None,
+    ts: pd.Timestamp,
 ) -> dict[str, float]:
     """Return the latest value(s) for (source, series) decision-eligible at ``ts``.
 
@@ -76,7 +80,12 @@ def _latest_value_for(
     vintages (e.g. a weekly history), the row with the largest available
     ``period`` (or last row) is taken — this is the contemporaneous read.
     """
-    res = reader.as_of(source=source, series=series, as_of_ts=ts.to_pydatetime())
+    res = reader.as_of(
+        source=source,
+        dataset=dataset,
+        series=series,
+        as_of_ts=ts.to_pydatetime(),
+    )
     if res is None:
         return {}
     df = res.data
@@ -198,11 +207,17 @@ def build_features(
     seeded_columns: set[str] = set()
     for entry in eligible:
         source = entry.source
+        dataset = entry.dataset
         series = entry.series_id
-        prefix = f"{source}__{series}" if series is not None else source
+        prefix_parts = [source]
+        if dataset is not None:
+            prefix_parts.append(dataset)
+        if series is not None:
+            prefix_parts.append(series)
+        prefix = "__".join(prefix_parts)
         seeded_columns.add(f"{prefix}__value")
         for ts in timestamps:
-            vals = _latest_value_for(reader, source, series, ts)
+            vals = _latest_value_for(reader, source, dataset, series, ts)
             for field, v in vals.items():
                 col_blocks[ts][f"{prefix}__{field}"] = v
 

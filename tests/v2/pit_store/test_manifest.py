@@ -19,8 +19,10 @@ def _row(**overrides) -> ManifestRow:
     base: dict = {
         "manifest_id": new_manifest_id(),
         "source": "eia_wpsr",
+        "dataset": None,
         "series": "crude_stocks",
         "release_ts": datetime(2026, 1, 14, 15, 30, tzinfo=UTC),
+        "usable_after_ts": datetime(2026, 1, 14, 15, 35, tzinfo=UTC),
         "revision_ts": None,
         "observation_start": date(2026, 1, 3),
         "observation_end": date(2026, 1, 9),
@@ -32,6 +34,7 @@ def _row(**overrides) -> ManifestRow:
         "parquet_path": (
             "raw/eia_wpsr/series=crude_stocks/release_ts=2026-01-14T15-30-00Z/data.parquet"
         ),
+        "vintage_quality": "true_first_release",
         "superseded_by": None,
     }
     base.update(overrides)
@@ -44,10 +47,13 @@ def test_insert_and_roundtrip(manifest):
     got = manifest.get(r.manifest_id)
     assert got is not None
     assert got.source == r.source
+    assert got.dataset == r.dataset
     assert got.series == r.series
     assert got.release_ts == r.release_ts
+    assert got.usable_after_ts == r.usable_after_ts
     assert got.checksum == r.checksum
     assert got.provenance == {"source": "eia.gov", "method": "http"}
+    assert got.vintage_quality == "true_first_release"
 
 
 def test_manifest_allows_duplicate_null_revision_at_db_layer(manifest):
@@ -116,3 +122,22 @@ def test_null_series_handling(manifest):
     got = manifest.find_first_release(r.source, None, r.release_ts)
     assert got is not None
     assert got.series is None
+
+
+def test_dataset_distinguishes_same_source_series(manifest):
+    wpsr = _row(source="eia", dataset="wpsr", series="WCESTUS1")
+    steo = _row(
+        manifest_id=new_manifest_id(),
+        source="eia",
+        dataset="steo",
+        series="WCESTUS1",
+        checksum="cs_steo",
+        parquet_path="raw/eia/dataset=steo/series=WCESTUS1/release_ts=2026-01-14T15-30-00Z/data.parquet",
+    )
+    manifest.insert(wpsr)
+    manifest.insert(steo)
+    got = manifest.find_first_release(
+        "eia", "WCESTUS1", datetime(2026, 1, 14, 15, 30, tzinfo=UTC), dataset="wpsr"
+    )
+    assert got is not None
+    assert got.manifest_id == wpsr.manifest_id

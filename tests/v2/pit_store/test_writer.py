@@ -55,12 +55,36 @@ def test_first_release_writes_parquet_and_manifest(writer_and_manifest, tmp_path
     assert r.was_revision is False
     assert r.superseded_manifest_id is None
     assert r.row_count == 2
+    assert r.vintage_quality == "true_first_release"
     assert (tmp_path / r.parquet_path).exists()
     mf = m.get(r.manifest_id)
     assert mf is not None
     assert mf.checksum == r.checksum
     assert mf.revision_ts is None
     assert mf.row_count == 2
+    assert mf.vintage_quality == "true_first_release"
+
+
+def test_write_records_dataset_and_vintage_quality(writer_and_manifest, tmp_path):
+    w, m = writer_and_manifest
+    r = w.write_vintage(
+        source="eia",
+        dataset="wpsr",
+        series="WCESTUS1",
+        release_ts=datetime(2026, 1, 14, 15, 30, tzinfo=UTC),
+        data=pd.DataFrame({"value": [425_000.0]}),
+        provenance={"source": "eia.gov", "method": "archive_csv"},
+        vintage_quality="release_lag_safe_revision_unknown",
+    )
+    assert r.dataset == "wpsr"
+    assert r.vintage_quality == "release_lag_safe_revision_unknown"
+    assert (tmp_path / r.parquet_path).exists()
+    mf = m.get(r.manifest_id)
+    assert mf is not None
+    assert mf.source == "eia"
+    assert mf.dataset == "wpsr"
+    assert mf.series == "WCESTUS1"
+    assert mf.vintage_quality == "release_lag_safe_revision_unknown"
 
 
 def test_reingest_identical_payload_is_idempotent(writer_and_manifest):

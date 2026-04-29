@@ -25,6 +25,7 @@ from v2.contracts import (
 )
 from v2.feature_view import FeatureSpec, build_feature_view
 from v2.pit_store.manifest import open_manifest
+from v2.pit_store.quality import VintageQuality
 from v2.pit_store.reader import PITReader
 from v2.pit_store.writer import PITWriter
 
@@ -334,3 +335,62 @@ def test_source_eligibility_survives_build():
     f = _mint()
     assert "eia_wpsr" in f.source_eligibility
     assert isinstance(f.source_eligibility["eia_wpsr"], SourceEligibility)
+
+
+def test_revision_quality_propagates_into_forecast_metadata(tmp_path):
+    m = open_manifest(tmp_path)
+    try:
+        w = PITWriter(tmp_path, m)
+        w.write_vintage(
+            source="eia",
+            dataset="wpsr",
+            series="WCESTUS1",
+            release_ts=datetime(2026, 4, 15, 14, 30, tzinfo=UTC),
+            data=pd.DataFrame({"value": [425_000.0]}),
+            provenance={"source": "eia", "method": "test"},
+            vintage_quality=VintageQuality.RELEASE_LAG_SAFE_REVISION_UNKNOWN.value,
+        )
+        reader = PITReader(tmp_path, m)
+        view = build_feature_view(
+            as_of_ts=datetime(2026, 4, 22, 21, 0, tzinfo=UTC),
+            family="oil_wti_5d",
+            desk="prompt_balance_nowcast",
+            specs=[
+                FeatureSpec(
+                    name="crude_sign_context",
+                    source="eia",
+                    dataset="wpsr",
+                    series="WCESTUS1",
+                    feature_use="return_sign_target",
+                )
+            ],
+            reader=reader,
+        )
+        f = ForecastV2.build_from_view(
+            view=view,
+            family_id="oil_wti_5d",
+            desk_id="prompt_balance_nowcast",
+            distribution_version="0.0.1-scaffold",
+            target_variable="WTI_FRONT_1W_LOG_RETURN",
+            target_horizon="5d",
+            decision_unit=DecisionUnit.LOG_RETURN,
+            quantile_vector=(-0.10, -0.05, -0.02, 0.0, 0.02, 0.05, 0.10),
+            calibration_score=0.7,
+            calibration_metadata=_CAL,
+            data_quality_score=0.9,
+            valid_until_ts=datetime(2026, 4, 23, 21, 0, tzinfo=UTC),
+            emitted_ts=datetime(2026, 4, 22, 21, 5, tzinfo=UTC),
+            prereg_hash="sha256:prereg",
+            code_commit="abcdef0",
+            contract_hash="sha256:contract",
+            release_calendar_version="eia/wpsr:1.0.0",
+        )
+        fe = f.feature_eligibility["crude_sign_context"]
+        assert fe.source == "eia"
+        assert fe.dataset == "wpsr"
+        assert fe.series == "WCESTUS1"
+        assert fe.vintage_quality == VintageQuality.RELEASE_LAG_SAFE_REVISION_UNKNOWN.value
+        se = f.source_eligibility["eia/wpsr"]
+        assert se.vintage_quality == VintageQuality.RELEASE_LAG_SAFE_REVISION_UNKNOWN.value
+    finally:
+        m.close()

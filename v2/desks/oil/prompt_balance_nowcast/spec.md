@@ -57,9 +57,9 @@ under docs/v2/v2_data_contract.md §4 with the following source lineage:
 
 | Input | Source | Release | Lag |
 |---|---|---|---|
-| crude_stocks, gasoline_stocks, distillate_stocks | `eia_wpsr` | Wed ≥10:30 ET | 5 days (week-ending Friday prior) |
-| refinery_runs | `eia_wpsr` | Wed ≥10:30 ET | 5 days |
-| crude_imports, crude_exports | `eia_wpsr` | Wed ≥10:30 ET | 5 days |
+| crude_stocks, gasoline_stocks, distillate_stocks | `eia/wpsr` | Wed ≥10:30 ET + latency guard | 5 days (week-ending Friday prior) |
+| refinery_runs | `eia/wpsr` | Wed ≥10:30 ET + latency guard | 5 days |
+| crude_imports, crude_exports | `eia/wpsr` | Wed ≥10:30 ET + latency guard | 5 days |
 | wti_calendar_spread_1_2 | `wti_front_month` | daily ≥14:30 ET settlement | 0 days |
 
 All source rows are recorded with full vintage provenance; the

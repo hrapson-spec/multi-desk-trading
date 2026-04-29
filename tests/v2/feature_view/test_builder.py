@@ -7,8 +7,16 @@ from datetime import UTC, datetime
 import pandas as pd
 import pytest
 
-from v2.feature_view import FeatureSpec, FeatureViewBuildError, build_feature_view
+from v2.feature_view import (
+    FeatureAdmissibilityError,
+    FeatureSpec,
+    FeatureViewBuildError,
+    build_data_quality_manifest,
+    build_feature_view,
+    render_data_quality_warning_block,
+)
 from v2.pit_store.manifest import open_manifest
+from v2.pit_store.quality import VintageQuality
 from v2.pit_store.reader import PITReader
 from v2.pit_store.writer import PITWriter
 
@@ -24,13 +32,24 @@ def store(tmp_path):
         m.close()
 
 
-def _ingest(writer, source, series, release_ts, value):
+def _ingest(
+    writer,
+    source,
+    series,
+    release_ts,
+    value,
+    *,
+    dataset=None,
+    vintage_quality=VintageQuality.TRUE_FIRST_RELEASE.value,
+):
     writer.write_vintage(
         source=source,
+        dataset=dataset,
         series=series,
         release_ts=release_ts,
         data=pd.DataFrame({"value": [value]}),
         provenance={"source": source, "method": "test"},
+        vintage_quality=vintage_quality,
     )
 
 
@@ -56,6 +75,8 @@ def test_build_populates_features_and_eligibility(store):
     assert view.any_required_missing is False
     assert "eia_wpsr" in view.source_eligibility
     assert "wti_front_month" in view.source_eligibility
+    assert view.worst_vintage_quality == VintageQuality.TRUE_FIRST_RELEASE.value
+    assert view.data_quality_warning is False
     assert view.view_hash.startswith("") and len(view.view_hash) == 64
 
 
@@ -166,3 +187,118 @@ def test_required_false_feature_missing_does_not_flag_any_required_missing(store
     )
     assert view.missingness["crude"] is True
     assert view.any_required_missing is False
+
+
+def test_dataset_aware_feature_lookup(store):
+    _root, w, _m, reader = store
+    release_ts = datetime(2026, 4, 15, 14, 30, tzinfo=UTC)
+    _ingest(w, "eia", "WCESTUS1", release_ts, 425_000.0, dataset="wpsr")
+    specs = [FeatureSpec(name="crude", source="eia", dataset="wpsr", series="WCESTUS1")]
+    view = build_feature_view(
+        as_of_ts=datetime(2026, 4, 22, 21, 0, tzinfo=UTC),
+        family="oil_wti_5d",
+        desk="prompt_balance_nowcast",
+        specs=specs,
+        reader=reader,
+    )
+    assert view.missingness["crude"] is False
+    assert "eia/wpsr" in view.source_eligibility
+
+
+def test_revision_quality_blocks_surprise(store):
+    _root, w, _m, reader = store
+    release_ts = datetime(2026, 4, 15, 14, 30, tzinfo=UTC)
+    _ingest(
+        w,
+        "eia",
+        "WCESTUS1",
+        release_ts,
+        425_000.0,
+        dataset="wpsr",
+        vintage_quality=VintageQuality.RELEASE_LAG_SAFE_REVISION_UNKNOWN.value,
+    )
+    specs = [
+        FeatureSpec(
+            name="crude_surprise",
+            source="eia",
+            dataset="wpsr",
+            series="WCESTUS1",
+            feature_use="inventory_surprise_magnitude",
+        )
+    ]
+    with pytest.raises(FeatureAdmissibilityError):
+        build_feature_view(
+            as_of_ts=datetime(2026, 4, 22, 21, 0, tzinfo=UTC),
+            family="oil_wti_5d",
+            desk="prompt_balance_nowcast",
+            specs=specs,
+            reader=reader,
+        )
+
+
+def test_latest_snapshot_not_pit_rejected_even_for_generic_feature(store):
+    _root, w, _m, reader = store
+    release_ts = datetime(2026, 4, 15, 14, 30, tzinfo=UTC)
+    _ingest(
+        w,
+        "eia",
+        "WCESTUS1",
+        release_ts,
+        425_000.0,
+        dataset="wpsr",
+        vintage_quality=VintageQuality.LATEST_SNAPSHOT_NOT_PIT.value,
+    )
+    specs = [FeatureSpec(name="crude", source="eia", dataset="wpsr", series="WCESTUS1")]
+    with pytest.raises(FeatureAdmissibilityError):
+        build_feature_view(
+            as_of_ts=datetime(2026, 4, 22, 21, 0, tzinfo=UTC),
+            family="oil_wti_5d",
+            desk="prompt_balance_nowcast",
+            specs=specs,
+            reader=reader,
+        )
+
+
+def test_revision_quality_propagation(store):
+    _root, w, _m, reader = store
+    release_ts = datetime(2026, 4, 15, 14, 30, tzinfo=UTC)
+    _ingest(
+        w,
+        "eia",
+        "WCESTUS1",
+        release_ts,
+        425_000.0,
+        dataset="wpsr",
+        vintage_quality=VintageQuality.RELEASE_LAG_SAFE_REVISION_UNKNOWN.value,
+    )
+    specs = [
+        FeatureSpec(
+            name="crude_sign_context",
+            source="eia",
+            dataset="wpsr",
+            series="WCESTUS1",
+            feature_use="return_sign_target",
+        )
+    ]
+    view = build_feature_view(
+        as_of_ts=datetime(2026, 4, 22, 21, 0, tzinfo=UTC),
+        family="oil_wti_5d",
+        desk="prompt_balance_nowcast",
+        specs=specs,
+        reader=reader,
+    )
+    assert view.vintage_quality["crude_sign_context"] == (
+        VintageQuality.RELEASE_LAG_SAFE_REVISION_UNKNOWN.value
+    )
+    assert view.worst_vintage_quality == VintageQuality.RELEASE_LAG_SAFE_REVISION_UNKNOWN.value
+    assert view.data_quality_warning is True
+    assert view.degraded_inputs == ("eia/wpsr/WCESTUS1",)
+    manifest = build_data_quality_manifest(view)
+    assert manifest.to_dict() == {
+        "data_quality_warning": True,
+        "worst_vintage_quality": VintageQuality.RELEASE_LAG_SAFE_REVISION_UNKNOWN.value,
+        "degraded_inputs": ["eia/wpsr/WCESTUS1"],
+    }
+    report = render_data_quality_warning_block(view)
+    assert "Data quality warning" in report
+    assert "eia/wpsr/WCESTUS1" in report

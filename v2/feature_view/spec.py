@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
+
+FeatureUse = Literal[
+    "generic_feature",
+    "tractability_count",
+    "return_sign_target",
+    "inventory_surprise_magnitude",
+    "stock_change_feature",
+]
 
 
 class FeatureSpec(BaseModel):
@@ -18,6 +28,7 @@ class FeatureSpec(BaseModel):
 
     name: str
     source: str
+    dataset: str | None = None
     series: str | None = None
 
     # Transform applied to the raw vintage DataFrame before the value
@@ -37,14 +48,23 @@ class FeatureSpec(BaseModel):
     # abstention logic reads it.
     quality_floor: float = Field(default=0.0, ge=0.0, le=1.0)
 
+    # Used by the feature-admissibility gate. `release_lag_safe_revision_unknown`
+    # is acceptable for tractability/sign-only work, but forbidden for
+    # inventory surprise magnitude and stock-change features.
+    feature_use: FeatureUse = "generic_feature"
+    enforce_feature_admissibility: bool = True
+
     def canonical_key(self) -> tuple:
         """Stable tuple used in the view hash."""
         return (
             self.name,
             self.source,
+            self.dataset or "",
             self.series or "",
             self.transform,
             tuple(sorted(self.transform_params.items())),
             self.required,
             self.quality_floor,
+            self.feature_use,
+            self.enforce_feature_admissibility,
         )

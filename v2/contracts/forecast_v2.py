@@ -44,11 +44,13 @@ class SourceEligibility(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     source: str
+    dataset: str | None = None
     eligible: bool
     release_lag_days: float = Field(ge=0.0)
     freshness_state: str  # fresh | stale_1w | stale_2w | stale_over_2w
     quality_multiplier: float = Field(ge=0.0, le=1.0)
     manifest_id: str | None = None
+    vintage_quality: str = "true_first_release"
 
 
 class FeatureEligibility(BaseModel):
@@ -64,6 +66,7 @@ class FeatureEligibility(BaseModel):
 
     feature_name: str
     source: str
+    dataset: str | None = None
     series: str | None = None
     transform: str = "identity"
     missing: bool = False
@@ -71,6 +74,7 @@ class FeatureEligibility(BaseModel):
     quality_multiplier: float = Field(default=1.0, ge=0.0, le=1.0)
     manifest_id: str | None = None
     forward_fill_used: bool = False
+    vintage_quality: str = "true_first_release"
 
 
 class CalibrationMetadata(BaseModel):
@@ -254,10 +258,13 @@ class ForecastV2(BaseModel):
         # to every feature sharing the source; the desk can tighten later.
         feature_eligibility: dict[str, FeatureEligibility] = {}
         for spec in view.specs:
-            src_elig = view.source_eligibility.get(spec.source)
+            src_elig = view.source_eligibility.get(
+                _input_key(spec.source, spec.dataset, None)
+            )
             feature_eligibility[spec.name] = FeatureEligibility(
                 feature_name=spec.name,
                 source=spec.source,
+                dataset=spec.dataset,
                 series=spec.series,
                 transform=spec.transform,
                 missing=view.missingness.get(spec.name, False),
@@ -265,6 +272,7 @@ class ForecastV2(BaseModel):
                 quality_multiplier=(src_elig.quality_multiplier if src_elig is not None else 0.0),
                 manifest_id=view.manifest_ids.get(spec.name),
                 forward_fill_used=view.forward_fill_used.get(spec.name, False),
+                vintage_quality=view.vintage_quality.get(spec.name, "missing"),
             )
 
         # source_manifest_set_hash = SHA-256 over sorted non-null manifest_ids.
@@ -349,6 +357,15 @@ def _canonical_id_payload(**fields: object) -> dict:
     sort_keys=True later; here we just ensure we accept dict/tuple/etc.
     """
     return dict(fields)
+
+
+def _input_key(source: str, dataset: str | None, series: str | None) -> str:
+    parts = [source]
+    if dataset:
+        parts.append(dataset)
+    if series:
+        parts.append(series)
+    return "/".join(parts)
 
 
 def _compute_forecast_id(forecast: ForecastV2) -> str:

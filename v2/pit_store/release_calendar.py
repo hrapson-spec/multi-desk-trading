@@ -12,9 +12,10 @@ publisher?) is the test suite's responsibility.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
@@ -55,9 +56,12 @@ class DataQualityMultipliers(BaseModel):
 
 class ReleaseCalendar(BaseModel):
     source: str
+    dataset: str | None = None
     description: str = ""
     publisher: str = ""
     calendar_version: str = "1.0.0"
+    latency_guard_minutes: int = Field(default=0, ge=0)
+    holiday_handling: str = "schedule"
     release_cadence: ReleaseCadence
     observation_semantics: ObservationSemantics
     revision_policy: str = ""
@@ -78,14 +82,28 @@ class ReleaseCalendar(BaseModel):
     # -- eligibility predicate -----------------------------------------------
 
     def is_eligible(self, release_ts: datetime, as_of_ts: datetime) -> bool:
-        """PIT eligibility: release_ts <= as_of_ts in UTC.
+        """PIT eligibility after the calendar's latency guard.
 
         (Supersession-aware eligibility is in PITReader.as_of; this
         predicate is for raw temporal ordering only.)
         """
-        r = _to_utc(release_ts)
+        r = self.usable_after_ts(release_ts)
         t = _to_utc(as_of_ts)
         return r <= t
+
+    def usable_after_ts(self, release_ts: datetime) -> datetime:
+        """Return the first timestamp at which the release may be used."""
+        return _to_utc(release_ts) + timedelta(minutes=self.latency_guard_minutes)
+
+    def release_datetime_utc(self, issue_date: date) -> datetime:
+        """Convert the local ET release time on an official issue date to UTC."""
+        hh, mm = self.release_cadence.earliest_release_time_et.split(":")
+        local = datetime.combine(
+            issue_date,
+            time(int(hh), int(mm)),
+            tzinfo=ZoneInfo("America/New_York"),
+        )
+        return local.astimezone(UTC)
 
     def quality_multiplier_for_lag(self, lag_days: float) -> float:
         m = self.data_quality_multipliers

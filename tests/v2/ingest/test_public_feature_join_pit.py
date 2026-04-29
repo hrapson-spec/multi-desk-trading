@@ -60,6 +60,7 @@ def test_eia_pre_release_is_absent_post_release_present(store, tmp_path):
     release_ts_utc = datetime(2026, 4, 22, 11, 0, tzinfo=NY).astimezone(UTC)
     w.write_vintage(
         source="eia",
+        dataset="wpsr",
         series="WCESTUS1",
         release_ts=release_ts_utc,
         data=_eia_vintage(440000.0),
@@ -74,7 +75,7 @@ def test_eia_pre_release_is_absent_post_release_present(store, tmp_path):
         end=datetime(2026, 4, 22, 14, 0, tzinfo=UTC),  # 14:00 UTC = 10:00 ET
         output_path=out,
     )
-    col = "eia__WCESTUS1__value"
+    col = "eia__wpsr__WCESTUS1__value"
     assert col in df_pre.columns
     # The Wednesday 2026-04-22 row at the daily grid is the 10:00 ET snapshot
     # because the daily grid is rendered at the start of `start`+N days.
@@ -148,6 +149,7 @@ def test_revision_rewinds_value(store, tmp_path):
     revision_ts_utc = release_ts_utc + timedelta(days=2)
     w.write_vintage(
         source="eia",
+        dataset="wpsr",
         series="WCESTUS1",
         release_ts=release_ts_utc,
         data=_eia_vintage(100.0),
@@ -155,6 +157,7 @@ def test_revision_rewinds_value(store, tmp_path):
     )
     w.write_vintage(
         source="eia",
+        dataset="wpsr",
         series="WCESTUS1",
         release_ts=release_ts_utc,
         revision_ts=revision_ts_utc,
@@ -172,7 +175,7 @@ def test_revision_rewinds_value(store, tmp_path):
         end=t1_5,
         output_path=out_a,
     )
-    col = "eia__WCESTUS1__value"
+    col = "eia__wpsr__WCESTUS1__value"
     post_mask_a = df_a.index > pd.Timestamp(release_ts_utc)
     assert (df_a.loc[post_mask_a, col] == 100.0).all()
 
@@ -196,6 +199,7 @@ def test_output_parquet_round_trips(store, tmp_path):
     release_ts_utc = datetime(2026, 4, 22, 11, 0, tzinfo=NY).astimezone(UTC)
     w.write_vintage(
         source="eia",
+        dataset="wpsr",
         series="WCESTUS1",
         release_ts=release_ts_utc,
         data=_eia_vintage(440000.0),

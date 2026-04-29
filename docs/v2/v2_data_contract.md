@@ -51,9 +51,11 @@ escalate to runtime gating via a contract deviation.
 ```sql
 CREATE TABLE pit_manifest (
     manifest_id      TEXT PRIMARY KEY,       -- uuid
-    source           TEXT NOT NULL,          -- e.g. "eia_wpsr", "cftc_cot_futures"
+    source           TEXT NOT NULL,          -- e.g. "eia", "cftc_cot"
+    dataset          TEXT,                   -- e.g. "wpsr", "steo", "disaggregated"
     series           TEXT,                   -- optional intra-source key
     release_ts       TIMESTAMP NOT NULL,     -- publisher's release timestamp (UTC)
+    usable_after_ts  TIMESTAMP,              -- release_ts plus latency guard, if any
     revision_ts      TIMESTAMP,              -- when a revision superseded this vintage, if any
     observation_start DATE,                  -- earliest observation this file covers
     observation_end   DATE,                  -- latest observation this file covers
@@ -63,8 +65,9 @@ CREATE TABLE pit_manifest (
     ingest_ts        TIMESTAMP NOT NULL,     -- when v2 ingested it (UTC)
     provenance       TEXT NOT NULL,          -- JSON: {url, method, scraper_version, ...}
     parquet_path     TEXT NOT NULL,          -- path relative to pit_root
+    vintage_quality  TEXT NOT NULL,          -- true_first_release | release_lag_safe_revision_unknown | ...
     superseded_by    TEXT,                   -- manifest_id of newer vintage, if any
-    UNIQUE (source, series, release_ts, revision_ts)
+    UNIQUE (source, dataset, series, release_ts, revision_ts)
 );
 ```
 
@@ -78,6 +81,10 @@ CREATE TABLE pit_manifest (
   supersedes it.
 - `checksum` is the SHA-256 of the raw Parquet bytes after ingest. Any
   mismatch at read time is a hard-fail condition for the consuming desk.
+- `usable_after_ts` is the timestamp used by `PITReader.as_of`. For WPSR,
+  it is `release_ts + latency_guard_minutes`.
+- `vintage_quality` is monotonic downstream: feature views, forecasts,
+  run manifests, and reports may degrade it but may not drop or improve it.
 
 ---
 
@@ -86,12 +93,13 @@ CREATE TABLE pit_manifest (
 ```
 pit_root/
     raw/
-        eia_wpsr/
+        eia/
+            dataset=wpsr/
+            series=WCESTUS1/
             release_ts=2026-01-14T15:30:00Z/
                 data.parquet
-            release_ts=2026-01-21T15:30:00Z/
-                data.parquet
-        cftc_cot_futures/
+        cftc_cot/
+            dataset=disaggregated/
             release_ts=2026-01-16T20:30:00Z/
                 data.parquet
         fred_alfred/
@@ -122,9 +130,12 @@ One YAML file per source under `v2/pit_store/calendars/`. Example:
 
 ```yaml
 # v2/pit_store/calendars/eia_wpsr.yaml
-source: eia_wpsr
+source: eia
+dataset: wpsr
 description: "EIA Weekly Petroleum Status Report (U.S. crude/product balances)"
 publisher: "U.S. Energy Information Administration"
+latency_guard_minutes: 5
+holiday_handling: "official_issue_date_or_schedule"
 release_cadence:
   type: weekly
   weekday: wednesday
@@ -135,9 +146,8 @@ observation_semantics:
   lag_to_publication_days: 5
 revision_policy: "ad_hoc_small_revisions_possible"
 pit_eligibility_rule: |
-  For decision timestamp t (UTC), a row with release_ts r is
-  decision-eligible iff r <= t AND (r.superseded_by IS NULL OR
-  superseded_release_ts > t).
+  For decision timestamp t (UTC), a row with usable_after_ts u is
+  decision-eligible iff u <= t and COALESCE(revision_ts, u) <= t.
 source_confidence:
   baseline: 0.95
   degradation_conditions:
@@ -161,20 +171,20 @@ if any feature path has no calendar entry.
 ### 5.1 DuckDB macros (stable contract)
 
 ```sql
--- Return the decision-eligible row for (source, series) as of the given
+-- Return the decision-eligible row for (source, dataset, series) as of the given
 -- UTC timestamp. Respects supersession.
-SELECT * FROM as_of('eia_wpsr.crude_stocks', TIMESTAMP '2026-04-23 21:00:00Z');
+SELECT * FROM as_of('eia.wpsr.WCESTUS1', TIMESTAMP '2026-04-23 21:00:00Z');
 
 -- Return the latest vintage released strictly before the given timestamp.
 SELECT * FROM latest_available_before('fred.DCOILWTICO', '2026-04-23T08:00:00Z');
 
 -- Diff two vintages of the same series; used by the PIT auditor.
-SELECT * FROM vintage_diff('eia_wpsr.crude_stocks',
+SELECT * FROM vintage_diff('eia.wpsr.WCESTUS1',
                            '2026-01-14T15:30:00Z',
                            '2026-01-21T15:30:00Z');
 
 -- Declared calendar metadata (read-only view over YAML).
-SELECT * FROM release_calendar('eia_wpsr');
+SELECT * FROM release_calendar('eia.wpsr');
 ```
 
 ### 5.2 Python reader
@@ -192,7 +202,9 @@ Every row returned by the PIT reader carries a `data_quality` struct:
 ```
 data_quality = {
     "source"              : str,
+    "dataset"             : str | null,
     "release_ts"          : timestamp,
+    "usable_after_ts"     : timestamp,
     "revision_ts"         : timestamp | null,
     "as_of_ts"            : timestamp,
     "freshness_state"     : "fresh" | "stale_1w" | "stale_2w" | "stale_over_2w",
@@ -205,6 +217,7 @@ data_quality = {
     "decision_eligible"   : bool,
     "calendar_version"    : str,
     "checksum_verified"   : bool,
+    "vintage_quality"     : str,
 }
 ```
 

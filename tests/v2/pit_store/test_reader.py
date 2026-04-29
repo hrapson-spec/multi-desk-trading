@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
 import pytest
@@ -88,6 +88,38 @@ def test_as_of_returns_none_when_nothing_eligible(store):
     # Ask for data as of Jan 1 — before any release. None eligible.
     res = r.as_of("eia_wpsr", "weekly", datetime(2026, 1, 1, 0, 0, tzinfo=UTC))
     assert res is None
+
+
+def test_as_of_respects_usable_after_latency_guard(store):
+    _, w, r, _ = store
+    release_ts = datetime(2026, 4, 17, 14, 30, tzinfo=UTC)
+    usable_after = release_ts + timedelta(minutes=5)
+    w.write_vintage(
+        source="eia",
+        dataset="wpsr",
+        series="WCESTUS1",
+        release_ts=release_ts,
+        usable_after_ts=usable_after,
+        data=pd.DataFrame({"value": [425_000.0]}),
+        provenance={"source": "eia.gov", "method": "archive_csv"},
+    )
+    assert (
+        r.as_of(
+            "eia",
+            "WCESTUS1",
+            usable_after - timedelta(seconds=1),
+            dataset="wpsr",
+        )
+        is None
+    )
+    res = r.as_of(
+        "eia",
+        "WCESTUS1",
+        usable_after + timedelta(seconds=1),
+        dataset="wpsr",
+    )
+    assert res is not None
+    assert res.data["value"].iloc[0] == 425_000.0
 
 
 def test_latest_available_before_ignores_supersession(store):

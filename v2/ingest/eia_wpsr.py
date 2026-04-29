@@ -50,6 +50,7 @@ from v2.ingest.public_data_registry import (
     load_registry,
 )
 from v2.pit_store.manifest import PITManifest
+from v2.pit_store.quality import VintageQuality
 from v2.pit_store.writer import PITWriter
 
 EIA_API_V2_BASE = "https://api.eia.gov/v2"
@@ -239,11 +240,13 @@ class EIAWPSRIngester(BaseIngester):
 
         return FetchResult(
             source=self.source,
+            dataset="wpsr",
             series=series_id,
             release_ts=release_ts,
             revision_ts=None,
             data=df,
             provenance=provenance,
+            vintage_quality=VintageQuality.LATEST_SNAPSHOT_NOT_PIT.value,
         )
 
     # -------------------------------------------------------------------

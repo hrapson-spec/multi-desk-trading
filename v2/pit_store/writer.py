@@ -25,7 +25,8 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from v2.pit_store.manifest import ManifestRow, PITManifest, new_manifest_id
+from v2.pit_store.manifest import MANIFEST_SELECT, ManifestRow, PITManifest, new_manifest_id
+from v2.pit_store.quality import VintageQuality, coerce_vintage_quality
 
 
 class PITChecksumMismatchError(Exception):
@@ -45,6 +46,10 @@ class WriteResult:
     checksum: str
     schema_hash: str
     row_count: int
+    source: str
+    dataset: str | None
+    series: str | None
+    vintage_quality: str
     was_revision: bool
     superseded_manifest_id: str | None
 
@@ -59,10 +64,13 @@ class PITWriter:
         self,
         *,
         source: str,
+        dataset: str | None = None,
         series: str | None,
         release_ts: datetime,
         data: pd.DataFrame,
         provenance: dict,
+        vintage_quality: str | VintageQuality = VintageQuality.TRUE_FIRST_RELEASE,
+        usable_after_ts: datetime | None = None,
         revision_ts: datetime | None = None,
         observation_start: date | None = None,
         observation_end: date | None = None,
@@ -77,8 +85,12 @@ class PITWriter:
                 "provenance must include at least 'source' and 'method' keys "
                 "(see v2_data_contract §10)"
             )
+        vintage_quality_value = coerce_vintage_quality(vintage_quality).value
 
         release_ts_utc = _to_utc(release_ts)
+        usable_after_ts_utc = (
+            _to_utc(usable_after_ts) if usable_after_ts is not None else release_ts_utc
+        )
         ingest_ts_utc = _to_utc(ingest_ts) if ingest_ts is not None else _utcnow()
 
         # Stage 1: write to a temp file so we can checksum before commit.
@@ -113,7 +125,9 @@ class PITWriter:
         #     If first-release exists with matching checksum: idempotent no-op.
         #     If first-release exists with different checksum: this is a
         #     revision; auto-assign revision_ts=ingest_ts and insert as revision.
-        existing_first = self.manifest.find_first_release(source, series, release_ts_utc)
+        existing_first = self.manifest.find_first_release(
+            source, series, release_ts_utc, dataset=dataset
+        )
 
         if revision_ts is None:
             if existing_first is None:
@@ -127,6 +141,10 @@ class PITWriter:
                     checksum=existing_first.checksum,
                     schema_hash=existing_first.schema_hash,
                     row_count=existing_first.row_count,
+                    source=existing_first.source,
+                    dataset=existing_first.dataset,
+                    series=existing_first.series,
+                    vintage_quality=existing_first.vintage_quality,
                     was_revision=False,
                     superseded_manifest_id=None,
                 )
@@ -137,7 +155,9 @@ class PITWriter:
             # Caller specified revision_ts explicitly.
             revision_ts_utc = _to_utc(revision_ts)
             is_revision = True
-            existing_slot = self._find_exact_slot(source, series, release_ts_utc, revision_ts_utc)
+            existing_slot = self._find_exact_slot(
+                source, dataset, series, release_ts_utc, revision_ts_utc
+            )
             if existing_slot is not None:
                 if existing_slot.checksum == checksum:
                     tmp_path.unlink(missing_ok=True)
@@ -147,18 +167,22 @@ class PITWriter:
                         checksum=existing_slot.checksum,
                         schema_hash=existing_slot.schema_hash,
                         row_count=existing_slot.row_count,
+                        source=existing_slot.source,
+                        dataset=existing_slot.dataset,
+                        series=existing_slot.series,
+                        vintage_quality=existing_slot.vintage_quality,
                         was_revision=True,
                         superseded_manifest_id=None,
                     )
                 tmp_path.unlink(missing_ok=True)
                 raise PITChecksumMismatch(
-                    f"re-ingest of ({source}, {series}, {release_ts_utc.isoformat()}, "
+                    f"re-ingest of ({source}, {dataset}, {series}, {release_ts_utc.isoformat()}, "
                     f"rev={revision_ts_utc.isoformat()}) produced checksum "
                     f"{checksum}, manifest has {existing_slot.checksum}"
                 )
 
         # Stage 3: promote temp to canonical path.
-        parquet_rel = _canonical_path(source, series, release_ts_utc, revision_ts_utc)
+        parquet_rel = _canonical_path(source, dataset, series, release_ts_utc, revision_ts_utc)
         parquet_abs = self.pit_root / parquet_rel
         parquet_abs.parent.mkdir(parents=True, exist_ok=True)
         tmp_path.replace(parquet_abs)
@@ -167,8 +191,10 @@ class PITWriter:
         row = ManifestRow(
             manifest_id=manifest_id,
             source=source,
+            dataset=dataset,
             series=series,
             release_ts=release_ts_utc,
+            usable_after_ts=usable_after_ts_utc,
             revision_ts=revision_ts_utc,
             observation_start=observation_start,
             observation_end=observation_end,
@@ -178,6 +204,7 @@ class PITWriter:
             ingest_ts=ingest_ts_utc,
             provenance=provenance,
             parquet_path=parquet_rel,
+            vintage_quality=vintage_quality_value,
             superseded_by=None,
         )
         self.manifest.insert(row)
@@ -194,6 +221,10 @@ class PITWriter:
             checksum=checksum,
             schema_hash=schema_hash,
             row_count=row_count,
+            source=source,
+            dataset=dataset,
+            series=series,
+            vintage_quality=vintage_quality_value,
             was_revision=is_revision,
             superseded_manifest_id=superseded_id,
         )
@@ -203,22 +234,28 @@ class PITWriter:
     def _find_exact_slot(
         self,
         source: str,
+        dataset: str | None,
         series: str | None,
         release_ts: datetime,
         revision_ts: datetime | None,
     ) -> ManifestRow | None:
         if revision_ts is None:
-            return self.manifest.find_first_release(source, series, release_ts)
+            return self.manifest.find_first_release(
+                source, series, release_ts, dataset=dataset
+            )
         rows = self.manifest.conn.execute(
-            """
-            SELECT * FROM pit_manifest
+            f"""
+            SELECT {MANIFEST_SELECT} FROM pit_manifest
             WHERE source = ?
+              AND ((? IS NULL AND dataset IS NULL) OR dataset = ?)
               AND ((? IS NULL AND series IS NULL) OR series = ?)
               AND release_ts = ?
               AND revision_ts = ?
             """,
             [
                 source,
+                dataset,
+                dataset,
                 series,
                 series,
                 _naive_utc(release_ts),
@@ -233,12 +270,15 @@ class PITWriter:
 
 def _canonical_path(
     source: str,
+    dataset: str | None,
     series: str | None,
     release_ts: datetime,
     revision_ts: datetime | None,
 ) -> str:
     iso = release_ts.strftime("%Y-%m-%dT%H-%M-%SZ")
     parts = [f"raw/{source}"]
+    if dataset is not None:
+        parts.append(f"dataset={dataset}")
     if series is not None:
         parts.append(f"series={series}")
     parts.append(f"release_ts={iso}")

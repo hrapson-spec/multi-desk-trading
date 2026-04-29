@@ -112,6 +112,7 @@ class WTIPricesIngester(BaseIngester):
         }
         return FetchResult(
             source="wti_prices",
+            dataset="front_month_eod_proxy",
             series="CL_FRONT_DAILY_EOD",
             release_ts=release_ts,
             revision_ts=None,
@@ -155,6 +156,7 @@ class WTIPricesIngester(BaseIngester):
         }
         return FetchResult(
             source="wti_prices",
+            dataset="front_month_eod_proxy",
             series="CL_FRONT_DAILY_EOD",
             release_ts=release_ts,
             revision_ts=None,

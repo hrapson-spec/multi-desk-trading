@@ -1,7 +1,10 @@
-source: eia_wpsr
+source: eia
+dataset: wpsr
 description: "EIA Weekly Petroleum Status Report (U.S. crude/product balances)"
 publisher: "U.S. Energy Information Administration"
 calendar_version: "1.0.0"
+latency_guard_minutes: 5
+holiday_handling: "official_issue_date_or_schedule"
 release_cadence:
   type: weekly
   weekday: wednesday

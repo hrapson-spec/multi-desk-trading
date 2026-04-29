@@ -20,13 +20,21 @@ from v2.feature_view.builder import (
     build_feature_view,
     identity_transform,
 )
+from v2.feature_view.quality import (
+    FeatureAdmissibilityError,
+    build_data_quality_manifest,
+    render_data_quality_warning_block,
+)
 from v2.feature_view.spec import FeatureSpec
 from v2.feature_view.view import FeatureView
 
 __all__ = [
     "FeatureSpec",
     "FeatureView",
+    "FeatureAdmissibilityError",
     "FeatureViewBuildError",
+    "build_data_quality_manifest",
     "build_feature_view",
     "identity_transform",
+    "render_data_quality_warning_block",
 ]

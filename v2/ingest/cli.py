@@ -38,7 +38,7 @@ SOURCE_KEYS = (
 )
 
 
-def _build_ingester(source_key: str, writer: PITWriter, manifest):
+def _build_ingester(source_key: str, writer: PITWriter, manifest, *, since: str | None = None):
     """Wire a source key to its ingester with default arguments.
 
     Imports are lazy so that a missing optional API key (FRED/EIA) only
@@ -53,9 +53,17 @@ def _build_ingester(source_key: str, writer: PITWriter, manifest):
 
         return FREDAlfredIngester(writer=writer, manifest=manifest)
     if source_key == "cftc_cot":
+        from datetime import UTC
+
         from v2.ingest.cftc_cot import CFTCCOTIngester
 
-        return CFTCCOTIngester(writer=writer, manifest=manifest)
+        if since is None:
+            years = None
+        else:
+            start_year = datetime.fromisoformat(since).replace(tzinfo=UTC).year
+            current_year = datetime.now(UTC).year
+            years = list(range(start_year, current_year + 1))
+        return CFTCCOTIngester(writer=writer, manifest=manifest, years=years)
     if source_key == "wti_prices":
         from v2.ingest.wti_prices import WTIPricesIngester
 
@@ -81,7 +89,7 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
     manifest = open_manifest(pit_root)
     writer = PITWriter(pit_root, manifest)
     try:
-        ingester = _build_ingester(args.source, writer, manifest)
+        ingester = _build_ingester(args.source, writer, manifest, since=args.since)
         try:
             results = ingester.ingest()
         except MissingAPIKeyError as e:
@@ -136,6 +144,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     bf = sub.add_parser("backfill", help="run an ingester with default args")
     bf.add_argument("--source", required=True, choices=SOURCE_KEYS)
+    bf.add_argument(
+        "--since",
+        default=None,
+        help=(
+            "optional ISO date lower bound where supported; currently used "
+            "to bound CFTC annual backfill years"
+        ),
+    )
     bf.set_defaults(func=_cmd_backfill)
 
     feats = sub.add_parser("build-features", help="build the PIT-safe feature join")

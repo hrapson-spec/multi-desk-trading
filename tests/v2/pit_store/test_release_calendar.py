@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 import yaml
@@ -89,6 +89,22 @@ def test_is_eligible_simple():
     release_ts = datetime(2026, 1, 14, 15, 30, tzinfo=UTC)
     assert cal.is_eligible(release_ts, datetime(2026, 1, 14, 15, 30, tzinfo=UTC)) is True
     assert cal.is_eligible(release_ts, datetime(2026, 1, 14, 15, 29, tzinfo=UTC)) is False
+
+
+def test_latency_guard_minutes_delays_eligibility():
+    cal = ReleaseCalendar.model_validate({**_VALID, "latency_guard_minutes": 5})
+    release_ts = datetime(2026, 1, 14, 15, 30, tzinfo=UTC)
+    assert cal.usable_after_ts(release_ts) == release_ts + timedelta(minutes=5)
+    assert cal.is_eligible(release_ts, release_ts + timedelta(minutes=4, seconds=59)) is False
+    assert cal.is_eligible(release_ts, release_ts + timedelta(minutes=5)) is True
+
+
+def test_release_timezone_dst_uses_america_new_york():
+    cal = ReleaseCalendar.model_validate(_VALID)
+    winter = cal.release_datetime_utc(date(2026, 1, 14))
+    summer = cal.release_datetime_utc(date(2026, 7, 15))
+    assert winter == datetime(2026, 1, 14, 15, 30, tzinfo=UTC)
+    assert summer == datetime(2026, 7, 15, 14, 30, tzinfo=UTC)
 
 
 def test_quality_multiplier_for_lag():

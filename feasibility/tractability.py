@@ -219,14 +219,23 @@ def load_wpsr_release_dates(pit_root: Path) -> tuple[list[pd.Timestamp], dict[st
 
     conn = duckdb.connect(str(db_path), read_only=True)
     try:
+        manifest_cols = {
+            str(row[1])
+            for row in conn.execute("PRAGMA table_info('pit_manifest')").fetchall()
+        }
+        ts_col = "usable_after_ts" if "usable_after_ts" in manifest_cols else "release_ts"
+        dataset_predicate = (
+            "OR lower(dataset) = 'wpsr'" if "dataset" in manifest_cols else ""
+        )
         rows = conn.execute(
-            """
-            SELECT DISTINCT source, series, release_ts
+            f"""
+            SELECT DISTINCT source, series, {ts_col}
             FROM pit_manifest
             WHERE source IN ('eia', 'eia_wpsr')
                OR lower(source) LIKE '%wpsr%'
+               {dataset_predicate}
                OR lower(series) LIKE '%wpsr%'
-            ORDER BY release_ts
+            ORDER BY {ts_col}
             """
         ).fetchall()
     finally:

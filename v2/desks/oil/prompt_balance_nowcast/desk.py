@@ -40,14 +40,24 @@ class PromptBalanceNowcastDesk(ConcreteDeskV2):
 
     def feature_specs(self) -> list[FeatureSpec]:
         return [
-            FeatureSpec(name="eia_crude_stocks", source="eia_wpsr", series="crude_stocks"),
-            FeatureSpec(name="eia_gasoline_stocks", source="eia_wpsr", series="gasoline_stocks"),
             FeatureSpec(
-                name="eia_distillate_stocks", source="eia_wpsr", series="distillate_stocks"
+                name="eia_crude_stocks", source="eia", dataset="wpsr", series="crude_stocks"
             ),
-            FeatureSpec(name="refinery_runs", source="eia_wpsr", series="refinery_runs"),
-            FeatureSpec(name="crude_imports", source="eia_wpsr", series="crude_imports"),
-            FeatureSpec(name="crude_exports", source="eia_wpsr", series="crude_exports"),
+            FeatureSpec(
+                name="eia_gasoline_stocks",
+                source="eia",
+                dataset="wpsr",
+                series="gasoline_stocks",
+            ),
+            FeatureSpec(
+                name="eia_distillate_stocks",
+                source="eia",
+                dataset="wpsr",
+                series="distillate_stocks",
+            ),
+            FeatureSpec(name="refinery_runs", source="eia", dataset="wpsr", series="refinery_runs"),
+            FeatureSpec(name="crude_imports", source="eia", dataset="wpsr", series="crude_imports"),
+            FeatureSpec(name="crude_exports", source="eia", dataset="wpsr", series="crude_exports"),
             FeatureSpec(
                 name="wti_calendar_spread_1_2",
                 source="wti_front_month",

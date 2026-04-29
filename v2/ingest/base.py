@@ -9,6 +9,7 @@ from typing import Protocol, runtime_checkable
 import pandas as pd
 
 from v2.pit_store.manifest import PITManifest
+from v2.pit_store.quality import VintageQuality
 from v2.pit_store.writer import PITWriter, WriteResult
 
 
@@ -29,6 +30,9 @@ class FetchResult:
     revision_ts: datetime | None
     data: pd.DataFrame
     provenance: dict
+    dataset: str | None = None
+    vintage_quality: str = VintageQuality.TRUE_FIRST_RELEASE.value
+    usable_after_ts: datetime | None = None
     observation_start: date | None = None
     observation_end: date | None = None
 
@@ -70,10 +74,13 @@ class BaseIngester:
         for f in self.fetch(as_of_ts):
             r = self.writer.write_vintage(
                 source=f.source,
+                dataset=f.dataset,
                 series=f.series,
                 release_ts=f.release_ts,
                 data=f.data,
                 provenance=f.provenance,
+                vintage_quality=f.vintage_quality,
+                usable_after_ts=f.usable_after_ts,
                 revision_ts=f.revision_ts,
                 observation_start=f.observation_start,
                 observation_end=f.observation_end,

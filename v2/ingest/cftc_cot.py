@@ -143,6 +143,7 @@ class CFTCCOTIngester(BaseIngester):
 
         return FetchResult(
             source="cftc_cot",
+            dataset="disaggregated",
             series=f"{self._market_code}_disaggregated",
             release_ts=release_ts,
             revision_ts=None,

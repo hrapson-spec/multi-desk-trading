@@ -33,11 +33,12 @@ def populated_store(tmp_path):
     release_ts = datetime(2026, 4, 22, 14, 30, tzinfo=UTC)
     for s in REQUIRED_SERIES:
         w.write_vintage(
-            source="eia_wpsr",
+            source="eia",
+            dataset="wpsr",
             series=s,
             release_ts=release_ts,
             data=pd.DataFrame({"value": [1.0]}),
-            provenance={"source": "eia_wpsr", "method": "test"},
+            provenance={"source": "eia", "method": "test"},
         )
     try:
         yield tmp_path, w, m, r
@@ -80,11 +81,12 @@ def test_desk_abstains_when_required_feature_missing(tmp_path):
     # Only ingest 3 of the 6 required series — desk must abstain.
     for s in REQUIRED_SERIES[:3]:
         w.write_vintage(
-            source="eia_wpsr",
+            source="eia",
+            dataset="wpsr",
             series=s,
             release_ts=datetime(2026, 4, 22, 14, 30, tzinfo=UTC),
             data=pd.DataFrame({"value": [1.0]}),
-            provenance={"source": "eia_wpsr", "method": "test"},
+            provenance={"source": "eia", "method": "test"},
         )
     reader = PITReader(tmp_path, m)
 

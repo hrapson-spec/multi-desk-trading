@@ -153,6 +153,7 @@ entries:
   # -------------------------------------------------------------------------
   - key: eia_wcestus1
     source: eia
+    dataset: wpsr
     series_id: WCESTUS1
     description: "U.S. Ending Stocks of Crude Oil (excl. SPR), weekly, kbbl"
     source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCESTUS1&f=W
@@ -165,6 +166,7 @@ entries:
 
   - key: eia_wcsstus1
     source: eia
+    dataset: wpsr
     series_id: WCSSTUS1
     description: "U.S. Ending Stocks of Crude Oil in SPR, weekly, kbbl"
     source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCSSTUS1&f=W
@@ -177,6 +179,7 @@ entries:
 
   - key: eia_cushing_stocks
     source: eia
+    dataset: wpsr
     series_id: W_EPC0_SAX_YCUOK_MBBL
     description: "Cushing OK ending stocks of crude oil (weekly, kbbl)"
     source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=W_EPC0_SAX_YCUOK_MBBL&f=W
@@ -189,6 +192,7 @@ entries:
 
   - key: eia_us_crude_production_weekly
     source: eia
+    dataset: wpsr
     series_id: WCRFPUS2
     description: "U.S. weekly field production of crude oil (kbbl/d)"
     source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCRFPUS2&f=W
@@ -202,6 +206,7 @@ entries:
 
   - key: eia_us_crude_imports_weekly
     source: eia
+    dataset: wpsr
     series_id: WCRIMUS2
     description: "U.S. weekly imports of crude oil (kbbl/d)"
     source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCRIMUS2&f=W
@@ -215,6 +220,7 @@ entries:
 
   - key: eia_us_crude_exports_weekly
     source: eia
+    dataset: wpsr
     series_id: WCREXUS2
     description: "U.S. weekly exports of crude oil (kbbl/d)"
     source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCREXUS2&f=W
@@ -228,6 +234,7 @@ entries:
 
   - key: eia_refinery_utilisation_weekly
     source: eia
+    dataset: wpsr
     series_id: WPULEUS3
     description: "U.S. weekly percent utilisation of refinery operable capacity"
     source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WPULEUS3&f=W
@@ -241,6 +248,7 @@ entries:
 
   - key: eia_us_gasoline_stocks_weekly
     source: eia
+    dataset: wpsr
     series_id: WGTSTUS1
     description: "U.S. weekly ending stocks of total gasoline (kbbl)"
     source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WGTSTUS1&f=W
@@ -254,6 +262,7 @@ entries:
 
   - key: eia_us_distillate_stocks_weekly
     source: eia
+    dataset: wpsr
     series_id: WDISTUS1
     description: "U.S. weekly ending stocks of distillate fuel oil (kbbl)"
     source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WDISTUS1&f=W
@@ -267,6 +276,7 @@ entries:
 
   - key: eia_us_jet_stocks_weekly
     source: eia
+    dataset: wpsr
     series_id: WKJSTUS1
     description: "U.S. weekly ending stocks of kerosene-type jet fuel (kbbl)"
     source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WKJSTUS1&f=W
@@ -280,6 +290,7 @@ entries:
 
   - key: eia_us_propane_stocks_weekly
     source: eia
+    dataset: wpsr
     series_id: WPRSTUS1
     description: "U.S. weekly ending stocks of propane and propylene (kbbl)"
     source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WPRSTUS1&f=W
@@ -293,6 +304,7 @@ entries:
 
   - key: eia_us_product_supplied_total_weekly
     source: eia
+    dataset: wpsr
     series_id: WRPUPUS2
     description: "U.S. weekly total products supplied (proxy for end-use demand, kbbl/d)"
     source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WRPUPUS2&f=W

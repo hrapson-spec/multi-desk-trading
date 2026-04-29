@@ -22,6 +22,11 @@ from typing import Any
 import pandas as pd
 
 from v2.contracts.forecast_v2 import SourceEligibility
+from v2.feature_view.quality import (
+    enforce_feature_admissibility,
+    input_key,
+    summarise_vintage_quality,
+)
 from v2.feature_view.spec import FeatureSpec
 from v2.feature_view.view import FeatureView
 from v2.pit_store.reader import PITReader
@@ -64,6 +69,8 @@ def build_feature_view(
     stale_flags: dict[str, str] = {}
     manifest_ids: dict[str, str | None] = {}
     forward_fill_used: dict[str, bool] = {}
+    vintage_quality: dict[str, str] = {}
+    degraded_inputs: set[str] = set()
 
     # Hash inputs: the set of (feature_name, source, series, transform,
     # transform_params, vintage_checksum, eligible, quality_multiplier)
@@ -77,13 +84,19 @@ def build_feature_view(
                 f"feature {spec.name!r}: transform {spec.transform!r} not registered"
             )
 
-        read = reader.as_of(spec.source, spec.series, as_of_ts)
+        read = reader.as_of(
+            source=spec.source,
+            dataset=spec.dataset,
+            series=spec.series,
+            as_of_ts=as_of_ts,
+        )
         if read is None:
             features[spec.name] = None
             missingness[spec.name] = True
             stale_flags[spec.name] = "missing"
             manifest_ids[spec.name] = None
             forward_fill_used[spec.name] = False
+            vintage_quality[spec.name] = "missing"
             hash_payload.append(
                 {
                     "feature": spec.name,
@@ -91,15 +104,20 @@ def build_feature_view(
                     "vintage_checksum": None,
                     "eligible": False,
                     "quality_multiplier": 0.0,
+                    "vintage_quality": "missing",
                 }
             )
             continue
 
+        enforce_feature_admissibility(spec, read.manifest.vintage_quality)
         value = reg[spec.transform](read.data, dict(spec.transform_params))
         features[spec.name] = value
         missingness[spec.name] = False
         stale_flags[spec.name] = read.data_quality.freshness_state
         manifest_ids[spec.name] = read.manifest.manifest_id
+        vintage_quality[spec.name] = read.manifest.vintage_quality
+        if read.manifest.vintage_quality != "true_first_release":
+            degraded_inputs.add(input_key(spec.source, spec.dataset, spec.series))
         # Forward-fill tracking: v2.0 builds do not forward-fill (identity
         # transform only). A future transform that fills gaps must set
         # forward_fill_used=True via the TransformFn contract.
@@ -107,16 +125,18 @@ def build_feature_view(
 
         elig = SourceEligibility(
             source=spec.source,
+            dataset=spec.dataset,
             eligible=read.data_quality.decision_eligible,
             release_lag_days=read.data_quality.release_lag_days,
             freshness_state=read.data_quality.freshness_state,
             quality_multiplier=read.data_quality.quality_multiplier,
             manifest_id=read.manifest.manifest_id,
+            vintage_quality=read.manifest.vintage_quality,
         )
         # Per-source record. If two specs share a source, the most
         # restrictive quality_multiplier wins; that is a v2.1 refinement
         # and not required at v2.0 — first-write-wins here.
-        source_eligibility.setdefault(spec.source, elig)
+        source_eligibility.setdefault(input_key(spec.source, spec.dataset, None), elig)
 
         hash_payload.append(
             {
@@ -125,6 +145,7 @@ def build_feature_view(
                 "vintage_checksum": read.manifest.checksum,
                 "eligible": read.data_quality.decision_eligible,
                 "quality_multiplier": read.data_quality.quality_multiplier,
+                "vintage_quality": read.manifest.vintage_quality,
             }
         )
 
@@ -140,6 +161,14 @@ def build_feature_view(
     view_hash = hashlib.sha256(
         json.dumps(hash_input, sort_keys=True, default=str).encode("utf-8")
     ).hexdigest()
+    quality_payload = {
+        name: quality
+        for name, quality in vintage_quality.items()
+        if quality != "missing"
+    }
+    worst_quality, data_quality_warning, degraded_input_tuple = summarise_vintage_quality(
+        quality_payload, degraded_inputs
+    )
 
     return FeatureView(
         as_of_ts=as_of_ts,
@@ -152,5 +181,9 @@ def build_feature_view(
         stale_flags=stale_flags,
         manifest_ids=manifest_ids,
         forward_fill_used=forward_fill_used,
+        vintage_quality=vintage_quality,
+        degraded_inputs=degraded_input_tuple,
+        worst_vintage_quality=worst_quality,
+        data_quality_warning=data_quality_warning,
         view_hash=view_hash,
     )

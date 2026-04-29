@@ -34,6 +34,7 @@ class RegistryEntry(BaseModel):
 
     key: str = Field(..., description="Unique identifier within the registry")
     source: str
+    dataset: str | None = None
     series_id: str | None = None
     description: str
     source_url: HttpUrl
