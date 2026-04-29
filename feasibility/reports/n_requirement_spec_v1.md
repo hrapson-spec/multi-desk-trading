@@ -249,15 +249,26 @@ mandatory field plus:
 If any v0 mandatory field is absent, the run is not valid evidence.
 Harness v1.0 produces a complete manifest by construction.
 
-## 13. Horizon variants (NEW per A9)
+## 13. 3d operational default (promoted from variant 2026-04-29)
 
-### 13.1 `WTI_FRONT_3D_LOG_RETURN` variant
+**As of 2026-04-29**, the 3d horizon (`horizon_days=3, purge_days=3,
+embargo_days=3`) is the harness's default operational baseline.
+The locked v0 5d horizon remains byte-identically reproducible via
+explicit `--horizon-days 5 --purge-days 5 --embargo-days 5`. The
+v0 invariant tests at `tests/feasibility/test_tractability_v1.py`
+(lines 302, 549, 1064) continue to verify the v0 N=163 result and
+have been pinned with explicit `_default_targets(horizon_days=5)`.
+
+The default flip is documented in
+`feasibility/reports/terminal_2026-04-29_3d_operational_baseline.md`.
+
+### 13.1 `WTI_FRONT_3D_LOG_RETURN` variant — now operational default
 
 Added to the target registry at `contracts/target_variables.py` as
 a v1.x revision. Companion target name:
 `WTI_FRONT_3D_RETURN_SIGN` (binary directional).
 
-**Parameters:**
+**Parameters (now the harness default):**
 - `horizon_days = 3`
 - `purge_days = 3`
 - `embargo_days = 3`
@@ -266,11 +277,14 @@ a v1.x revision. Companion target name:
 **Justification (per spec §11 #4):** the dependence analysis at
 `docs/v2/dependence_analysis_3d_horizon.md` provides the written
 analysis required by §11 #4 for any reduction in `purge` or
-`embargo`. Key empirical findings:
+`embargo`. Key empirical findings (post bug fix `7b3a321`
+"correct residual-mode event de-duplication" — earlier numbers
+were inflated by a duplicate target-anchor expansion):
 
-- Post-thinning N at 3d horizon: **365** (was 163 at 5d for WPSR
-  alone; 207 at 5d for WPSR + FOMC; 209 at 5d for WPSR + FOMC +
-  OPEC).
+- Post-thinning N at 3d horizon (corrected): **310** (was 163 at
+  5d for WPSR alone; 285 at 3d for WPSR + FOMC + OPEC; 310 at 3d
+  for all 6 calendar families). Pre-bug-fix numbers (365 / 401)
+  are superseded.
 - Newey-West HAC effective N at 3d (raw target, Phase 0
   diagnostic):
   - `return_sign`: 268 (clears Phase 3)
