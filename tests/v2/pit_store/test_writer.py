@@ -158,6 +158,7 @@ def test_same_release_ts_different_observation_period_is_not_revision(writer_and
     assert first.was_revision is False
     assert second.was_revision is False
     assert first.manifest_id != second.manifest_id
+    assert first.parquet_path != second.parquet_path
     rows = m.list_all("eia", dataset="wpsr")
     assert len(rows) == 2
     assert {row.observation_end for row in rows} == {

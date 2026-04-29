@@ -11,9 +11,10 @@ Each `write_vintage` call atomically:
        revision, its `revision_ts` is set, and the older row is marked
        superseded.
 
-The canonical path is stable: re-ingesting an identical vintage byte-for-byte
-overwrites the same file and the checksum stays constant. Re-ingesting with
-a different payload raises PITChecksumMismatch.
+    The canonical path is stable for a complete vintage identity, including the
+    observation period when present: re-ingesting an identical vintage
+    byte-for-byte overwrites the same file and the checksum stays constant.
+    Re-ingesting with a different payload raises PITChecksumMismatch.
 """
 
 from __future__ import annotations
@@ -195,7 +196,15 @@ class PITWriter:
                 )
 
         # Stage 3: promote temp to canonical path.
-        parquet_rel = _canonical_path(source, dataset, series, release_ts_utc, revision_ts_utc)
+        parquet_rel = _canonical_path(
+            source,
+            dataset,
+            series,
+            release_ts_utc,
+            revision_ts_utc,
+            observation_start=observation_start,
+            observation_end=observation_end,
+        )
         parquet_abs = self.pit_root / parquet_rel
         parquet_abs.parent.mkdir(parents=True, exist_ok=True)
         tmp_path.replace(parquet_abs)
@@ -300,6 +309,8 @@ def _canonical_path(
     series: str | None,
     release_ts: datetime,
     revision_ts: datetime | None,
+    observation_start: date | None = None,
+    observation_end: date | None = None,
 ) -> str:
     iso = release_ts.strftime("%Y-%m-%dT%H-%M-%SZ")
     parts = [f"raw/{source}"]
@@ -308,6 +319,10 @@ def _canonical_path(
     if series is not None:
         parts.append(f"series={series}")
     parts.append(f"release_ts={iso}")
+    if observation_start is not None:
+        parts.append(f"observation_start={observation_start.isoformat()}")
+    if observation_end is not None:
+        parts.append(f"observation_end={observation_end.isoformat()}")
     if revision_ts is not None:
         rev_iso = revision_ts.strftime("%Y-%m-%dT%H-%M-%SZ")
         parts.append(f"revision_ts={rev_iso}")
