@@ -173,3 +173,82 @@ held the write lock. A subsequent foreground call failed with `IOException: Conf
 **Mitigation:** Never run two `cli backfill` commands concurrently against the same
 `pit.duckdb`. The operator should wait for one backfill to complete before launching the
 next (as specified in the task instructions).
+
+---
+
+## R1 Retry — 2026-04-29
+
+Retry run at approximately the same day (no overnight reset observed). All 4 stooq
+endpoints remain blocked.
+
+### Per-source result
+
+| source             | symbol | outcome                                      |
+|--------------------|--------|----------------------------------------------|
+| cl_front_eod_pit   | cl.f   | FAIL — `RuntimeError: all WTI price sources failed: ['stooq']; last error: _EmptyBodyError('stooq returned empty body')` |
+| brent_front_eod_pit | b.f   | FAIL — `_EmptyBodyError: stooq returned empty for b.f` |
+| rbob_front_eod_pit | rb.f   | FAIL — `_EmptyBodyError: stooq returned empty for rb.f` |
+| ng_front_eod_pit   | ng.f   | FAIL — `_EmptyBodyError: stooq returned empty for ng.f` |
+
+All 4 sources returned HTTP 200 with empty body. No partial data written.
+
+### PIT manifest delta
+
+No delta. Query on `WHERE source LIKE '%_front_eod_pit'` returns zero rows — unchanged
+from R0.
+
+### Multi-asset tractability
+
+Skipped — no spines populated.
+
+### Test suite
+
+```
+1 failed, 879 passed, 1 skipped in 35.67s
+```
+
+The 1 failure (`test_yahoo_fallback_on_stooq_503`) is a pre-existing flaky test: it passes
+when run in isolation (confirmed: `1 passed in 3.94s`). Not a regression from this run.
+
+**R1 still blocked at 2026-04-29; suggest 1440 min (24h) retry interval.**
+Stooq quotas are documented as daily-resetting; the retry should be run the following
+morning before any other stooq usage.
+
+---
+
+## R2 RESOLVED — 2026-04-29
+
+**Root cause (confirmed by live probe):** Yahoo Finance `v7/finance/download/CL=F` now
+returns HTTP 429 with HTML body `"Edge: Too Many Requests"` rather than a CSV. The
+`_parse_csv` function parsed the HTML as a single-column DataFrame, and `_normalize_ohlcv`
+raised `ValueError("WTI CSV missing 'date' column")`. That `ValueError` was not caught by
+the `fetch()` fallthrough loop (which only caught `RetryExhaustedError` and `_EmptyBodyError`),
+so it propagated out of `WTIPricesIngester.fetch()` as an unhandled exception.
+
+**Fix applied (Option B — graceful decommission):**
+
+File: `v2/ingest/wti_prices.py`
+
+1. `WTIPricesIngester.__init__`: default `source_priority` changed from
+   `["stooq", "yahoo"]` to `["stooq"]`. Yahoo remains callable by operator subclasses
+   that supply authenticated sessions, but is no longer in the default path.
+2. `_fetch_yahoo`: added `resp.status_code != 200` guard that raises `_EmptyBodyError`
+   (not `ValueError`) before attempting CSV parse — 4xx/5xx from Yahoo now falls through
+   to the next source cleanly.
+3. `_fetch_yahoo`: added `except ValueError` wrapper around `_parse_csv` +
+   `_normalize_ohlcv` calls, converting unexpected column-layout errors into
+   `_EmptyBodyError` for graceful fallthrough (covers the 200-but-HTML edge case).
+4. Docstring on `_fetch_yahoo` documents the 2026-04-29 decommission decision.
+
+**Tests added/updated:** `tests/v2/ingest/test_wti_prices_fetcher.py`
+
+- `test_yahoo_429_raises_empty_body_and_falls_through_to_stooq` (new): verifies 429
+  triggers fallthrough to stooq with correct provenance.
+- `test_yahoo_non_csv_body_treated_as_empty_source` (new): verifies 200+HTML falls
+  through via the `ValueError` guard.
+- `test_stooq_primary_path_unaffected_by_yahoo_decommission` (new): verifies default
+  `source_priority=["stooq"]` never contacts Yahoo.
+- `test_yahoo_fallback_on_stooq_503` (updated): now passes explicit
+  `source_priority=["stooq", "yahoo"]` since Yahoo is no longer a default.
+
+**Full suite result post-fix:** 883 passed, 1 skipped (up from 879 pre-fix). Ruff clean.

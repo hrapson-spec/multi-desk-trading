@@ -176,6 +176,11 @@ def load_residuals_csv(path: Path) -> pd.Series:
     """Load residuals CSV with columns decision_ts (ISO 8601 UTC), residual.
 
     Returns pd.Series indexed by UTC DatetimeIndex, values are residuals.
+
+    Duplicate timestamps arise when multiple event families (e.g. wpsr + fomc)
+    share the same decision date; the WTI target outcome is identical for each
+    so the residual values agree.  We deduplicate by keeping the first row per
+    timestamp (after asserting all duplicates carry the same residual value).
     """
     df = pd.read_csv(path)
     if not {"decision_ts", "residual"} <= set(df.columns):
@@ -184,11 +189,26 @@ def load_residuals_csv(path: Path) -> pd.Series:
             f"got {list(df.columns)}"
         )
     ts = pd.to_datetime(df["decision_ts"], utc=True)
-    return pd.Series(
+    ser = pd.Series(
         df["residual"].astype(float).to_numpy(),
         index=pd.DatetimeIndex(ts),
         name="residual",
     )
+    # Deduplicate: multi-family events can share a decision_ts; residuals must agree.
+    dup_mask = ser.index.duplicated(keep=False)
+    if dup_mask.any():
+        dup_ser = ser[dup_mask]
+        groups_inconsistent = (
+            dup_ser.groupby(level=0).std(ddof=0).fillna(0.0) > 1e-9
+        )
+        if groups_inconsistent.any():
+            bad = groups_inconsistent[groups_inconsistent].index.tolist()
+            raise ValueError(
+                f"residuals CSV has duplicate timestamps with inconsistent values "
+                f"at: {bad[:5]}"
+            )
+        ser = ser[~ser.index.duplicated(keep="first")]
+    return ser
 
 
 @dataclass
