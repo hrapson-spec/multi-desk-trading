@@ -12,6 +12,43 @@ controller correctness, or the frozen contract surface is not in-budget.
 
 ## Active debits (2026-04-22 worktree — v1.16 restructure)
 
+### D-WTI-LAG-1D. Provisional 1d WTI lag candidate requires forward holdout — opened 2026-04-29
+
+**Finding.** The all-calendar WTI lag 1d audit candidate clears the registered
+historical Phase 3 numeric thresholds, but it was discovered after the planned
+3d candidate family failed. It is therefore a post-hoc exploratory success, not
+a promotion-grade preregistered result.
+
+Pinned metrics:
+
+- Target: `wti_front_1d_return_sign`
+- Families: `wpsr,fomc,steo,opec_ministerial,psm,gpr`
+- Horizon / purge / embargo: `1/1/1`
+- Scored residuals: `589`
+- HAC effective N: `524`
+- Block-bootstrap effective N: `547`
+- Accuracy: `52.12%`
+- Gain vs zero-return baseline: `+5.09 pp`
+- Gain vs realized majority-sign baseline: `-0.85 pp`
+
+**Scope.** Feasibility-audit debit. The harness can find and lock a viable
+short-horizon branch, but the candidate cannot be represented as a promoted
+desk until forward outcomes validate the claim without tuning.
+
+**Mitigation.** Forward lock created at
+`feasibility/forward/wti_lag_1d/lock.json`. Promotion review requires at least
+60 resolved forward events, preferably 100, with the locked feature, model,
+threshold, family list, refit cadence, purge, and embargo unchanged. Forward
+review must beat both the registered zero-return baseline and the realized
+majority-sign baseline.
+
+**Pinned by.**
+
+- `feasibility/reports/terminal_2026-04-29_phase3_audit_wti_lag_1d.md`
+- `feasibility/reports/terminal_2026-04-29_wti_lag_1d_robustness.md`
+- `feasibility/reports/terminal_2026-04-29_wti_lag_1d_promotion_memo.md`
+- `feasibility/forward/wti_lag_1d/lock.json`
+
 ### D-S4-3. Local/free WTI ridge signal not promotable — opened 2026-04-24
 
 **Finding.** The first S4-3 local/free model-quality diagnostic evaluates a

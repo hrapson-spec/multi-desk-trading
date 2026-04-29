@@ -26,6 +26,7 @@ from __future__ import annotations
 # First registered target; all others added as desks are deepened per §12.1.
 WTI_FRONT_MONTH_CLOSE = "wti_front_month_close"
 WTI_FRONT_1W_LOG_RETURN = "wti_front_1w_log_return"
+WTI_FRONT_1D_RETURN_SIGN = "wti_front_1d_return_sign"
 
 # v1.x addition (data plan Tier 3.A) — 3-day horizon variants admitted
 # under feasibility/reports/n_requirement_spec_v1.md §13. Backed by the
@@ -68,6 +69,7 @@ KNOWN_TARGETS: frozenset[str] = frozenset(
     {
         WTI_FRONT_MONTH_CLOSE,
         WTI_FRONT_1W_LOG_RETURN,
+        WTI_FRONT_1D_RETURN_SIGN,
         WTI_FRONT_3D_LOG_RETURN,
         WTI_FRONT_3D_RETURN_SIGN,
         BRENT_FRONT_5D_LOG_RETURN,

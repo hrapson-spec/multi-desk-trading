@@ -1,0 +1,113 @@
+{
+  "candidate": {
+    "decision_threshold_probability_positive": 0.5,
+    "embargo_days": 1,
+    "families": [
+      "wpsr",
+      "fomc",
+      "steo",
+      "opec_ministerial",
+      "psm",
+      "gpr"
+    ],
+    "feature_leakage_guard": "strict_previous_trading_day_excludes_event_day",
+    "feature_set": [
+      "wti_prev_trading_day_1d_log_return"
+    ],
+    "horizon_days": 1,
+    "id": "wti_lag_all_calendar_1d_audit_candidate",
+    "min_train_events": 52,
+    "model_class": "feasibility.candidates.wti_lag_1d.classical.WTILag1DLogisticModel",
+    "model_hyperparameters": {
+      "C": 0.25,
+      "fit_intercept": true,
+      "max_iter": 200,
+      "penalty": "l2",
+      "random_state": 42,
+      "solver": "lbfgs"
+    },
+    "purge_days": 1,
+    "refit_months": 1,
+    "status": "audit_only_provisional",
+    "target_variable": "wti_front_1d_return_sign"
+  },
+  "capability_debits": [
+    {
+      "description": "Candidate was discovered after exploratory 3d failures; historical pass is not promotion-grade.",
+      "id": "D-WTI-LAG-1D-001",
+      "severity": "blocking_for_promotion"
+    },
+    {
+      "description": "Historical model beats the registered zero-return baseline but trails the realized majority-sign baseline.",
+      "id": "D-WTI-LAG-1D-002",
+      "severity": "major"
+    },
+    {
+      "description": "WTI target uses free FRED spot proxy and is forbidden for executable CL/MCL replay.",
+      "id": "D-WTI-LAG-1D-003",
+      "severity": "major"
+    }
+  ],
+  "forward_holdout_rules": {
+    "forbidden": [
+      "change_features",
+      "change_model_class",
+      "change_hyperparameters",
+      "change_thresholds",
+      "peek_and_tune_on_forward_outcomes",
+      "promote_without_forward_memo"
+    ],
+    "minimum_forward_scored_events_before_promotion_review": 60,
+    "must_retest_majority_baseline": true,
+    "must_retest_zero_return_baseline": true,
+    "preferred_forward_scored_events_before_promotion_review": 100
+  },
+  "lock_id": "dcc249c4d25a8890",
+  "lock_version": "wti_lag_1d.forward_lock.v1",
+  "locked_at_utc": "2026-04-29T14:25:52Z",
+  "locked_files": {
+    "contracts/target_variables.py": {
+      "bytes": 3974,
+      "sha256": "3474b7561a0ecedfd614dfc96940fe84638c2024b82e5f15a1fdf9bad5b7a855"
+    },
+    "feasibility/candidates/wti_lag_1d/classical.py": {
+      "bytes": 3643,
+      "sha256": "02f1b1f4d57ad0aebb3f3bf0630832dc6d3a1dbd789f2c58dbb8e2ff6af6fcae"
+    },
+    "feasibility/outputs/tractability_v1_1d_phase3_audit_wti_lag.json": {
+      "bytes": 9439,
+      "sha256": "7738e33fa49eb043ee3d9036b42818299d64177a5e1c29daabf7c2fd2b0f02a5"
+    },
+    "feasibility/outputs/wti_lag_1d_residuals.csv": {
+      "bytes": 15016,
+      "sha256": "2b34a571f29f8d7fe3c78efe749390f8e06be958506c5b17f7c96390c7abd268"
+    },
+    "feasibility/preregs/2026-04-29-wti_lag_all_calendar_1d.yaml": {
+      "bytes": 2868,
+      "sha256": "6c185905560f4fddf6728d8e4b327a410f1a85cc772748249fb8ad1c4b581a6b"
+    },
+    "feasibility/scripts/audit_wti_lag_1d_phase3.py": {
+      "bytes": 13943,
+      "sha256": "4d3be6f714b807571e9b0d1aa3749bdb846acb1565af49d2272f415778205638"
+    },
+    "feasibility/tractability_v1.py": {
+      "bytes": 48474,
+      "sha256": "0e91fe95683ddd4c420409d2391f543bfd5940ce2c864507228fe30c78411c9d"
+    }
+  },
+  "phase3_historical_metrics": {
+    "block_bootstrap_effective_n": 547,
+    "gain_vs_majority_baseline_pp": -0.85,
+    "gain_vs_zero_return_baseline_pp": 5.09,
+    "hac_effective_n": 524,
+    "harness_action": "continue_per_plan",
+    "majority_baseline_accuracy": 0.5297,
+    "manifest_created_at_utc": "2026-04-29T14:12:37.698685Z",
+    "model_accuracy": 0.5212,
+    "n_after_purge_embargo": 648,
+    "n_star": 524,
+    "scored_residuals": 589,
+    "verdict": "ADMISSIBLE_PROVISIONAL_FORWARD_LOCK_REQUIRED",
+    "zero_return_baseline_accuracy": 0.4703
+  }
+}
