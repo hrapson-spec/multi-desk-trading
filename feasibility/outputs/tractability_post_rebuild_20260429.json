@@ -1,11 +1,11 @@
 {
-  "created_at_utc": "2026-04-29T07:26:50.464581Z",
+  "created_at_utc": "2026-04-29T07:33:52.492620Z",
   "decision": {
     "action": "remove_foundation_models_from_harness",
     "min_effective_n": 163,
     "rule": "continue_small_model_only"
   },
-  "git_commit": "670fc1b3744d9e07959b719c165fd595aca71a7f",
+  "git_commit": "748fdb07a19691132ea13b2ce93885cde8230610",
   "input_status": {
     "wpsr": {
       "available": true,

@@ -1,7 +1,7 @@
 # Feasibility Harness v0 Report - Tractability Gate Post-Rebuild
 
 Created: 2026-04-29
-Git commit: `670fc1b3744d9e07959b719c165fd595aca71a7f`
+Git commit: `748fdb07a19691132ea13b2ce93885cde8230610`
 
 ## Verdict
 
