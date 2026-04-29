@@ -1,0 +1,61 @@
+{
+  "created_at_utc": "2026-04-29T06:31:07.935079Z",
+  "decision": {
+    "action": "write_terminal_report_do_not_build_harness",
+    "min_effective_n": 0,
+    "rule": "stop"
+  },
+  "git_commit": "b4c5d83e30105fadf70d2cb4980d78eb46122844",
+  "input_status": {
+    "wpsr": {
+      "available": false,
+      "path": "data/pit_store/pit.duckdb",
+      "reason": "missing_pit_manifest",
+      "rows": 0
+    },
+    "wti": {
+      "available": true,
+      "end": "2025-12-30T21:00:00+00:00",
+      "path": "data/s4_0/free_source_wti_futures/raw/yfinance_wti_futures_replay.csv",
+      "price_column": "price",
+      "rows": 20,
+      "start": "2025-12-02T21:00:00+00:00"
+    }
+  },
+  "parameters": {
+    "embargo_days": 5,
+    "horizon_days": 5,
+    "pit_root": "data/pit_store",
+    "post_2020_start": "2020-01-01T00:00:00+00:00",
+    "purge_days": 5,
+    "wti_path": "data/s4_0/free_source_wti_futures/raw/yfinance_wti_futures_replay.csv"
+  },
+  "schema_version": "tractability.v0.1",
+  "targets": {
+    "mae_conditional_on_direction_5d": {
+      "effect_unit": "absolute_adverse_5d_log_return",
+      "effective_n_after_purge_embargo": 0,
+      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": null,
+      "post_2020_effective_n": 0,
+      "raw_n": 0,
+      "sample_std": null
+    },
+    "return_magnitude_5d": {
+      "effect_unit": "absolute_5d_log_return",
+      "effective_n_after_purge_embargo": 0,
+      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": null,
+      "post_2020_effective_n": 0,
+      "raw_n": 0,
+      "sample_std": null
+    },
+    "return_sign_5d": {
+      "baseline_rate": null,
+      "effect_unit": "absolute_proportion_point_lift",
+      "effective_n_after_purge_embargo": 0,
+      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": null,
+      "observed_positive_rate": null,
+      "post_2020_effective_n": 0,
+      "raw_n": 0
+    }
+  }
+}
