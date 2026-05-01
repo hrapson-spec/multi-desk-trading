@@ -1,0 +1,25 @@
+source: cftc_cot
+description: "CFTC Commitments of Traders report (disaggregated, futures-only for WTI CL)"
+publisher: "U.S. Commodity Futures Trading Commission"
+calendar_version: "1.0.0"
+release_cadence:
+  type: weekly
+  weekday: friday
+  earliest_release_time_et: "15:30"
+  holiday_rule: shift_prior_business_day
+observation_semantics:
+  reporting_period: "positions_as_of_tuesday_prior"
+  lag_to_publication_days: 3
+revision_policy: "rare; publisher issues reissue with revision_ts if corrected"
+pit_eligibility_rule: |
+  Positions reported for Tuesday are only eligible from Friday 15:30 ET
+  onwards. Never treat COT as if contemporaneous with Tuesday.
+source_confidence:
+  baseline: 0.90
+  degradation_conditions:
+    - "federal shutdown"
+data_quality_multipliers:
+  fresh: 1.0
+  stale_1week: 0.80
+  stale_2week: 0.50
+  stale_over_2week: 0.0

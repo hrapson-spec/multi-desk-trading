@@ -1,0 +1,32 @@
+source: fomc
+dataset: fomc_announcements
+description: "Federal Open Market Committee statement + minutes announcements"
+publisher: "Board of Governors of the Federal Reserve System"
+calendar_version: "1.0.0"
+latency_guard_minutes: 5
+holiday_handling: "official_publication_time_no_shift"
+release_cadence:
+  type: irregular
+  earliest_release_time_et: "14:00"
+  holiday_rule: none
+observation_semantics:
+  reporting_period: "instantaneous_announcement"
+  lag_to_publication_days: 0  # statement; minutes lag is encoded as a separate event
+revision_policy: "none_announcements_are_immutable"
+pit_eligibility_rule: |
+  known_by_ts = release_ts
+  Row eligible at ts iff release_ts <= ts.
+source_confidence:
+  baseline: 1.00  # statement of record; no revision possible
+  degradation_conditions: []
+data_quality_multipliers:
+  fresh: 1.0
+  stale_1week: 1.0  # event timestamp does not decay; the event happened
+  stale_2week: 1.0
+  stale_over_2week: 1.0
+notes: |
+  This calendar records the existence of the announcement event for
+  decision-event harness counting. The semantic content of the
+  announcement (statement text, dot plot, dissent count) is OUT OF
+  SCOPE at v2.0. A future v1.x extension can add a parallel ingester
+  that captures the statement text by URL.

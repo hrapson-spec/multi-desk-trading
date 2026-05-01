@@ -8,25 +8,18 @@
   (5) If the candidate beats current by a pre-registered margin,
       new SignalWeight rows append with a new promotion_ts_utc.
 
-This module ships the v0.2 shape:
+This module ships the v0.2/v0.3 shape:
   - propose_weights_from_shapley: turn an attribution_shapley rollup
     into a candidate SignalWeight bundle whose weights are
-    proportional to |Shapley value| per desk, normalised to sum to 1.
-    Zero-|Shapley| desks drop to weight 0 (Controller excludes them
-    next call).
+    proportional to positive Shapley value per desk, normalised to sum
+    to 1. Non-positive-Shapley desks drop to weight 0 (Controller
+    excludes them next call).
   - promote_weights: writes the candidate rows with a new
     promotion_ts_utc and validation_artefact describing the proposer.
 
-**Capability-claim debit** (explicit): this v0.2 omits the §8.3 step 4
-held-out validation and margin-beat check. It promotes Shapley-
-proportional weights whenever called. Rationale: signal-space Shapley
-is itself a sufficient statistic under the characteristic-function
-assumption used by compute_shapley_signal_space; a held-out RMSE
-margin check needs Print-grounded grading-space attribution (§9.1
-step 2) which lands in a later commit. Until then, the research
-loop's promotion path runs under a "Shapley-monotone" promotion
-contract and the capability debit is recorded in the promotion row's
-validation_artefact.
+The legacy v0.2 path still exists for narrow callers and historical
+artefacts. The active research-loop promotion path is v0.3: grading-
+space Shapley plus held-out margin validation before promotion.
 """
 
 from __future__ import annotations
@@ -76,8 +69,8 @@ def propose_weights_from_shapley(
 ) -> list[SignalWeight]:
     """Build a SignalWeight candidate bundle from a Shapley rollup.
 
-    Weights are proportional to |Shapley value|, normalised to sum to
-    1 across all desks in the current weight row. Desks present in
+    Weights are proportional to positive Shapley value, normalised to
+    sum to 1 across all desks in the current weight row. Desks present in
     current_weights but absent from shapley_rows (e.g. freshly-added
     desks mid-week) keep their current weight to avoid silently
     dropping them.
@@ -95,21 +88,21 @@ def propose_weights_from_shapley(
     if new_promotion_ts_utc.tzinfo is None:
         raise ValueError("new_promotion_ts_utc must be timezone-aware (§14.8)")
 
-    abs_values = {row.desk_name: abs(row.shapley_value) for row in shapley_rows}
-    total_abs = sum(abs_values.values())
+    positive_values = {row.desk_name: max(float(row.shapley_value), 0.0) for row in shapley_rows}
+    total_positive = sum(positive_values.values())
 
     # Build candidate row per current (desk, target) pair.
     proposals: list[SignalWeight] = []
     for row in current_weights:
         desk = str(row["desk_name"])
         target = str(row["target_variable"])
-        if desk in abs_values and total_abs > 0.0:
-            new_w = abs_values[desk] / total_abs
-        elif desk not in abs_values:
+        if desk in positive_values and total_positive > 0.0:
+            new_w = positive_values[desk] / total_positive
+        elif desk not in positive_values:
             # Not represented in this review — fall back to current weight.
             new_w = float(row["weight"])
         else:
-            # Every Shapley value is zero: preserve the uniform prior.
+            # Every represented desk is non-positive: preserve current weight.
             new_w = float(row["weight"])
 
         # Regime must come from current_weights so we know the key path.
@@ -259,6 +252,7 @@ def propose_validate_and_promote(
     recent_forecasts_by_decision: dict[str, dict[tuple[str, str], Forecast]],
     prints_by_decision: dict[str, float],
     margin: float = 0.05,
+    validation_artefact: str = PROMOTION_ARTEFACT_VALIDATED_V03,
 ) -> tuple[list[SignalWeight], ValidationResult]:
     """Full §8.3 path: propose → validate → promote only on margin-beat.
 
@@ -274,7 +268,7 @@ def propose_validate_and_promote(
         shapley_rows=shapley_rows,
         current_weights=current,
         new_promotion_ts_utc=new_promotion_ts_utc,
-        validation_artefact=PROMOTION_ARTEFACT_VALIDATED_V03,
+        validation_artefact=validation_artefact,
     )
     validation = validate_candidate_vs_current(
         conn=conn,

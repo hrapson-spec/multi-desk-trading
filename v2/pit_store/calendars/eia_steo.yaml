@@ -1,0 +1,37 @@
+source: eia_steo
+dataset: steo_calendar
+description: "EIA Short-Term Energy Outlook monthly release schedule"
+publisher: "U.S. Energy Information Administration"
+calendar_version: "1.0.0"
+latency_guard_minutes: 5
+holiday_handling: "shift_to_next_business_day_if_holiday_falls_on_2nd_tuesday"
+release_cadence:
+  type: monthly
+  earliest_release_time_et: "12:00"
+  holiday_rule: shift_next_business_day
+steo_release_exceptions:
+  - month: "2020-04"
+    actual_date: "2020-04-07"
+    reason: "COVID disruption pulled forward"
+observation_semantics:
+  reporting_period: "forward_calendar_year_outlook"
+  lag_to_publication_days: 0  # decision event = release event
+revision_policy: "monthly_re_publication_replaces_prior_outlook"
+pit_eligibility_rule: |
+  known_by_ts = release_ts
+  Row eligible at ts iff release_ts <= ts.
+source_confidence:
+  baseline: 0.95
+  degradation_conditions:
+    - "federal shutdown (EIA suspends publication)"
+    - "scheduled methodology change within 1 month"
+data_quality_multipliers:
+  fresh: 1.0
+  stale_1week: 0.95
+  stale_2week: 0.85
+  stale_over_2week: 0.50
+notes: |
+  v1.0 of the ingester computes release dates from the 2nd-Tuesday rule.
+  vintage_quality is therefore "release_lag_safe_revision_unknown" — the
+  dates are approximate but well within the harness's ±5d embargo
+  window. v1.1 will scrape the archive and upgrade to true_first_release.

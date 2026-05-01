@@ -19,12 +19,14 @@ from .gates import (
     gate_sign_preservation,
     gate_skill_vs_baseline,
 )
+from .hot_swap import build_hot_swap_callables
 from .runner import GateRunner
 
 __all__ = [
     "GateReport",
     "GateResult",
     "GateRunner",
+    "build_hot_swap_callables",
     "gate_hot_swap",
     "gate_sign_preservation",
     "gate_skill_vs_baseline",

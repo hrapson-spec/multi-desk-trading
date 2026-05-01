@@ -1,0 +1,251 @@
+{
+  "created_at_utc": "2026-04-29T13:24:22.617789Z",
+  "decision": {
+    "action": "remove_foundation_models_from_harness",
+    "min_effective_n": 175,
+    "rule": "continue_small_model_only"
+  },
+  "git_commit": "8040950b4e696e13d31b1acf54d8ca9b1206fcf9",
+  "input_status": {
+    "families": {
+      "wpsr": {
+        "distinct_decision_ts": 742,
+        "manifest_rows_matched": 8904,
+        "vintage_quality_distribution": {
+          "true_first_release": 8904
+        }
+      }
+    },
+    "targets": {
+      "wti_3d_mae_conditional": {
+        "available": true,
+        "end": "2026-04-20T00:00:00+00:00",
+        "forbidden_uses": [
+          "executable_futures_replay",
+          "CL_front_month_backtest",
+          "MCL_execution_replay"
+        ],
+        "path": "data/s4_0/free_source/raw/DCOILWTICO.csv",
+        "price_column": "DCOILWTICO",
+        "price_target_kind": "fred_wti_spot_proxy",
+        "rows": 10142,
+        "start": "1986-01-02T00:00:00+00:00"
+      },
+      "wti_3d_return_magnitude": {
+        "available": true,
+        "end": "2026-04-20T00:00:00+00:00",
+        "forbidden_uses": [
+          "executable_futures_replay",
+          "CL_front_month_backtest",
+          "MCL_execution_replay"
+        ],
+        "path": "data/s4_0/free_source/raw/DCOILWTICO.csv",
+        "price_column": "DCOILWTICO",
+        "price_target_kind": "fred_wti_spot_proxy",
+        "rows": 10142,
+        "start": "1986-01-02T00:00:00+00:00"
+      },
+      "wti_3d_return_sign": {
+        "available": true,
+        "end": "2026-04-20T00:00:00+00:00",
+        "forbidden_uses": [
+          "executable_futures_replay",
+          "CL_front_month_backtest",
+          "MCL_execution_replay"
+        ],
+        "path": "data/s4_0/free_source/raw/DCOILWTICO.csv",
+        "price_column": "DCOILWTICO",
+        "price_target_kind": "fred_wti_spot_proxy",
+        "rows": 10142,
+        "start": "1986-01-02T00:00:00+00:00"
+      }
+    }
+  },
+  "n_waterfall": {
+    "by_family": {
+      "wpsr": {
+        "distinct_decision_ts": 742,
+        "manifest_rows_matched": 8904
+      }
+    },
+    "n_decision_timestamps": 742,
+    "n_manifest_rows": 8904
+  },
+  "parameters": {
+    "admissible_vintage_qualities": [
+      "release_lag_safe_revision_unknown",
+      "true_first_release"
+    ],
+    "alpha_family": 0.05,
+    "alpha_per_test": 0.05,
+    "embargo_days": 3,
+    "families": [
+      "wpsr"
+    ],
+    "pit_root": "data/pit_store",
+    "post_2020_start": "2020-01-01T00:00:00+00:00",
+    "purge_days": 3,
+    "search_budget_runs": 1,
+    "targets": [
+      "wti_3d_return_sign",
+      "wti_3d_return_magnitude",
+      "wti_3d_mae_conditional"
+    ]
+  },
+  "schema_version": "tractability.v1.0",
+  "targets": {
+    "wti_3d_mae_conditional": {
+      "baseline_rate": null,
+      "horizon_days": 3,
+      "metric": "mae_conditional",
+      "minimum_detectable_effect_size_against_naive_50pct_baseline": null,
+      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": {
+        "raw_effect": 0.21382843445874325,
+        "standardized_effect": 0.169871055491895
+      },
+      "n_after_purge_embargo": 272,
+      "n_after_quality_filter": 741,
+      "n_by_cost_bucket": {
+        "executable_paper": 0,
+        "free_proxy_no_friction": 272,
+        "free_proxy_with_roll_friction": 272,
+        "real_capital": 0
+      },
+      "n_by_regime": {
+        "unknown": 272
+      },
+      "n_hac_or_block_adjusted": {
+        "block_bootstrap": {
+          "B": 2000,
+          "block_length": 5,
+          "method": "circular_block_bootstrap_variance_ratio",
+          "point_estimate": 175
+        },
+        "newey_west": {
+          "K_used": 4,
+          "method": "newey_west_bartlett_capped_at_zero",
+          "point_estimate": 176,
+          "rho_sum_capped": 0.14254648785259247
+        },
+        "phase_3_disposition": "active_residual_mode_HAC_on_model_residuals_n_star_propagates_to_decision",
+        "point_estimate": 175
+      },
+      "n_oos_by_fold": {},
+      "n_post2020_raw": 326,
+      "n_star": 175,
+      "n_star_strict_hac_phase3plus": 175,
+      "n_targetable_raw": 741,
+      "observed_positive_rate": null,
+      "price_target_forbidden_uses": [
+        "executable_futures_replay",
+        "CL_front_month_backtest",
+        "MCL_execution_replay"
+      ],
+      "price_target_kind": "fred_wti_spot_proxy",
+      "sample_std": 1.2587690930603865
+    },
+    "wti_3d_return_magnitude": {
+      "baseline_rate": null,
+      "horizon_days": 3,
+      "metric": "return_magnitude",
+      "minimum_detectable_effect_size_against_naive_50pct_baseline": null,
+      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": {
+        "raw_effect": 0.21382843445874325,
+        "standardized_effect": 0.169871055491895
+      },
+      "n_after_purge_embargo": 272,
+      "n_after_quality_filter": 741,
+      "n_by_cost_bucket": {
+        "executable_paper": 0,
+        "free_proxy_no_friction": 272,
+        "free_proxy_with_roll_friction": 272,
+        "real_capital": 0
+      },
+      "n_by_regime": {
+        "unknown": 272
+      },
+      "n_hac_or_block_adjusted": {
+        "block_bootstrap": {
+          "B": 2000,
+          "block_length": 5,
+          "method": "circular_block_bootstrap_variance_ratio",
+          "point_estimate": 175
+        },
+        "newey_west": {
+          "K_used": 4,
+          "method": "newey_west_bartlett_capped_at_zero",
+          "point_estimate": 176,
+          "rho_sum_capped": 0.14254648785259247
+        },
+        "phase_3_disposition": "active_residual_mode_HAC_on_model_residuals_n_star_propagates_to_decision",
+        "point_estimate": 175
+      },
+      "n_oos_by_fold": {},
+      "n_post2020_raw": 326,
+      "n_star": 175,
+      "n_star_strict_hac_phase3plus": 175,
+      "n_targetable_raw": 741,
+      "observed_positive_rate": null,
+      "price_target_forbidden_uses": [
+        "executable_futures_replay",
+        "CL_front_month_backtest",
+        "MCL_execution_replay"
+      ],
+      "price_target_kind": "fred_wti_spot_proxy",
+      "sample_std": 1.2587690930603865
+    },
+    "wti_3d_return_sign": {
+      "baseline_rate": null,
+      "horizon_days": 3,
+      "metric": "return_sign",
+      "minimum_detectable_effect_size_against_naive_50pct_baseline": null,
+      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": {
+        "raw_effect": 0.21382843445874325,
+        "standardized_effect": 0.169871055491895
+      },
+      "n_after_purge_embargo": 272,
+      "n_after_quality_filter": 741,
+      "n_by_cost_bucket": {
+        "executable_paper": 0,
+        "free_proxy_no_friction": 272,
+        "free_proxy_with_roll_friction": 272,
+        "real_capital": 0
+      },
+      "n_by_regime": {
+        "unknown": 272
+      },
+      "n_hac_or_block_adjusted": {
+        "block_bootstrap": {
+          "B": 2000,
+          "block_length": 5,
+          "method": "circular_block_bootstrap_variance_ratio",
+          "point_estimate": 175
+        },
+        "newey_west": {
+          "K_used": 4,
+          "method": "newey_west_bartlett_capped_at_zero",
+          "point_estimate": 176,
+          "rho_sum_capped": 0.14254648785259247
+        },
+        "phase_3_disposition": "active_residual_mode_HAC_on_model_residuals_n_star_propagates_to_decision",
+        "point_estimate": 175
+      },
+      "n_oos_by_fold": {},
+      "n_post2020_raw": 326,
+      "n_star": 175,
+      "n_star_strict_hac_phase3plus": 175,
+      "n_targetable_raw": 741,
+      "observed_positive_rate": null,
+      "price_target_forbidden_uses": [
+        "executable_futures_replay",
+        "CL_front_month_backtest",
+        "MCL_execution_replay"
+      ],
+      "price_target_kind": "fred_wti_spot_proxy",
+      "sample_std": 1.2587690930603865
+    }
+  },
+  "vintage_quality_distribution": {
+    "true_first_release": 8904
+  }
+}

@@ -24,7 +24,11 @@ from contracts.v1 import Forecast, Print
 class GateResult:
     name: str
     passed: bool
-    metrics: dict[str, float] = field(default_factory=dict)
+    # metrics is heterogeneous: numeric keys like "desk_metric", "dev_rho",
+    # plus string tags like "failure_mode" (spec v1.14 — see gate_hot_swap).
+    # Consumers access specific known keys; treat as dict[str, object] at
+    # read time and narrow per-key.
+    metrics: dict[str, float | str] = field(default_factory=dict)
     reason: str = ""
 
 
@@ -206,22 +210,61 @@ def gate_hot_swap(
     both outcomes and emits a structured result.
 
     run_controller_fn and run_controller_with_stub_fn each return True iff
-    the Controller ran to completion under that configuration.
+    the Controller ran to completion under that configuration. At spec v1.14
+    the callables may also raise AssertionError (from in-closure
+    post-exercise assertions about Decision validity, combined_signal delta,
+    or contributing_ids membership). AssertionError is distinguished from
+    generic runtime exceptions via the `failure_mode` field in metrics.
+
+    metrics schema:
+      - real_ok: 0.0 | 1.0 — whether the real-desk closure returned True.
+      - stub_ok: 0.0 | 1.0 — whether the stub-swap closure returned True.
+      - failure_mode: "passed" | "controller_exception" | "assertion_failure"
+        — distinguishes integration bugs (controller raised) from harness
+        contract violations (closure asserted on Decision properties).
     """
+    # Try real-desk closure. AssertionError caught first (narrower exception)
+    # before the generic Exception branch.
     try:
         real_ok = bool(run_controller_fn())
+    except AssertionError as e:
+        return GateResult(
+            name="hot_swap",
+            passed=False,
+            metrics={"real_ok": 0.0, "stub_ok": 0.0, "failure_mode": "assertion_failure"},
+            reason=f"Real-desk closure assertion failed: {e!s}",
+        )
     except Exception as e:
         return GateResult(
             name="hot_swap",
             passed=False,
+            metrics={"real_ok": 0.0, "stub_ok": 0.0, "failure_mode": "controller_exception"},
             reason=f"Controller raised with real desk: {e!r}",
         )
+
+    # Try stub-swap closure.
     try:
         stub_ok = bool(run_controller_with_stub_fn())
+    except AssertionError as e:
+        return GateResult(
+            name="hot_swap",
+            passed=False,
+            metrics={
+                "real_ok": 1.0 if real_ok else 0.0,
+                "stub_ok": 0.0,
+                "failure_mode": "assertion_failure",
+            },
+            reason=f"Stub-swap closure assertion failed: {e!s}",
+        )
     except Exception as e:
         return GateResult(
             name="hot_swap",
             passed=False,
+            metrics={
+                "real_ok": 1.0 if real_ok else 0.0,
+                "stub_ok": 0.0,
+                "failure_mode": "controller_exception",
+            },
             reason=f"Controller raised after hot-swap to stub: {e!r}",
         )
 
@@ -229,7 +272,11 @@ def gate_hot_swap(
     return GateResult(
         name="hot_swap",
         passed=passed,
-        metrics={"real_ok": 1.0 if real_ok else 0.0, "stub_ok": 1.0 if stub_ok else 0.0},
+        metrics={
+            "real_ok": 1.0 if real_ok else 0.0,
+            "stub_ok": 1.0 if stub_ok else 0.0,
+            "failure_mode": "passed" if passed else "controller_exception",
+        },
         reason=(
             f"Controller run real={real_ok} stub={stub_ok}; "
             f"{'passed' if passed else 'failed — boundary has drifted'}"

@@ -1,7 +1,8 @@
-"""Tests for HMMRegimeClassifier (v0.2, plan §A follow-up).
+"""Tests for HMMRegimeClassifier (v0.3 adaptive-K, plan §A follow-up).
 
 Covers:
   - fit/predict on a synthetic 4-regime path
+  - adaptive regime-count selection under the default path
   - seed determinism (same seed ⇒ byte-identical fit)
   - causal inference (regime_label_at only uses observations up to index i)
   - posterior probabilities sum to 1
@@ -33,6 +34,8 @@ def test_hmm_fits_and_predicts(channels):
     clf.fit(channels.market_price[:300])
     label = clf.regime_label_at(channels, 350, NOW)
     assert label.regime_id.startswith("hmm_regime_")
+    assert 2 <= clf.active_n_states <= 6
+    assert set(label.regime_probabilities) == set(clf.active_regime_ids())
     # Probabilities sum to 1 (with small numerical slack)
     assert abs(sum(label.regime_probabilities.values()) - 1.0) < 1e-9
     # Regime_id is the argmax
@@ -60,8 +63,8 @@ def test_hmm_rejects_unfit_predict(channels):
 
 
 def test_hmm_rejects_too_short_training(channels):
-    clf = HMMRegimeClassifier(n_states=4)
-    with pytest.raises(ValueError, match="≥ 40 training"):
+    clf = HMMRegimeClassifier()
+    with pytest.raises(ValueError, match="≥ 20 training"):
         clf.fit(channels.market_price[:10])
 
 
@@ -102,7 +105,14 @@ def test_hmm_causal_inference(channels):
 
 def test_hmm_all_regime_ids():
     ids = HMMRegimeClassifier.all_regime_ids()
-    assert set(ids) == {f"hmm_regime_{k}" for k in range(4)}
+    assert set(ids) == {f"hmm_regime_{k}" for k in range(6)}
+
+
+def test_hmm_fixed_state_mode_respects_requested_k(channels):
+    clf = HMMRegimeClassifier(n_states=4, seed=0)
+    clf.fit(channels.market_price[:300])
+    assert clf.active_n_states == 4
+    assert clf.active_regime_ids() == [f"hmm_regime_{k}" for k in range(4)]
 
 
 def test_hmm_end_to_end_with_controller(channels):
@@ -130,7 +140,7 @@ def test_hmm_end_to_end_with_controller(channels):
     seed_cold_start(
         conn,
         desks=[("storage_curve", WTI_FRONT_MONTH_CLOSE)],
-        regime_ids=HMMRegimeClassifier.all_regime_ids(),
+        regime_ids=clf.active_regime_ids(),
         boot_ts=boot_ts,
         default_cold_start_limit=1e9,
     )

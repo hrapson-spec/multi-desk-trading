@@ -144,6 +144,12 @@ def random_walk_price_baseline(
     price observed at emission time (no-change-over-horizon). Both the desk
     and this baseline see the same information set at emission, which is the
     apples-to-apples comparison for Gate 1.
+
+    Use with PRICE-level targets (e.g. WTI_FRONT_MONTH_CLOSE). For log-return
+    targets (e.g. WTI_FRONT_1W_LOG_RETURN, VIX_30D_FORWARD_3D_DELTA), use
+    `zero_return_baseline` — the random-walk analog for returns is a zero
+    prediction (no change), which has units comparable to the desk's
+    log-return point_estimate.
     """
 
     def _baseline(i: int, _prior_prints: Sequence[Print]) -> float:
@@ -151,6 +157,26 @@ def random_walk_price_baseline(
         if emission_i < 1:
             return float(prices[0])
         return float(prices[emission_i - 1])
+
+    return _baseline
+
+
+def zero_return_baseline() -> Callable[[int, Sequence[Print]], float]:
+    """Factory: baseline_fn that predicts 0 for every forecast row.
+
+    v1.16 addition — the random-walk analog for log-return targets. A
+    desk emitting a log-return prediction is compared to a baseline that
+    predicts "no change" (log-return = 0). Both desk point_estimate and
+    Print value are in log-return units, so Gate 1 compares like with
+    like.
+
+    Use this when the desk's emitted target is a return / delta
+    (WTI_FRONT_1W_LOG_RETURN, VIX_30D_FORWARD_3D_DELTA). For price-level
+    targets use `random_walk_price_baseline` instead.
+    """
+
+    def _baseline(_i: int, _prior_prints: Sequence[Print]) -> float:
+        return 0.0
 
     return _baseline
 

@@ -32,12 +32,13 @@ from contracts.v1 import (
     ResearchLoopEvent,
 )
 from controller import Controller, seed_cold_start
-from desks.demand import ClassicalDemandModel, DemandDesk
-from desks.geopolitics import ClassicalGeopoliticsModel, GeopoliticsDesk
-from desks.macro import ClassicalMacroModel, MacroDesk
+from desks.oil_demand_nowcast import ClassicalOilDemandNowcastModel, OilDemandNowcastDesk
 from desks.regime_classifier import GroundTruthRegimeClassifier
 from desks.storage_curve import ClassicalStorageCurveModel, StorageCurveDesk
-from desks.supply import ClassicalSupplyModel, SupplyDesk
+from desks.supply_disruption_news import (
+    ClassicalSupplyDisruptionNewsModel,
+    SupplyDisruptionNewsDesk,
+)
 from grading.match import grade
 from persistence.db import connect, count_rows, init_db
 from research_loop import Dispatcher, compute_latency_report, gate_failure_handler
@@ -68,33 +69,23 @@ def _fit_all_desks(channels: ObservationChannels, market_price: np.ndarray) -> d
     small_alpha = 1e-4
     sc_model = ClassicalStorageCurveModel(lookback=10, horizon_days=HORIZON, alpha=1.0)
     sc_model.fit(market_price[:TRAIN_END])
-    supply_model = ClassicalSupplyModel(horizon_days=HORIZON, alpha=small_alpha)
-    supply_model.fit(
-        channels.by_desk["supply"].components["supply"][:TRAIN_END],
-        market_price[:TRAIN_END],
-    )
-    demand_model = ClassicalDemandModel(horizon_days=HORIZON, alpha=small_alpha)
-    demand_model.fit(
-        channels.by_desk["demand"].components["demand"][:TRAIN_END],
-        market_price[:TRAIN_END],
-    )
-    geo_model = ClassicalGeopoliticsModel(horizon_days=HORIZON, alpha=small_alpha)
-    geo_model.fit(
+    sdn_model = ClassicalSupplyDisruptionNewsModel(horizon_days=HORIZON, alpha=small_alpha)
+    sdn_model.fit(
         channels.by_desk["geopolitics"].components["event_indicator"][:TRAIN_END],
         channels.by_desk["geopolitics"].components["event_intensity"][:TRAIN_END],
+        channels.by_desk["geopolitics"].components["event_intensity_raw"][:TRAIN_END],
         market_price[:TRAIN_END],
     )
-    macro_model = ClassicalMacroModel(lookback=60, horizon_days=HORIZON, alpha=small_alpha)
-    macro_model.fit(
-        channels.by_desk["macro"].components["xi"][:TRAIN_END],
+    odn_model = ClassicalOilDemandNowcastModel(horizon_days=HORIZON, alpha=small_alpha)
+    odn_model.fit(
+        channels.by_desk["demand"].components["demand"][:TRAIN_END],
+        channels.by_desk["demand"].components["demand_level"][:TRAIN_END],
         market_price[:TRAIN_END],
     )
     return {
         "storage_curve": StorageCurveDesk(model=sc_model),
-        "supply": SupplyDesk(model=supply_model),
-        "demand": DemandDesk(model=demand_model),
-        "geopolitics": GeopoliticsDesk(model=geo_model),
-        "macro": MacroDesk(model=macro_model),
+        "supply_disruption_news": SupplyDisruptionNewsDesk(model=sdn_model),
+        "oil_demand_nowcast": OilDemandNowcastDesk(model=odn_model),
     }
 
 
@@ -156,19 +147,29 @@ def test_phase1_round_trips_per_desk_ge_20(smoke_db):
         for a in lodo_rows:
             bus.publish_attribution_lodo(a)
 
-        # Print arrives + grade computed per-desk.
+        # Print arrives + grade computed per-desk. v1.16 desks emit either
+        # WTI_FRONT_MONTH_CLOSE (storage_curve — price) or
+        # WTI_FRONT_1W_LOG_RETURN (supply_disruption_news, oil_demand_nowcast —
+        # log return). Per-desk Print value matches the desk's target.
         realised_price = float(market_price[i + HORIZON])
-        for name in desks:
+        realised_log_return = float(
+            np.log(market_price[i + HORIZON]) - np.log(market_price[i - 1])
+        )
+        for name, desk in desks.items():
+            target = desk.target_variable
+            value = (
+                realised_price if target == WTI_FRONT_MONTH_CLOSE else realised_log_return
+            )
             p = Print(
                 print_id=str(uuid.uuid4()),
                 realised_ts_utc=realised_ts,
-                target_variable=WTI_FRONT_MONTH_CLOSE,
-                value=realised_price,
-                event_id=recent_forecasts[(name, WTI_FRONT_MONTH_CLOSE)].horizon.event_id,
+                target_variable=target,
+                value=value,
+                event_id=recent_forecasts[(name, target)].horizon.event_id,
             )
             bus.publish_print(p)
             g = grade(
-                forecast=recent_forecasts[(name, WTI_FRONT_MONTH_CLOSE)],
+                forecast=recent_forecasts[(name, target)],
                 p=p,
                 grading_ts_utc=realised_ts,
             )

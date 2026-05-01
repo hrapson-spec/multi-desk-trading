@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS launchd agent for the multi-desk-trading forward pipeline.
+
+  Schedule: daily at 22:30 system-local time.
+    - System local on this machine is BST/GMT (UK).
+    - 22:30 BST = 21:30 UTC; 22:30 GMT = 22:30 UTC.
+    - 22:30 BST = 17:30 ET (EDT); 22:30 GMT = 17:30 ET (EST).
+    - This is comfortably after FRED's typical evening DCOILWTICO
+      refresh (~6pm ET) regardless of US daylight savings.
+
+  Operator install:
+    cp feasibility/scripts/launchd/com.henri.mdt.forward.plist \
+       ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) \
+       ~/Library/LaunchAgents/com.henri.mdt.forward.plist
+    launchctl enable gui/$(id -u)/com.henri.mdt.forward
+    launchctl kickstart -p gui/$(id -u)/com.henri.mdt.forward  # one immediate run
+    launchctl print gui/$(id -u)/com.henri.mdt.forward          # verify status
+
+  Operator uninstall:
+    launchctl bootout gui/$(id -u)/com.henri.mdt.forward
+    rm ~/Library/LaunchAgents/com.henri.mdt.forward.plist
+
+  Logs:
+    feasibility/forward/wti_lag_1d/launchd_logs/stdout.log
+    feasibility/forward/wti_lag_1d/launchd_logs/stderr.log
+  Tail with: tail -F feasibility/forward/wti_lag_1d/launchd_logs/*.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.henri.mdt.forward</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/henrirapson/projects/multi-desk-trading/feasibility/scripts/cron_refresh_and_score.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/henrirapson/projects/multi-desk-trading</string>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>22</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/henrirapson/projects/multi-desk-trading/feasibility/forward/wti_lag_1d/launchd_logs/stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/henrirapson/projects/multi-desk-trading/feasibility/forward/wti_lag_1d/launchd_logs/stderr.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>LANG</key>
+        <string>en_US.UTF-8</string>
+    </dict>
+</dict>
+</plist>

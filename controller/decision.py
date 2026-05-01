@@ -100,7 +100,16 @@ class Controller:
                 continue
             if f.staleness:
                 continue
-            combined_signal += float(row["weight"]) * float(f.point_estimate)
+            w = float(row["weight"])
+            # v1.14: exclude retired desks (weight=0) from contributing_ids.
+            # A zero weight means the desk was retired via §7.2 auto-retire
+            # or v1.7 feed-reliability retirement; its forecast contributes
+            # 0 to combined_signal but must not leak into attribution /
+            # audit trails. Without this guard, Shapley on same-target
+            # desks would misattribute under the zero-weight case.
+            if w == 0.0:
+                continue
+            combined_signal += w * float(f.point_estimate)
             contributing_ids.append(f.forecast_id)
 
         raw = float(params["k_regime"]) * combined_signal

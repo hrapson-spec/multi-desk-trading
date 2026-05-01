@@ -1,0 +1,22 @@
+source: event_calendar
+description: "Derived deterministic event flags (EIA/COT release days, CL expiry, US holidays)"
+publisher: "v2/ingest/event_calendar.py (derived)"
+calendar_version: "1.0.0"
+release_cadence:
+  type: irregular
+  holiday_rule: none
+observation_semantics:
+  reporting_period: "derived_from_parent_calendars"
+  lag_to_publication_days: 0
+revision_policy: "deterministic; rebuilt from parent calendars + CME metadata"
+pit_eligibility_rule: |
+  Derived feature; eligibility is the max of the parent calendars feeding the
+  flag (e.g. is_eia_release_day inherits eia_wpsr.yaml eligibility).
+source_confidence:
+  baseline: 1.0
+  degradation_conditions: []
+data_quality_multipliers:
+  fresh: 1.0
+  stale_1week: 1.0
+  stale_2week: 1.0
+  stale_over_2week: 1.0

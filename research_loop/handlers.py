@@ -12,9 +12,9 @@ v0.1 ships one handler:
 v0.2 upgrades:
   gate_failure_handler — auto-retires (regime, desk) when
     failure_mode starts with "harmful:" (§7.2).
-  regime_transition_handler — triggers a Shapley-proportional weight
-    refresh for the to_regime when ≥min_decisions of historical
-    evidence exist for it (§8.3).
+  regime_transition_handler — triggers a grading-space Shapley refresh
+    plus held-out margin validation for the to_regime when ≥min_decisions
+    of historical decisions and matching Prints exist for it (§8.3).
 
 Design guardrail: handlers are pure w.r.t. their inputs except for
 explicit DB writes (new AttributionShapley / SignalWeight rows). No
@@ -29,7 +29,7 @@ from datetime import UTC, datetime, timedelta
 
 import duckdb
 
-from attribution import compute_shapley_signal_space
+from attribution import compute_shapley_grading_space, compute_shapley_signal_space
 from contracts.v1 import Decision, Forecast, Provenance, ResearchLoopEvent
 
 from .dispatcher import HandlerResult
@@ -38,9 +38,10 @@ from .feed_reliability import (
     feeds_eligible_for_reinstatement,
     feeds_meeting_retirement_criteria,
     historical_shapley_share,
+    latest_nonzero_weight_for_desk,
     retired_desks_for_feed,
 )
-from .promotion import propose_and_promote_from_shapley
+from .promotion import propose_validate_and_promote
 from .remediation import (
     FEED_UNRELIABLE_PREFIX,
     is_harmful,
@@ -49,7 +50,7 @@ from .remediation import (
     retire_desk_for_regime,
 )
 
-REGIME_TRANSITION_ARTEFACT_V02 = "auto:regime_transition_shapley_v0.2"
+REGIME_TRANSITION_ARTEFACT_V03 = "auto:regime_transition_margin_validated_v0.3"
 FEED_RELIABILITY_HANDLER_V02 = "feed_reliability_review_v0.2"
 _DEFAULT_LOOKBACK_SECONDS = 30 * 24 * 3600
 _DEFAULT_MIN_DECISIONS = 5
@@ -167,6 +168,54 @@ def _forecasts_by_decision(
     return result
 
 
+def _prints_by_decision(
+    conn: duckdb.DuckDBPyConnection,
+    decisions: list[Decision],
+    recent_forecasts_by_decision: dict[str, dict[tuple[str, str], Forecast]],
+) -> dict[str, float]:
+    """Best-effort decision_id -> realised Print value mapping.
+
+    v0.3 promotion validation requires realised Prints. The current
+    architecture emits event horizons for all shipped desk forecasts, so
+    we map a decision to a Print by reading the common
+    (target_variable, expected_ts_utc) pair from its non-stale forecasts.
+    Mixed-target or mixed-horizon decisions are skipped rather than
+    guessed — validation must be honest.
+    """
+    by_decision: dict[str, float] = {}
+    lookup_pairs: dict[tuple[str, datetime], list[str]] = {}
+    for d in decisions:
+        recent = recent_forecasts_by_decision.get(d.decision_id, {})
+        pairs: set[tuple[str, datetime]] = set()
+        for f in recent.values():
+            if f.staleness:
+                continue
+            if hasattr(f.horizon, "expected_ts_utc"):
+                pairs.add((f.target_variable, f.horizon.expected_ts_utc))
+        if len(pairs) != 1:
+            continue
+        pair = next(iter(pairs))
+        lookup_pairs.setdefault(pair, []).append(d.decision_id)
+
+    for (target_variable, realised_ts_utc), decision_ids in lookup_pairs.items():
+        row = conn.execute(
+            """
+            SELECT value
+            FROM prints
+            WHERE target_variable = ?
+              AND realised_ts_utc = ?
+            ORDER BY print_id
+            LIMIT 1
+            """,
+            [target_variable, realised_ts_utc],
+        ).fetchone()
+        if row is None:
+            continue
+        for decision_id in decision_ids:
+            by_decision[decision_id] = float(row[0])
+    return by_decision
+
+
 def gate_failure_handler(
     conn: duckdb.DuckDBPyConnection, event: ResearchLoopEvent
 ) -> HandlerResult:
@@ -250,16 +299,17 @@ def gate_failure_handler(
 def regime_transition_handler(
     conn: duckdb.DuckDBPyConnection, event: ResearchLoopEvent
 ) -> HandlerResult:
-    """Trigger a Shapley-proportional weight refresh on regime transition
+    """Trigger a validated Shapley-based weight refresh on regime transition
     (§6.2, §8.3).
 
-    v0.2 upgrade: when ≥`min_decisions` historical decisions exist for
-    the to_regime within the lookback window, the handler runs a
-    Shapley rollup over those decisions and invokes
-    `propose_and_promote_from_shapley` to write a fresh SignalWeight
-    bundle for the to_regime. Controller picks up the new weights on
-    the next decision via the (promotion_ts_utc DESC, weight_id DESC)
-    tie-break. If history is insufficient, the handler logs the
+    v0.3 path: when ≥`min_decisions` historical decisions exist for the
+    to_regime within the lookback window, the handler runs a grading-
+    space Shapley rollup over those decisions, validates the candidate
+    against held-out prints, and promotes only when the candidate beats
+    the incumbent by the pre-registered margin. Controller picks up the
+    new weights on the next decision via the
+    `(promotion_ts_utc DESC, weight_id DESC)` tie-break. If history is
+    insufficient or the candidate fails validation, the handler logs the
     transition without mutating state (fail-safe).
 
     Payload contract:
@@ -271,10 +321,10 @@ def regime_transition_handler(
       - min_decisions: int (optional, default 5) — minimum historical
         to_regime decisions required to trigger a refresh.
 
-    Refresh semantics match §8.3 Shapley-monotone path: candidate
-    weights are |Shapley|-proportional, normalised across desks, with
-    zero-|Shapley| desks falling to weight 0. Capability-claim debit:
-    v0.2 omits the held-out margin check — see promotion.py.
+    Refresh semantics follow the active §8.3 validated path: candidate
+    weights are positive-Shapley-proportional, normalised across desks,
+    with non-positive-Shapley desks falling to weight 0, and promotion
+    only occurs after the held-out margin check passes.
     """
     if event.event_type != "regime_transition":
         raise ValueError(f"regime_transition_handler on wrong event: {event.event_type!r}")
@@ -308,33 +358,61 @@ def regime_transition_handler(
         }
     else:
         recent_by_decision = _forecasts_by_decision(conn, decisions)
-        shapley_rows = compute_shapley_signal_space(
-            conn=conn,
-            decisions=decisions,
-            recent_forecasts_by_decision=recent_by_decision,
-            review_ts_utc=end_ts,
-        )
-        promoted = propose_and_promote_from_shapley(
-            conn=conn,
-            regime_id=to_regime,
-            shapley_rows=shapley_rows,
-            new_promotion_ts_utc=end_ts,
-            validation_artefact=REGIME_TRANSITION_ARTEFACT_V02,
-        )
-        action = "refreshed_from_shapley"
-        refresh_detail = {
-            "n_decisions": len(decisions),
-            "n_desks_promoted": len(promoted),
-            "validation_artefact": REGIME_TRANSITION_ARTEFACT_V02,
-            "shapley": sorted(
-                [{"desk": r.desk_name, "value": r.shapley_value} for r in shapley_rows],
-                key=lambda x: str(x["desk"]),
-            ),
-        }
+        prints_by_decision = _prints_by_decision(conn, decisions, recent_by_decision)
+        if len(prints_by_decision) < min_decisions:
+            action = "insufficient_print_history_for_refresh"
+            refresh_detail = {
+                "n_decisions": len(decisions),
+                "n_prints": len(prints_by_decision),
+                "min_required": min_decisions,
+                "to_regime": to_regime,
+                "lookback_window_s": lookback_s,
+            }
+        else:
+            shapley_rows = compute_shapley_grading_space(
+                conn=conn,
+                decisions=decisions,
+                recent_forecasts_by_decision=recent_by_decision,
+                prints_by_decision=prints_by_decision,
+                review_ts_utc=end_ts,
+            )
+            promoted, validation = propose_validate_and_promote(
+                conn=conn,
+                regime_id=to_regime,
+                shapley_rows=shapley_rows,
+                new_promotion_ts_utc=end_ts,
+                held_out_decisions=decisions,
+                recent_forecasts_by_decision=recent_by_decision,
+                prints_by_decision=prints_by_decision,
+                margin=float(event.payload.get("promotion_margin", 0.05)),
+                validation_artefact=REGIME_TRANSITION_ARTEFACT_V03,
+            )
+            if promoted:
+                action = "refreshed_from_validated_shapley"
+            else:
+                action = "candidate_failed_margin_check"
+            refresh_detail = {
+                "n_decisions": len(decisions),
+                "n_prints": len(prints_by_decision),
+                "n_desks_promoted": len(promoted),
+                "validation_artefact": REGIME_TRANSITION_ARTEFACT_V03,
+                "validation": {
+                    "passed": validation.passed,
+                    "current_mse": validation.current_mse,
+                    "candidate_mse": validation.candidate_mse,
+                    "margin": validation.margin,
+                    "improvement_ratio": validation.improvement_ratio,
+                    "n_held_out": validation.n_held_out,
+                },
+                "shapley": sorted(
+                    [{"desk": r.desk_name, "value": r.shapley_value} for r in shapley_rows],
+                    key=lambda x: str(x["desk"]),
+                ),
+            }
 
     artefact = json.dumps(
         {
-            "handler": "regime_transition_v0.2",
+            "handler": "regime_transition_v0.3",
             "from": from_regime,
             "to": to_regime,
             "probability": probability,
@@ -424,8 +502,9 @@ def feed_reliability_review_handler(
     that depends on them in EVERY regime where the desk currently
     holds non-zero weight. Also reinstates desks whose feeds have
     recovered (no failures for `recovery_days`) — via Shapley-based
-    promotion when attribution rows exist, else a conservative direct
-    insert (`remediation.reinstate_desk_direct`, weight=0.1).
+    reinstatement when attribution rows exist, else prior historical
+    weight when available, else a conservative direct insert
+    (`remediation.reinstate_desk_direct`, weight=0.1).
 
     Cascading-loss cap: no more than `max_retirements_per_7_days`
     (desk, regime, target) triples may be retired in any rolling
@@ -555,8 +634,19 @@ def feed_reliability_review_handler(
                 chosen_weight = shapley_share
                 source = "shapley"
             else:
-                chosen_weight = reinstate_weight
-                source = "fallback"
+                previous_weight = latest_nonzero_weight_for_desk(
+                    conn,
+                    regime_id=regime_id,
+                    desk_name=desk,
+                    target_variable=target,
+                    now_utc=now_utc,
+                )
+                if previous_weight is not None and previous_weight > 0.0:
+                    chosen_weight = previous_weight
+                    source = "historical_weight"
+                else:
+                    chosen_weight = reinstate_weight
+                    source = "fallback"
             sw = reinstate_desk_direct(
                 conn,
                 regime_id=regime_id,
@@ -574,7 +664,7 @@ def feed_reliability_review_handler(
                 "feed_name": feed,
                 "source": source,
             }
-            if source == "shapley":
+            if source in {"shapley", "historical_weight"}:
                 reinstatements_performed.append(record)
             else:
                 reinstatement_fallbacks.append(record)
@@ -597,7 +687,7 @@ def feed_reliability_review_handler(
             f"feed reliability review: "
             f"retired={len(retirements_performed)} "
             f"capped={len(retirements_skipped_capped)} "
-            f"reinstated={len(reinstatement_fallbacks)}"
+            f"reinstated={len(reinstatements_performed) + len(reinstatement_fallbacks)}"
         ),
     )
 
@@ -622,6 +712,8 @@ def periodic_weekly_handler(
     Output (produced_artefact): JSON of
       {
         "n_decisions": int,
+        "n_prints": int,
+        "metric_name": str,
         "window": {"start": "...", "end": "..."},
         "shapley": [{"desk": str, "value": float, "n": int}, ...]
       }
@@ -645,24 +737,40 @@ def periodic_weekly_handler(
     if not decisions:
         summary = {
             "n_decisions": 0,
+            "n_prints": 0,
+            "metric_name": "position_size_delta",
             "window": {"start": start_ts.isoformat(), "end": end_ts.isoformat()},
             "shapley": [],
         }
         return HandlerResult(artefact=json.dumps(summary), notes="no decisions in window")
 
     recent_by_decision = _forecasts_by_decision(conn, decisions)
-    shapley_rows = compute_shapley_signal_space(
-        conn=conn,
-        decisions=decisions,
-        recent_forecasts_by_decision=recent_by_decision,
-        review_ts_utc=end_ts,
-    )
+    prints_by_decision = _prints_by_decision(conn, decisions, recent_by_decision)
+    if prints_by_decision:
+        shapley_rows = compute_shapley_grading_space(
+            conn=conn,
+            decisions=decisions,
+            recent_forecasts_by_decision=recent_by_decision,
+            prints_by_decision=prints_by_decision,
+            review_ts_utc=end_ts,
+        )
+        metric_name = "squared_error_reduction"
+    else:
+        shapley_rows = compute_shapley_signal_space(
+            conn=conn,
+            decisions=decisions,
+            recent_forecasts_by_decision=recent_by_decision,
+            review_ts_utc=end_ts,
+        )
+        metric_name = "position_size_delta"
     summary_rows: list[dict[str, object]] = [
         {"desk": r.desk_name, "value": r.shapley_value, "n": r.n_decisions} for r in shapley_rows
     ]
     summary_rows.sort(key=lambda x: str(x["desk"]))
     summary = {
         "n_decisions": len(decisions),
+        "n_prints": len(prints_by_decision),
+        "metric_name": metric_name,
         "window": {"start": start_ts.isoformat(), "end": end_ts.isoformat()},
         "shapley": summary_rows,
     }

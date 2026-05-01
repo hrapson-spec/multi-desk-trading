@@ -1,0 +1,125 @@
+{
+  "by_family": {
+    "fomc": {
+      "accuracy": 0.6666666666666666,
+      "gain_vs_majority_pp": 0.0,
+      "gain_vs_zero_pp": 33.33333333333333,
+      "majority_baseline_accuracy": 0.6666666666666666,
+      "n": 3,
+      "zero_return_baseline_accuracy": 0.3333333333333333
+    },
+    "gpr": {
+      "accuracy": 0.502262443438914,
+      "gain_vs_majority_pp": -2.26244343891403,
+      "gain_vs_zero_pp": 2.714932126696834,
+      "majority_baseline_accuracy": 0.5248868778280543,
+      "n": 221,
+      "zero_return_baseline_accuracy": 0.4751131221719457
+    },
+    "opec_ministerial": {
+      "accuracy": 0.5454545454545454,
+      "gain_vs_majority_pp": 0.0,
+      "gain_vs_zero_pp": 9.090909090909088,
+      "majority_baseline_accuracy": 0.5454545454545454,
+      "n": 11,
+      "zero_return_baseline_accuracy": 0.45454545454545453
+    },
+    "psm": {
+      "accuracy": 0.4838709677419355,
+      "gain_vs_majority_pp": -3.2258064516129004,
+      "gain_vs_zero_pp": 0.0,
+      "majority_baseline_accuracy": 0.5161290322580645,
+      "n": 62,
+      "zero_return_baseline_accuracy": 0.4838709677419355
+    },
+    "wpsr": {
+      "accuracy": 0.541095890410959,
+      "gain_vs_majority_pp": 0.6849315068493178,
+      "gain_vs_zero_pp": 7.534246575342474,
+      "majority_baseline_accuracy": 0.5342465753424658,
+      "n": 292,
+      "zero_return_baseline_accuracy": 0.4657534246575342
+    }
+  },
+  "by_window": {
+    "2020_2021": {
+      "accuracy": 0.5379310344827586,
+      "gain_vs_majority_pp": -2.758620689655178,
+      "gain_vs_zero_pp": 10.344827586206895,
+      "majority_baseline_accuracy": 0.5655172413793104,
+      "n": 145,
+      "zero_return_baseline_accuracy": 0.43448275862068964
+    },
+    "2022_2023": {
+      "accuracy": 0.5242718446601942,
+      "gain_vs_majority_pp": -0.4854368932038833,
+      "gain_vs_zero_pp": 5.339805825242716,
+      "majority_baseline_accuracy": 0.529126213592233,
+      "n": 206,
+      "zero_return_baseline_accuracy": 0.470873786407767
+    },
+    "2024_2026": {
+      "accuracy": 0.5084033613445378,
+      "gain_vs_majority_pp": 0.0,
+      "gain_vs_zero_pp": 1.6806722689075626,
+      "majority_baseline_accuracy": 0.5084033613445378,
+      "n": 238,
+      "zero_return_baseline_accuracy": 0.49159663865546216
+    },
+    "ex_2020": {
+      "accuracy": 0.5274725274725275,
+      "gain_vs_majority_pp": -0.366300366300365,
+      "gain_vs_zero_pp": 5.860805860805862,
+      "majority_baseline_accuracy": 0.5311355311355311,
+      "n": 546,
+      "zero_return_baseline_accuracy": 0.46886446886446886
+    }
+  },
+  "created_at_utc": "2026-04-29T14:26:23Z",
+  "date_shift_placebo_rows": {
+    "-2": {
+      "accuracy": 0.5195911413969335,
+      "gain_vs_majority_pp": -1.1925042589437829,
+      "gain_vs_zero_pp": 5.110732538330493,
+      "majority_baseline_accuracy": 0.5315161839863713,
+      "n": 587,
+      "zero_return_baseline_accuracy": 0.4684838160136286
+    },
+    "-5": {
+      "accuracy": 0.5308219178082192,
+      "gain_vs_majority_pp": 0.0,
+      "gain_vs_zero_pp": 6.164383561643838,
+      "majority_baseline_accuracy": 0.5308219178082192,
+      "n": 584,
+      "zero_return_baseline_accuracy": 0.4691780821917808
+    },
+    "2": {
+      "accuracy": 0.524701873935264,
+      "gain_vs_majority_pp": -0.5110732538330498,
+      "gain_vs_zero_pp": 5.451448040885859,
+      "majority_baseline_accuracy": 0.5298126064735945,
+      "n": 587,
+      "zero_return_baseline_accuracy": 0.47018739352640543
+    },
+    "5": {
+      "accuracy": 0.5308219178082192,
+      "gain_vs_majority_pp": -0.1712328767123239,
+      "gain_vs_zero_pp": 6.335616438356167,
+      "majority_baseline_accuracy": 0.5325342465753424,
+      "n": 584,
+      "zero_return_baseline_accuracy": 0.4674657534246575
+    }
+  },
+  "leakage_check": {
+    "feature_rule": "strict_previous_trading_day_excludes_event_day_daily_price",
+    "status": "pass_by_code_path"
+  },
+  "overall": {
+    "accuracy": 0.5212224108658744,
+    "gain_vs_majority_pp": -0.8488964346349714,
+    "gain_vs_zero_pp": 5.093378607809851,
+    "majority_baseline_accuracy": 0.5297113752122241,
+    "n": 589,
+    "zero_return_baseline_accuracy": 0.4702886247877759
+  }
+}

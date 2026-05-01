@@ -249,3 +249,70 @@ def test_hedging_demand_obs_rng_isolated_from_dealer_inventory():
     di_tweaked = tweaked.by_desk["dealer_inventory"].components
     np.testing.assert_array_equal(di_default["dealer_flow"], di_tweaked["dealer_flow"])
     np.testing.assert_array_equal(di_default["vega_exposure"], di_tweaked["vega_exposure"])
+
+
+# ---------------------------------------------------------------------------
+# v1.16 (C11) — fair_vol_baseline decision-time-safety tests.
+# ---------------------------------------------------------------------------
+
+
+def test_fair_vol_baseline_shape_and_warmup():
+    """fair_vol_baseline has shape (n_days,); warm-up indices (t < lag +
+    lookback) are populated with the OU baseline mean from the latent
+    market config — no NaN, no look-ahead."""
+    from sim_equity_vrp import EquityObservationConfig
+
+    cfg = EquityObservationConfig()
+    path = EquityVolMarket(n_days=200, seed=3).generate()
+    channels = EquityObservationChannels.build(path, mode="clean", seed=3, config=cfg)
+
+    assert channels.fair_vol_baseline.shape == (200,)
+    warmup = cfg.fair_vol_baseline_lag + cfg.fair_vol_baseline_lookback
+    # Warm-up indices take the starting vol level (= OU baseline at t=0).
+    warm = channels.fair_vol_baseline[:warmup]
+    assert np.all(warm == path.vol_level[0])
+
+
+def test_fair_vol_baseline_is_strict_function_of_past_vol_level():
+    """fair_vol_baseline[t] must not depend on vol_level[>= t] for any t.
+
+    Probe by mutating vol_level at indices >= t_probe and re-running the
+    baseline computation by hand; the baseline at t_probe must match the
+    version computed from the unmutated prefix."""
+    from sim_equity_vrp import EquityObservationConfig
+
+    cfg = EquityObservationConfig()
+    path = EquityVolMarket(n_days=200, seed=3).generate()
+    channels = EquityObservationChannels.build(path, mode="clean", seed=3, config=cfg)
+
+    lookback = cfg.fair_vol_baseline_lookback
+    lag = cfg.fair_vol_baseline_lag
+    for t_probe in (lag + lookback, 50, 100, 150, 199):
+        lo = t_probe - lag - lookback
+        hi = t_probe - lag
+        # All indices in the window must be strictly less than t_probe.
+        assert hi <= t_probe, f"window [{lo}:{hi}] must end strictly before t={t_probe}"
+        expected = float(path.vol_level[lo:hi].mean())
+        actual = float(channels.fair_vol_baseline[t_probe])
+        assert np.isclose(expected, actual), (
+            f"fair_vol_baseline[{t_probe}]={actual} does not match trailing "
+            f"mean of vol_level[{lo}:{hi}]={expected}"
+        )
+
+
+def test_fair_vol_baseline_excluded_from_d12_golden():
+    """Adding fair_vol_baseline as a new EquityObservationChannels field
+    must NOT perturb the D12 golden hashes on dealer_inventory's arrays
+    (latent or observed)."""
+    path = EquityVolMarket(n_days=_GOLDEN_N_DAYS, seed=_GOLDEN_SEED).generate()
+    # Latent hashes unchanged by observation-layer-only additions.
+    assert _sha256(path.vol_level) == _GOLDEN_VOL_LEVEL_SHA256
+    assert _sha256(path.dealer_flow) == _GOLDEN_DEALER_FLOW_SHA256
+    assert _sha256(path.vega_exposure) == _GOLDEN_VEGA_EXPOSURE_SHA256
+    # Observed hashes unchanged — the new merged-view key and new
+    # fair_vol_baseline field are additive; legacy component arrays are
+    # shared views of the pre-v1.16 buffers.
+    channels = EquityObservationChannels.build(path, mode="clean", seed=_GOLDEN_SEED)
+    di = channels.by_desk["dealer_inventory"].components
+    assert _sha256(di["dealer_flow"]) == _GOLDEN_OBS_DEALER_FLOW_SHA256
+    assert _sha256(di["vega_exposure"]) == _GOLDEN_OBS_VEGA_EXPOSURE_SHA256

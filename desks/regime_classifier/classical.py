@@ -6,25 +6,24 @@ Two classes live here:
     simulator's ground-truth regime label. Used to isolate
     desk/Controller/attribution testing from classifier quality under
     the DERAIL isolation principle.
-  - `HMMRegimeClassifier` (v0.2): data-driven 4-state Gaussian HMM
-    fitted on market-price log-returns via hmmlearn. Emits `RegimeLabel`
-    with soft posterior probabilities and a data-driven `regime_id` that
-    the Controller's `regime_id = argmax(probabilities)` path already
-    consumes without code changes.
+  - `HMMRegimeClassifier` (v0.3): data-driven Gaussian HMM fitted on
+    market-price log-returns via hmmlearn. By default it selects the
+    regime count from a bounded range using BIC, so the shipped path is
+    no longer fixed-K.
 
-The HMM's regime IDs are opaque integers (`hmm_regime_0` … `hmm_regime_3`)
-— they do NOT align with the simulator's ground truth labels
+The HMM's regime IDs are opaque integers (`hmm_regime_0`, ...): they do
+NOT align with the simulator's ground-truth labels
 (`equilibrium`, `supply_dominated`, etc.) because the HMM has no way to
 know which latent state corresponds to which economic regime. Controller
-weight matrices are keyed on `regime_id` strings, so at Phase A v0.2 the
-weight matrix is re-keyed to the HMM's opaque IDs; a real deployment
-would use label-matching (e.g. Hungarian algorithm on forecast
-distributions) to align.
+weight matrices are keyed on `regime_id` strings, so the weight matrix is
+re-keyed to the HMM's opaque IDs; a real deployment would use
+label-matching (e.g. Hungarian algorithm on forecast distributions) to
+align.
 
-**Capability-claim debit (remaining in v0.2)**: real deployment wants an
-HDP-HMM per spec §10 (non-parametric regime count, capped at 6 per §8.5).
-The v0.2 Gaussian HMM uses a fixed K=4 matching the simulator's known
-regime count; HDP-HMM lands in v0.3.
+The spec's full HDP-HMM remains a future model-family option, but the
+root fixed-K weakness is closed here: the default classifier now selects
+K in a capped range [2, 6] from the observed data without changing the
+Controller contract.
 """
 
 from __future__ import annotations
@@ -101,17 +100,17 @@ class GroundTruthRegimeClassifier:
 
 
 # ---------------------------------------------------------------------------
-# HMMRegimeClassifier (v0.2)
+# HMMRegimeClassifier (v0.3)
 # ---------------------------------------------------------------------------
 
-_HMM_NAME = "gaussian_hmm_k4_v0.2"
-_HMM_DEBIT = "hdp_hmm_deferred_to_v0.3"
-_HMM_N_STATES = 4  # matches sim/regimes.py REGIMES count
+_HMM_NAME = "gaussian_hmm_adaptive_k_bic_v0.3"
+_HMM_MIN_STATES = 2
+_HMM_MAX_STATES = 6
 
 
 @dataclass
 class HMMRegimeClassifier:
-    """4-state Gaussian HMM over market-price log-returns.
+    """Adaptive-K Gaussian HMM over market-price log-returns.
 
     Fit with `fit(market_price_train)`; after fitting, call
     `regime_label_at(channels, i, now_utc)` to get a RegimeLabel at
@@ -120,18 +119,57 @@ class HMMRegimeClassifier:
     `log(market_price[:i+1])`, so the label at index `i` only depends
     on observations up to and including that index (no look-ahead).
 
-    Regime IDs are opaque strings `hmm_regime_0` … `hmm_regime_3`. A
-    real deployment would align them to semantic labels via a post-fit
-    matching step (out of scope for v0.2).
+    By default the classifier fits candidate HMMs for K in
+    `[min_states, max_states]` and chooses the best BIC score. Passing
+    `n_states` forces a fixed-K fit, which remains useful for narrow
+    tests but is no longer the default deployment path.
+
+    Regime IDs are opaque strings `hmm_regime_0`, ...,
+    `hmm_regime_{K-1}`. A real deployment would align them to semantic
+    labels via a post-fit matching step (out of scope here).
     """
 
-    n_states: int = _HMM_N_STATES
+    n_states: int | None = None
+    min_states: int = _HMM_MIN_STATES
+    max_states: int = _HMM_MAX_STATES
     n_iter: int = 30
     seed: int = 0
 
     _model: object | None = field(default=None, init=False, repr=False)
     _fitted: bool = field(default=False, init=False)
     _train_hash: str = field(default="", init=False)
+    _active_n_states: int = field(default=0, init=False)
+
+    @staticmethod
+    def _n_hmm_params(n_states: int, n_features: int) -> int:
+        """Approximate free-parameter count for BIC under diag covariance."""
+        startprob_params = n_states - 1
+        transition_params = n_states * (n_states - 1)
+        mean_params = n_states * n_features
+        covariance_params = n_states * n_features
+        return startprob_params + transition_params + mean_params + covariance_params
+
+    def _candidate_state_counts(self, n_train_obs: int) -> list[int]:
+        if self.n_states is not None:
+            if self.n_states < 2:
+                raise ValueError(f"n_states must be ≥ 2; got {self.n_states}")
+            if n_train_obs < self.n_states * 10:
+                raise ValueError(
+                    f"need ≥ {self.n_states * 10} training observations; got {n_train_obs}"
+                )
+            return [self.n_states]
+        if self.min_states < 2:
+            raise ValueError(f"min_states must be ≥ 2; got {self.min_states}")
+        if self.max_states < self.min_states:
+            raise ValueError(
+                f"max_states must be ≥ min_states; got {self.max_states} < {self.min_states}"
+            )
+        if n_train_obs < self.min_states * 10:
+            raise ValueError(
+                f"need ≥ {self.min_states * 10} training observations; got {n_train_obs}"
+            )
+        max_fit_states = min(self.max_states, max(self.min_states, n_train_obs // 10))
+        return list(range(self.min_states, max_fit_states + 1))
 
     def fit(self, market_price_train: np.ndarray) -> None:
         """Fit HMM on training log-returns. Deterministic under the given seed."""
@@ -139,29 +177,48 @@ class HMMRegimeClassifier:
 
         from hmmlearn import hmm
 
-        if len(market_price_train) < self.n_states * 10:
-            raise ValueError(
-                f"need ≥ {self.n_states * 10} training observations; got {len(market_price_train)}"
-            )
-
         log_rets = np.diff(np.log(market_price_train)).reshape(-1, 1)
-        model = hmm.GaussianHMM(
-            n_components=self.n_states,
-            covariance_type="diag",
-            n_iter=self.n_iter,
-            random_state=self.seed,
-            init_params="stmc",
-            params="stmc",
-        )
-        model.fit(log_rets)
-        self._model = model
+        candidate_states = self._candidate_state_counts(len(market_price_train))
+        best_model: object | None = None
+        best_k: int | None = None
+        best_bic: float | None = None
+
+        for k in candidate_states:
+            model = hmm.GaussianHMM(
+                n_components=k,
+                covariance_type="diag",
+                n_iter=self.n_iter,
+                random_state=self.seed + 1009 * k,
+                init_params="stmc",
+                params="stmc",
+            )
+            model.fit(log_rets)
+            log_likelihood = float(model.score(log_rets))
+            bic = -2.0 * log_likelihood + self._n_hmm_params(k, log_rets.shape[1]) * float(
+                np.log(len(log_rets))
+            )
+            if (
+                best_bic is None
+                or bic < best_bic - 1e-12
+                or (abs(bic - best_bic) <= 1e-12 and best_k is not None and k < best_k)
+            ):
+                best_model = model
+                best_k = k
+                best_bic = bic
+
+        if best_model is None or best_k is None:
+            raise RuntimeError("failed to fit any HMM candidate")
+
+        self._model = best_model
         self._fitted = True
+        self._active_n_states = best_k
         # Deterministic fingerprint over fitted params
         h = hashlib.sha256()
-        h.update(model.startprob_.tobytes())
-        h.update(model.transmat_.tobytes())
-        h.update(model.means_.tobytes())
-        h.update(model.covars_.tobytes())
+        h.update(np.asarray([best_k], dtype=np.int64).tobytes())
+        h.update(best_model.startprob_.tobytes())
+        h.update(best_model.transmat_.tobytes())
+        h.update(best_model.means_.tobytes())
+        h.update(best_model.covars_.tobytes())
         self._train_hash = h.hexdigest()
 
     def fingerprint(self) -> str:
@@ -175,7 +232,7 @@ class HMMRegimeClassifier:
         return Provenance(
             desk_name="regime_classifier",
             model_name=_HMM_NAME,
-            model_version="0.2.0",
+            model_version="0.3.0",
             input_snapshot_hash=snapshot_hash,
             spec_hash="0" * 64,
             code_commit="0" * 40,
@@ -205,10 +262,12 @@ class HMMRegimeClassifier:
         probs_vec = posteriors[-1]  # (n_states,)
         argmax_k = int(np.argmax(probs_vec))
         regime_id = self._regime_str(argmax_k)
-        probs = {self._regime_str(k): float(probs_vec[k]) for k in range(self.n_states)}
+        probs = {
+            self._regime_str(k): float(probs_vec[k]) for k in range(self._active_n_states)
+        }
         # Transition row for the argmax state (hmmlearn stores transmat_[i, j] = P(j|i))
         trans_row = self._model.transmat_[argmax_k]
-        trans = {self._regime_str(k): float(trans_row[k]) for k in range(self.n_states)}
+        trans = {self._regime_str(k): float(trans_row[k]) for k in range(self._active_n_states)}
         return RegimeLabel(
             classification_ts_utc=now_utc,
             regime_id=regime_id,
@@ -217,6 +276,17 @@ class HMMRegimeClassifier:
             classifier_provenance=self._provenance(),
         )
 
+    @property
+    def active_n_states(self) -> int:
+        if self._fitted and self._active_n_states > 0:
+            return self._active_n_states
+        if self.n_states is not None:
+            return self.n_states
+        return self.max_states
+
+    def active_regime_ids(self) -> list[str]:
+        return [self._regime_str(k) for k in range(self.active_n_states)]
+
     @staticmethod
-    def all_regime_ids() -> list[str]:
-        return [f"hmm_regime_{k}" for k in range(_HMM_N_STATES)]
+    def all_regime_ids(max_states: int = _HMM_MAX_STATES) -> list[str]:
+        return [f"hmm_regime_{k}" for k in range(max_states)]

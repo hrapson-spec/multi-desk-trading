@@ -1,9 +1,9 @@
-"""Regime classifier — Week 1-2 stub implementation.
+"""Regime classifier stub used for early-phase hot-swap / cold-start tests.
 
 Always emits regime_boot (P=1.0). Exercises §14.8 cold-start path.
-Full HDP-HMM implementation deferred to last step of Phase 1 per §12.1
-('Controller weight matrix — final step') since the classifier's inputs
-are the mature desk outputs.
+The shipped data-driven classifier now lives in
+`desks.regime_classifier.classical.HMMRegimeClassifier`; this stub
+remains the trivial swap target required by Gate 3.
 """
 
 from __future__ import annotations

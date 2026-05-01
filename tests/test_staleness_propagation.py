@@ -1,17 +1,19 @@
-"""Integration test for feed-incident-driven staleness propagation.
+"""Integration test for feed-incident-driven staleness propagation (v1.16 roster).
 
-End-to-end guarantee: when data_ingestion_failure_handler v0.2 opens
-a feed_incidents row, concrete desks whose `feed_names` include the
-broken feed emit `Forecast.staleness=True` on their next call. The
-Controller's existing `if f.staleness: continue` path (§controller
-combined_signal) then excludes them — no extra work needed.
+End-to-end guarantee: when `data_ingestion_failure_handler` v0.2 opens a
+`feed_incidents` row, concrete desks whose `feed_names` include the broken
+feed emit `Forecast.staleness=True` on their next call. The Controller's
+existing `if f.staleness: continue` path (§controller combined_signal) then
+excludes them — no extra work needed.
 
-The test wires the pieces together without a full scheduler run:
-- Open an incident via the handler.
-- Call `forecast_from_observation(..., conn=conn)` on each desk.
-- Assert staleness=True for desks whose feed_names include the feed.
-- Assert staleness=False for desks whose feeds are unaffected.
-- Close the incident and verify staleness reverts to False.
+Under the v1.16 roster the test exercises:
+- `SupplyDisruptionNewsDesk` (feeds: opec_announcement + eia_wpsr)
+- `OilDemandNowcastDesk` (feed: eia_wpsr)
+- `StorageCurveDesk` (feeds: eia_wpsr + cftc_cot)
+
+The v1.11/v1.15 macro desk staleness tests are retired — macro is no longer
+a standalone alpha desk; its transmission is conditioning-only via
+`regime_classifier`, which has no external-feed dependencies.
 """
 
 from __future__ import annotations
@@ -25,16 +27,12 @@ import pytest
 
 from contracts.v1 import ResearchLoopEvent
 from desks.base import StubDesk
-from desks.demand import DemandDesk
-from desks.demand.classical import ClassicalDemandModel
-from desks.geopolitics import GeopoliticsDesk
-from desks.geopolitics.classical import ClassicalGeopoliticsModel
-from desks.macro import MacroDesk
-from desks.macro.classical import ClassicalMacroModel
-from desks.storage_curve import StorageCurveDesk
-from desks.storage_curve.classical import ClassicalStorageCurveModel
-from desks.supply import SupplyDesk
-from desks.supply.classical import ClassicalSupplyModel
+from desks.oil_demand_nowcast import ClassicalOilDemandNowcastModel, OilDemandNowcastDesk
+from desks.storage_curve import ClassicalStorageCurveModel, StorageCurveDesk
+from desks.supply_disruption_news import (
+    ClassicalSupplyDisruptionNewsModel,
+    SupplyDisruptionNewsDesk,
+)
 from persistence import (
     close_feed_incident,
     connect,
@@ -73,16 +71,14 @@ def _open_incident_via_handler(conn, *, feed_name: str, affected_desks: list[str
 
 
 # ---------------------------------------------------------------------------
-# feed_names class attribute is correctly set per-desk
+# feed_names class attribute is correctly set per v1.16 desk.
 # ---------------------------------------------------------------------------
 
 
 def test_feed_names_declared_per_desk():
-    assert "eia_wpsr" in SupplyDesk.feed_names
-    assert "opec_announcement" in SupplyDesk.feed_names
-    assert DemandDesk.feed_names == ["eia_wpsr"]
-    assert MacroDesk.feed_names == ["fomc_statement"]
-    assert "opec_announcement" in GeopoliticsDesk.feed_names
+    assert "opec_announcement" in SupplyDisruptionNewsDesk.feed_names
+    assert "eia_wpsr" in SupplyDisruptionNewsDesk.feed_names
+    assert OilDemandNowcastDesk.feed_names == ["eia_wpsr"]
     assert set(StorageCurveDesk.feed_names) == {"eia_wpsr", "cftc_cot"}
     # Base stub declares no dependencies.
     assert StubDesk.feed_names == []
@@ -95,7 +91,7 @@ def test_base_stub_with_empty_feed_names_returns_false(conn):
 
 
 # ---------------------------------------------------------------------------
-# Helper: OR-gate behaviour across declared feeds
+# Helper: OR-gate behaviour across declared feeds.
 # ---------------------------------------------------------------------------
 
 
@@ -110,21 +106,20 @@ def test_storage_curve_goes_stale_when_eia_wpsr_breaks(conn):
     assert StorageCurveDesk()._staleness_from_feeds(conn) is True
 
 
-def test_macro_unaffected_by_cftc_cot(conn):
-    """MacroDesk only depends on fomc_statement; a cftc_cot outage
+def test_oil_demand_nowcast_unaffected_by_unrelated_feed(conn):
+    """`oil_demand_nowcast` only depends on eia_wpsr; a cftc_cot outage
     must NOT set it stale (cross-feed leakage check)."""
     _open_incident_via_handler(conn, feed_name="cftc_cot", affected_desks=["storage_curve"])
-    assert MacroDesk()._staleness_from_feeds(conn) is False
+    assert OilDemandNowcastDesk()._staleness_from_feeds(conn) is False
 
 
 # ---------------------------------------------------------------------------
-# Forecast emission threads staleness correctly
+# Forecast emission threads staleness correctly.
 # ---------------------------------------------------------------------------
 
 
 def _trivial_channels():
-    """Minimal ObservationChannels stand-in for the desks we touch
-    below. Built lazily so sim dependencies stay isolated."""
+    """Minimal ObservationChannels stand-in for the desks we touch below."""
     from sim.latent_state import LatentMarket
     from sim.observations import ObservationChannels
 
@@ -132,60 +127,66 @@ def _trivial_channels():
     return ObservationChannels.build(latent, mode="clean", seed=1)
 
 
-def _fit(model, channel_key: str, channels) -> None:
-    """Fit a classical desk model against a single channel."""
-    if hasattr(model, "fit"):
-        target_ret = np.diff(np.log(np.asarray(channels.market_price)))
-        # Pad leading zero to keep index alignment with the channel array.
-        target_ret = np.concatenate([[0.0], target_ret])
-        channel = channels.by_desk[channel_key].components
-        if channel_key == "supply":
-            model.fit(channel["supply"], target_ret)
-        elif channel_key == "demand":
-            model.fit(channel["demand"], target_ret)
-        elif channel_key == "macro":
-            model.fit(channel["xi"], target_ret)
-
-
-def test_demand_forecast_is_stale_when_eia_wpsr_open(conn):
+def test_oil_demand_nowcast_forecast_is_stale_when_eia_wpsr_open(conn):
     channels = _trivial_channels()
-    model = ClassicalDemandModel()
-    _fit(model, "demand", channels)
-    desk = DemandDesk(model=model)
+    model = ClassicalOilDemandNowcastModel(horizon_days=3)
+    model.fit(
+        channels.by_desk["demand"].components["demand"],
+        channels.by_desk["demand"].components["demand_level"],
+        channels.market_price,
+    )
+    desk = OilDemandNowcastDesk(model=model)
 
     # No incident → staleness=False.
     f_clean = desk.forecast_from_observation(channels, 220, NOW, conn=conn)
     assert f_clean.staleness is False
 
-    _open_incident_via_handler(conn, feed_name="eia_wpsr", affected_desks=["demand"])
+    _open_incident_via_handler(
+        conn, feed_name="eia_wpsr", affected_desks=["oil_demand_nowcast"]
+    )
     f_stale = desk.forecast_from_observation(channels, 220, NOW, conn=conn)
     assert f_stale.staleness is True
 
 
-def test_demand_forecast_backcompat_without_conn(conn):
+def test_oil_demand_nowcast_forecast_backcompat_without_conn(conn):
     """Existing tests call forecast_from_observation without `conn`.
     That path must continue to return staleness=False (no behaviour
     change for pre-v1.7 callers)."""
     channels = _trivial_channels()
-    model = ClassicalDemandModel()
-    _fit(model, "demand", channels)
-    desk = DemandDesk(model=model)
+    model = ClassicalOilDemandNowcastModel(horizon_days=3)
+    model.fit(
+        channels.by_desk["demand"].components["demand"],
+        channels.by_desk["demand"].components["demand_level"],
+        channels.market_price,
+    )
+    desk = OilDemandNowcastDesk(model=model)
 
     # Open an incident on eia_wpsr — would set stale if conn were passed.
-    _open_incident_via_handler(conn, feed_name="eia_wpsr", affected_desks=["demand"])
-    # But we don't pass conn → staleness stays False.
+    _open_incident_via_handler(
+        conn, feed_name="eia_wpsr", affected_desks=["oil_demand_nowcast"]
+    )
     f = desk.forecast_from_observation(channels, 220, NOW)
     assert f.staleness is False
 
 
 def test_closing_incident_reverts_staleness(conn):
     channels = _trivial_channels()
-    model = ClassicalSupplyModel()
-    _fit(model, "supply", channels)
-    desk = SupplyDesk(model=model)
+    model = ClassicalSupplyDisruptionNewsModel(horizon_days=3)
+    geo_obs = channels.by_desk["geopolitics"].components
+    model.fit(
+        geo_obs["event_indicator"],
+        geo_obs["event_intensity"],
+        geo_obs["event_intensity_raw"],
+        channels.market_price,
+    )
+    desk = SupplyDisruptionNewsDesk(model=model)
 
-    fid = _open_incident_via_handler(conn, feed_name="eia_wpsr", affected_desks=["supply"])
-    assert desk.forecast_from_observation(channels, 220, NOW, conn=conn).staleness is True
+    fid = _open_incident_via_handler(
+        conn, feed_name="eia_wpsr", affected_desks=["supply_disruption_news"]
+    )
+    assert (
+        desk.forecast_from_observation(channels, 220, NOW, conn=conn).staleness is True
+    )
 
     close_feed_incident(
         conn,
@@ -193,12 +194,14 @@ def test_closing_incident_reverts_staleness(conn):
         closed_ts_utc=NOW + timedelta(hours=2),
         resolution_artefact="manual:test",
     )
-    assert desk.forecast_from_observation(channels, 220, NOW, conn=conn).staleness is False
+    assert (
+        desk.forecast_from_observation(channels, 220, NOW, conn=conn).staleness is False
+    )
 
 
 def test_storage_curve_forecast_from_prices_also_honours_staleness(conn):
-    """storage_curve has both forecast_from_prices and
-    forecast_from_observation — both must thread the conn kwarg."""
+    """storage_curve has both forecast_from_prices and forecast_from_observation —
+    both must thread the conn kwarg."""
     channels = _trivial_channels()
     prices = np.asarray(channels.market_price)
     model = ClassicalStorageCurveModel()
@@ -212,44 +215,49 @@ def test_storage_curve_forecast_from_prices_also_honours_staleness(conn):
     assert f_obs.staleness is True
 
 
-def test_macro_and_geopolitics_forecasts_honour_staleness(conn):
+def test_supply_disruption_news_forecast_honours_opec_staleness(conn):
+    """v1.16 merged desk stays stale when its opec_announcement feed breaks —
+    mirrors the pre-v1.16 GeopoliticsDesk + SupplyDesk staleness coverage now
+    that those two desks are merged."""
     channels = _trivial_channels()
-    macro_model = ClassicalMacroModel()
-    _fit(macro_model, "macro", channels)
-    macro_desk = MacroDesk(model=macro_model)
-
-    geo_model = ClassicalGeopoliticsModel()
-    # Geopolitics needs event_indicator + intensity — fit on market
-    # returns via the model's own .fit, which expects those features.
-    target_ret = np.diff(np.log(np.asarray(channels.market_price)))
-    target_ret = np.concatenate([[0.0], target_ret])
+    model = ClassicalSupplyDisruptionNewsModel(horizon_days=3)
     geo_obs = channels.by_desk["geopolitics"].components
-    geo_model.fit(geo_obs["event_indicator"], geo_obs["event_intensity"], target_ret)
-    geo_desk = GeopoliticsDesk(model=geo_model)
-
-    # Open unrelated incident first — neither desk should go stale.
-    _open_incident_via_handler(conn, feed_name="cftc_cot", affected_desks=["storage_curve"])
-    assert macro_desk.forecast_from_observation(channels, 220, NOW, conn=conn).staleness is False
-    assert geo_desk.forecast_from_observation(channels, 220, NOW, conn=conn).staleness is False
-
-    # Now open the feed each depends on.
-    _open_incident_via_handler(conn, feed_name="fomc_statement", affected_desks=["macro"])
-    _open_incident_via_handler(
-        conn, feed_name="opec_announcement", affected_desks=["geopolitics", "supply"]
+    model.fit(
+        geo_obs["event_indicator"],
+        geo_obs["event_intensity"],
+        geo_obs["event_intensity_raw"],
+        channels.market_price,
     )
-    assert macro_desk.forecast_from_observation(channels, 220, NOW, conn=conn).staleness is True
-    assert geo_desk.forecast_from_observation(channels, 220, NOW, conn=conn).staleness is True
+    desk = SupplyDisruptionNewsDesk(model=model)
+
+    # Open unrelated incident first — desk should NOT go stale.
+    _open_incident_via_handler(conn, feed_name="cftc_cot", affected_desks=["storage_curve"])
+    assert (
+        desk.forecast_from_observation(channels, 220, NOW, conn=conn).staleness is False
+    )
+
+    # Now open opec_announcement — desk SHOULD go stale.
+    _open_incident_via_handler(
+        conn,
+        feed_name="opec_announcement",
+        affected_desks=["supply_disruption_news"],
+    )
+    assert (
+        desk.forecast_from_observation(channels, 220, NOW, conn=conn).staleness is True
+    )
 
 
 # ---------------------------------------------------------------------------
-# Sanity — the registry and the handler agree on open-set
+# Sanity — the registry and the handler agree on open-set.
 # ---------------------------------------------------------------------------
 
 
 def test_handler_and_registry_agree(conn):
-    fid = _open_incident_via_handler(conn, feed_name="eia_wpsr", affected_desks=["supply"])
+    fid = _open_incident_via_handler(
+        conn, feed_name="eia_wpsr", affected_desks=["supply_disruption_news"]
+    )
     rows = get_open_feed_incidents(conn, "eia_wpsr")
     assert len(rows) == 1
     assert rows[0]["feed_incident_id"] == fid
     assert rows[0]["detected_by"] == "scheduler"
-    assert rows[0]["affected_desks"] == ["supply"]
+    assert rows[0]["affected_desks"] == ["supply_disruption_news"]

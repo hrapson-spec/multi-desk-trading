@@ -3,6 +3,14 @@
 # The scheduler emits the trigger with `affected_desks` drawn from this file
 # (v1.7: payload key renamed from `consumed_by` for handler alignment).
 #
+# v1.16 roster (2026-04-22):
+#   Oil — storage_curve + supply_disruption_news + oil_demand_nowcast.
+#   Equity-VRP — surface_positioning_feedback (merged dealer_inventory +
+#   hedging_demand) + the planned earnings_calendar (upcoming).
+#   macro / fomc_statement is retained as a feed that would influence
+#   regime_classifier conditioning but is not subscribed by any active
+#   alpha desk (macro absorbed into conditioning-only state).
+#
 # Schema:
 #   feed_name: stable identifier (matches event_id when the feed IS the event).
 #   description: human-readable.
@@ -15,7 +23,7 @@ data_sources:
   - feed_name: eia_wpsr
     description: "EIA Weekly Petroleum Status Report"
     tolerance_minutes: 120
-    consumed_by: [storage_curve, supply, demand]
+    consumed_by: [storage_curve, supply_disruption_news, oil_demand_nowcast]
 
   - feed_name: cftc_cot
     description: "CFTC Commitments of Traders (disaggregated)"
@@ -25,21 +33,33 @@ data_sources:
   - feed_name: fomc_statement
     description: "FOMC rate-decision statement"
     tolerance_minutes: 60
-    consumed_by: [macro]
+    # v1.16: consumed indirectly via regime_classifier conditioning —
+    # no alpha desk subscribes directly (macro-as-alpha removed).
+    consumed_by: []
 
   - feed_name: opec_announcement
     description: "OPEC ministerial meeting / production-quota announcement"
     tolerance_minutes: 120
-    consumed_by: [geopolitics, supply]
+    consumed_by: [supply_disruption_news]
 
-  # -- Phase 2 equity-VRP feeds (v1.13) -------------------------------
+  # -- Phase 2 equity-VRP feeds ---------------------------------------
 
   - feed_name: cboe_open_interest
     description: "CBOE options open interest (put/call OI snapshots)"
     tolerance_minutes: 240
-    consumed_by: [hedging_demand]
+    consumed_by: [surface_positioning_feedback]
 
   - feed_name: option_volume
     description: "Options daily volume (put/call totals)"
     tolerance_minutes: 240
-    consumed_by: [hedging_demand]
+    consumed_by: [surface_positioning_feedback]
+
+  - feed_name: vix_eod
+    description: "VIX end-of-day settlement + intraday printed quotes"
+    tolerance_minutes: 120
+    consumed_by: [surface_positioning_feedback, earnings_calendar]
+
+  - feed_name: earnings_calendar_feed
+    description: "Scheduled index-component earnings releases (synthetic placeholder until real feed wires in Phase 3)"
+    tolerance_minutes: 240
+    consumed_by: [earnings_calendar]

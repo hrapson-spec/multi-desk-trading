@@ -1,0 +1,459 @@
+# Public-data inventory for multi-desk-trading v2 (Phase B2b).
+#
+# Rights-gate invariant (enforced by public_data_registry.py validator):
+#   rights_status != "public"  =>  model_eligible MUST be false.
+#
+# Operator runbook: docs/v2/operator_runbook_public_data.md
+# Rights matrix:    docs/v2/public_data_rights_and_limitations.md
+
+entries:
+  # -------------------------------------------------------------------------
+  # FRED prices (canonical model-eligible source for WTI/Brent spot)
+  # -------------------------------------------------------------------------
+  - key: fred_dcoilwtico
+    source: fred
+    series_id: DCOILWTICO
+    description: "Cushing OK WTI Spot Price FOB (daily, USD/bbl)"
+    source_url: https://fred.stlouisfed.org/series/DCOILWTICO
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: daily
+    history_start: 1986-01-02
+    release_calendar_ref: fred_alfred.yaml
+
+  - key: fred_dcoilbrenteu
+    source: fred
+    series_id: DCOILBRENTEU
+    description: "Brent Crude Oil Spot Price (daily, USD/bbl)"
+    source_url: https://fred.stlouisfed.org/series/DCOILBRENTEU
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: daily
+    history_start: 1987-05-20
+    release_calendar_ref: fred_alfred.yaml
+
+  # -------------------------------------------------------------------------
+  # FRED macro / risk
+  # -------------------------------------------------------------------------
+  - key: fred_vixcls
+    source: fred
+    series_id: VIXCLS
+    description: "CBOE Volatility Index: VIX (daily close, FRED-routed)"
+    source_url: https://fred.stlouisfed.org/series/VIXCLS
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: daily
+    history_start: 1990-01-02
+    release_calendar_ref: fred_alfred.yaml
+    notes: "Canonical model-eligible VIX path. Cboe-direct entry exists only as resilience fallback."
+
+  - key: fred_dgs2
+    source: fred
+    series_id: DGS2
+    description: "2-Year Treasury Constant Maturity Rate (daily)"
+    source_url: https://fred.stlouisfed.org/series/DGS2
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: daily
+    history_start: 1976-06-01
+    release_calendar_ref: fred_alfred.yaml
+
+  - key: fred_dgs10
+    source: fred
+    series_id: DGS10
+    description: "10-Year Treasury Constant Maturity Rate (daily)"
+    source_url: https://fred.stlouisfed.org/series/DGS10
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: daily
+    history_start: 1962-01-02
+    release_calendar_ref: fred_alfred.yaml
+
+  - key: fred_t10y2y
+    source: fred
+    series_id: T10Y2Y
+    description: "10Y minus 2Y Treasury yield spread (daily)"
+    source_url: https://fred.stlouisfed.org/series/T10Y2Y
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: daily
+    history_start: 1976-06-01
+    release_calendar_ref: fred_alfred.yaml
+
+  - key: fred_dfii10
+    source: fred
+    series_id: DFII10
+    description: "10-Year TIPS yield (daily)"
+    source_url: https://fred.stlouisfed.org/series/DFII10
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: daily
+    history_start: 2003-01-02
+    release_calendar_ref: fred_alfred.yaml
+
+  - key: fred_t10yie
+    source: fred
+    series_id: T10YIE
+    description: "10-Year breakeven inflation rate (daily)"
+    source_url: https://fred.stlouisfed.org/series/T10YIE
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: daily
+    history_start: 2003-01-02
+    release_calendar_ref: fred_alfred.yaml
+
+  - key: fred_fedfunds
+    source: fred
+    series_id: FEDFUNDS
+    description: "Effective Federal Funds Rate (monthly)"
+    source_url: https://fred.stlouisfed.org/series/FEDFUNDS
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: monthly
+    history_start: 1954-07-01
+    release_calendar_ref: fred_alfred.yaml
+
+  - key: fred_sp500
+    source: fred
+    series_id: SP500
+    description: "S&P 500 index (daily close, FRED-routed)"
+    source_url: https://fred.stlouisfed.org/series/SP500
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: daily
+    history_start: 2013-01-02
+    release_calendar_ref: fred_alfred.yaml
+    notes: "FRED limits SP500 to ~10y trailing window; treat history_start as floating."
+
+  - key: fred_dtwexbgs
+    source: fred
+    series_id: DTWEXBGS
+    description: "Nominal Broad U.S. Dollar Index (daily, goods+services basket)"
+    source_url: https://fred.stlouisfed.org/series/DTWEXBGS
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: daily
+    history_start: 2006-01-02
+    release_calendar_ref: fred_alfred.yaml
+    notes: "Broad USD index. If discontinued, substitute DTWEXAFEGS (advanced foreign econs)."
+
+  # -------------------------------------------------------------------------
+  # EIA Weekly Petroleum Status Report (WPSR)
+  # -------------------------------------------------------------------------
+  - key: eia_wcestus1
+    source: eia
+    dataset: wpsr
+    series_id: WCESTUS1
+    description: "U.S. Ending Stocks of Crude Oil (excl. SPR), weekly, kbbl"
+    source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCESTUS1&f=W
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 1982-08-20
+    release_calendar_ref: eia_wpsr.yaml
+
+  - key: eia_wcsstus1
+    source: eia
+    dataset: wpsr
+    series_id: WCSSTUS1
+    description: "U.S. Ending Stocks of Crude Oil in SPR, weekly, kbbl"
+    source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCSSTUS1&f=W
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 1982-08-20
+    release_calendar_ref: eia_wpsr.yaml
+
+  - key: eia_cushing_stocks
+    source: eia
+    dataset: wpsr
+    series_id: W_EPC0_SAX_YCUOK_MBBL
+    description: "Cushing OK ending stocks of crude oil (weekly, kbbl)"
+    source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=W_EPC0_SAX_YCUOK_MBBL&f=W
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 2004-04-09
+    release_calendar_ref: eia_wpsr.yaml
+
+  - key: eia_us_crude_production_weekly
+    source: eia
+    dataset: wpsr
+    series_id: WCRFPUS2
+    description: "U.S. weekly field production of crude oil (kbbl/d)"
+    source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCRFPUS2&f=W
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 1983-01-07
+    release_calendar_ref: eia_wpsr.yaml
+    notes: "verify_series_id_at_first_fetch"
+
+  - key: eia_us_crude_imports_weekly
+    source: eia
+    dataset: wpsr
+    series_id: WCRIMUS2
+    description: "U.S. weekly imports of crude oil (kbbl/d)"
+    source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCRIMUS2&f=W
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 1990-01-05
+    release_calendar_ref: eia_wpsr.yaml
+    notes: "verify_series_id_at_first_fetch"
+
+  - key: eia_us_crude_exports_weekly
+    source: eia
+    dataset: wpsr
+    series_id: WCREXUS2
+    description: "U.S. weekly exports of crude oil (kbbl/d)"
+    source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WCREXUS2&f=W
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 1990-01-05
+    release_calendar_ref: eia_wpsr.yaml
+    notes: "verify_series_id_at_first_fetch"
+
+  - key: eia_refinery_utilisation_weekly
+    source: eia
+    dataset: wpsr
+    series_id: WPULEUS3
+    description: "U.S. weekly percent utilisation of refinery operable capacity"
+    source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WPULEUS3&f=W
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 1989-01-06
+    release_calendar_ref: eia_wpsr.yaml
+    notes: "verify_series_id_at_first_fetch"
+
+  - key: eia_us_gasoline_stocks_weekly
+    source: eia
+    dataset: wpsr
+    series_id: WGTSTUS1
+    description: "U.S. weekly ending stocks of total gasoline (kbbl)"
+    source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WGTSTUS1&f=W
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 1990-08-31
+    release_calendar_ref: eia_wpsr.yaml
+    notes: "verify_series_id_at_first_fetch"
+
+  - key: eia_us_distillate_stocks_weekly
+    source: eia
+    dataset: wpsr
+    series_id: WDISTUS1
+    description: "U.S. weekly ending stocks of distillate fuel oil (kbbl)"
+    source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WDISTUS1&f=W
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 1982-08-20
+    release_calendar_ref: eia_wpsr.yaml
+    notes: "verify_series_id_at_first_fetch"
+
+  - key: eia_us_jet_stocks_weekly
+    source: eia
+    dataset: wpsr
+    series_id: WKJSTUS1
+    description: "U.S. weekly ending stocks of kerosene-type jet fuel (kbbl)"
+    source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WKJSTUS1&f=W
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 1990-08-31
+    release_calendar_ref: eia_wpsr.yaml
+    notes: "verify_series_id_at_first_fetch"
+
+  - key: eia_us_propane_stocks_weekly
+    source: eia
+    dataset: wpsr
+    series_id: WPRSTUS1
+    description: "U.S. weekly ending stocks of propane and propylene (kbbl)"
+    source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WPRSTUS1&f=W
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 1993-10-01
+    release_calendar_ref: eia_wpsr.yaml
+    notes: "verify_series_id_at_first_fetch"
+
+  - key: eia_us_product_supplied_total_weekly
+    source: eia
+    dataset: wpsr
+    series_id: WRPUPUS2
+    description: "U.S. weekly total products supplied (proxy for end-use demand, kbbl/d)"
+    source_url: https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=WRPUPUS2&f=W
+    retrieval_method: api
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 1991-02-08
+    release_calendar_ref: eia_wpsr.yaml
+    notes: "verify_series_id_at_first_fetch"
+
+  # -------------------------------------------------------------------------
+  # CFTC Commitments of Traders (WTI disaggregated, futures only)
+  # -------------------------------------------------------------------------
+  - key: cftc_cot_wti
+    source: cftc
+    series_id: "067651"
+    description: "CFTC COT, NYMEX WTI Light Sweet Crude (market code 067651), disaggregated, futures-only"
+    source_url: https://www.cftc.gov/dea/newcot/FinFutWk.txt
+    retrieval_method: csv_download
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 2006-06-13
+    release_calendar_ref: cftc_cot.yaml
+
+  # -------------------------------------------------------------------------
+  # Cboe VIX direct (resilience fallback only — NOT model-eligible at v2.0)
+  # -------------------------------------------------------------------------
+  - key: cboe_vix_direct
+    source: cboe
+    series_id: VIX
+    description: "Cboe VIX historical CSV (display-permitted; resilience fallback only)"
+    source_url: https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv
+    retrieval_method: csv_download
+    rights_status: display_only
+    model_eligible: false
+    frequency: daily
+    history_start: 1990-01-02
+    release_calendar_ref: cboe_vix.yaml
+    notes: "FRED VIXCLS is the canonical model-eligible source; this entry exists for resilience fallback only."
+
+  # -------------------------------------------------------------------------
+  # Baker Hughes North America rig count (weekly, Friday afternoon)
+  # -------------------------------------------------------------------------
+  - key: baker_hughes_us_oil_rigs
+    source: baker_hughes
+    series_id: us_oil_rigs
+    description: "Baker Hughes North America Rig Count: U.S. oil rigs (weekly Friday)"
+    source_url: https://rigcount.bakerhughes.com/na-rig-count
+    retrieval_method: xlsx_download
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 1987-07-17
+    release_calendar_ref: baker_hughes_rig_count.yaml
+
+  - key: baker_hughes_us_gas_rigs
+    source: baker_hughes
+    series_id: us_gas_rigs
+    description: "Baker Hughes North America Rig Count: U.S. gas rigs (weekly Friday)"
+    source_url: https://rigcount.bakerhughes.com/na-rig-count
+    retrieval_method: xlsx_download
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 1987-07-17
+    release_calendar_ref: baker_hughes_rig_count.yaml
+
+  - key: baker_hughes_us_total_rigs
+    source: baker_hughes
+    series_id: us_total_rigs
+    description: "Baker Hughes North America Rig Count: U.S. total rigs (weekly Friday)"
+    source_url: https://rigcount.bakerhughes.com/na-rig-count
+    retrieval_method: xlsx_download
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 1987-07-17
+    release_calendar_ref: baker_hughes_rig_count.yaml
+
+  - key: baker_hughes_canada_total_rigs
+    source: baker_hughes
+    series_id: canada_total_rigs
+    description: "Baker Hughes North America Rig Count: Canada total rigs (weekly Friday)"
+    source_url: https://rigcount.bakerhughes.com/na-rig-count
+    retrieval_method: xlsx_download
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 2000-01-07
+    release_calendar_ref: baker_hughes_rig_count.yaml
+
+  - key: baker_hughes_na_total_rigs
+    source: baker_hughes
+    series_id: na_total_rigs
+    description: "Baker Hughes North America Rig Count: NA total rigs (weekly Friday)"
+    source_url: https://rigcount.bakerhughes.com/na-rig-count
+    retrieval_method: xlsx_download
+    rights_status: public
+    model_eligible: true
+    frequency: weekly
+    history_start: 2000-01-07
+    release_calendar_ref: baker_hughes_rig_count.yaml
+
+  # -------------------------------------------------------------------------
+  # CME public CL contract metadata (METADATA ONLY — not model-eligible)
+  # -------------------------------------------------------------------------
+  - key: cme_cl_contract_metadata
+    source: cme
+    series_id: CL
+    description: "CME Light Sweet Crude Oil (CL) public contract specification metadata"
+    source_url: https://www.cmegroup.com/markets/energy/crude-oil/light-sweet-crude.contractSpecs.html
+    retrieval_method: html_scrape
+    rights_status: display_only
+    model_eligible: false
+    frequency: irregular
+    history_start: null
+    release_calendar_ref: cme_cl_contract_metadata.yaml
+    notes: |
+      Metadata only: contract unit, expiry rule, physical-settlement flag, last-trade-date list.
+      Non-display market data (prices, settlements, volumes, open interest) is NOT authorised
+      under CME's public terms; ingester MUST refuse to write any price/quote columns.
+
+  # -------------------------------------------------------------------------
+  # OPEC MOMR / IEA OMR — manual-only event features
+  # -------------------------------------------------------------------------
+  - key: opec_momr
+    source: opec
+    series_id: MOMR
+    description: "OPEC Monthly Oil Market Report — release-event flag only (no PDF scraping at v2.0)"
+    source_url: https://www.opec.org/opec_web/en/publications/202.htm
+    retrieval_method: manual_event_feature
+    rights_status: manual_only
+    model_eligible: false
+    frequency: monthly
+    history_start: null
+    release_calendar_ref: event_calendar.yaml
+    notes: "Documented but not ingested; release-day flag only via event_calendar."
+
+  - key: iea_omr
+    source: iea
+    series_id: OMR
+    description: "IEA Oil Market Report — release-event flag only (paywall on full report)"
+    source_url: https://www.iea.org/reports/oil-market-report
+    retrieval_method: manual_event_feature
+    rights_status: manual_only
+    model_eligible: false
+    frequency: monthly
+    history_start: null
+    release_calendar_ref: event_calendar.yaml
+    notes: "Documented but not ingested; release-day flag only via event_calendar."

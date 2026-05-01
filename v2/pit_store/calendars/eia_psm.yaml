@@ -1,0 +1,32 @@
+source: eia_psm
+dataset: psm_calendar
+description: "EIA Petroleum Supply Monthly (EIA-914 preliminary) release schedule"
+publisher: "U.S. Energy Information Administration"
+calendar_version: "1.0.0"
+latency_guard_minutes: 5
+holiday_handling: "shift_prior_business_day_if_holiday"
+release_cadence:
+  type: monthly
+  earliest_release_time_et: "10:00"
+  holiday_rule: shift_prior_business_day
+observation_semantics:
+  reporting_period: "production_two_months_prior"
+  lag_to_publication_days: 60
+revision_policy: "preliminary_then_final_one_month_later_only_preliminary_is_decision_event"
+pit_eligibility_rule: |
+  known_by_ts = release_ts
+  Row eligible at ts iff release_ts <= ts.
+source_confidence:
+  baseline: 0.92
+  degradation_conditions:
+    - "federal shutdown"
+    - "EIA methodology revision"
+data_quality_multipliers:
+  fresh: 1.0
+  stale_1week: 0.95
+  stale_2week: 0.85
+  stale_over_2week: 0.50
+notes: |
+  v1.0 computes release dates via the "last Friday of month at 10:00 ET"
+  rule. vintage_quality = release_lag_safe_revision_unknown. v1.1
+  scraping will upgrade to true_first_release.

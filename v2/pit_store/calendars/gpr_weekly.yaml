@@ -1,0 +1,32 @@
+source: caldara_iacoviello
+dataset: gpr_weekly
+description: "Caldara-Iacoviello Geopolitical Risk Index weekly release"
+publisher: "Matteo Iacoviello (Federal Reserve Board)"
+calendar_version: "1.0.0"
+latency_guard_minutes: 5
+holiday_handling: "no_official_calendar_uses_friday_rule"
+release_cadence:
+  type: weekly
+  weekday: friday
+  earliest_release_time_et: "09:00"
+  holiday_rule: shift_prior_business_day
+observation_semantics:
+  reporting_period: "week_ending_friday"
+  lag_to_publication_days: 0
+revision_policy: "ad_hoc_back_revisions_acknowledged_in_paper"
+pit_eligibility_rule: |
+  known_by_ts = release_ts
+  Row eligible at ts iff release_ts <= ts.
+source_confidence:
+  baseline: 0.85
+  degradation_conditions:
+    - "v1.0 calendar inferred from publishing pattern, not scraped"
+data_quality_multipliers:
+  fresh: 1.0
+  stale_1week: 0.90
+  stale_2week: 0.80
+  stale_over_2week: 0.50
+notes: |
+  v1.0 emits Friday-cadence calendar events only. v1.1 will parse the
+  CSV at https://www.matteoiacoviello.com/gpr_files/data_gpr_export.csv
+  to populate per-event GPR values for use as feature inputs.

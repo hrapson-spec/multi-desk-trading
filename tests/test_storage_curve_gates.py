@@ -1,4 +1,7 @@
 """End-to-end: run StorageCurveDesk through all three hard gates.
+v1.14: Gate 3 uses the runtime hot-swap harness
+(eval.build_hot_swap_callables).
+
 
 Two phases covered:
   1. Stub phase (no model): Gate 1 fails, Gate 2 fails, Gate 3 passes.
@@ -20,10 +23,11 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 
 from contracts.target_variables import WTI_FRONT_MONTH_CLOSE
-from contracts.v1 import Print
+from contracts.v1 import Forecast, Print, Provenance, RegimeLabel
+from controller import seed_cold_start
 from desks.base import StubDesk
 from desks.storage_curve import ClassicalStorageCurveModel, StorageCurveDesk
-from eval import GateRunner
+from eval import GateRunner, build_hot_swap_callables
 from eval.data import (
     make_forecasts_and_prints,
     persistence_baseline,
@@ -31,13 +35,53 @@ from eval.data import (
     synthetic_price_path,
 )
 from grading.match import DEFAULT_CLOCK_TOLERANCE  # noqa: F401 (kept for doc clarity)
+from persistence import connect, init_db
+
+
+def _build_storage_curve_gate3_harness(tmp_path, real_forecast: Forecast, *, now_utc: datetime):
+    """Shared helper for storage_curve Gate 3 migration (v1.14).
+
+    Seeds cold-start for the storage_curve desk and returns (real_fn,
+    stub_fn) from build_hot_swap_callables. Both test callsites in
+    this file use the same seeding — extract into one place."""
+    conn = connect(tmp_path / "gate3_storage_curve.duckdb")
+    init_db(conn)
+    seed_cold_start(
+        conn,
+        desks=[("storage_curve", WTI_FRONT_MONTH_CLOSE)],
+        regime_ids=["regime_boot"],
+        boot_ts=now_utc - timedelta(hours=1),
+    )
+    regime_label = RegimeLabel(
+        classification_ts_utc=now_utc,
+        regime_id="regime_boot",
+        regime_probabilities={"regime_boot": 1.0},
+        transition_probabilities={"regime_boot": 1.0},
+        classifier_provenance=Provenance(
+            desk_name="regime_classifier",
+            model_name="stub",
+            model_version="0.0.0",
+            input_snapshot_hash="0" * 64,
+            spec_hash="0" * 64,
+            code_commit="0" * 40,
+        ),
+    )
+    return build_hot_swap_callables(
+        conn=conn,
+        real_desk=StorageCurveDesk(),
+        real_forecast=real_forecast,
+        regime_label=regime_label,
+        recent_forecasts_other={},
+        now_utc=now_utc,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Stub phase — unchanged behaviour from Week 1-2 integration
 # ---------------------------------------------------------------------------
 
 
-def test_storage_curve_stub_fails_skill_passes_hot_swap():
+def test_storage_curve_stub_fails_skill_passes_hot_swap(tmp_path):
     runner = GateRunner(desk_name="storage_curve")
     fcasts, prints, _ = make_forecasts_and_prints(
         n=50,
@@ -56,14 +100,20 @@ def test_storage_curve_stub_fails_skill_passes_hot_swap():
     test_scores = rng.normal(0, 1, n).tolist()
     test_outcomes = rng.normal(0, 1, n).tolist()
 
+    # v1.14: real Gate 3 harness. `fcasts` are stub forecasts (staleness=True
+    # per StubDesk convention via the "zero" generator); the helper enters
+    # the stale-real + stale-stub branch → trivial delta=0 assertion.
+    real_fn, stub_fn = _build_storage_curve_gate3_harness(
+        tmp_path, real_forecast=fcasts[0], now_utc=datetime(2026, 1, 1, tzinfo=UTC)
+    )
     report = runner.run(
         desk_forecasts=fcasts,
         prints=prints,
         baseline_fn=persistence_baseline,
         directional_split=(dev_scores, test_scores, dev_outcomes, test_outcomes),
         expected_sign="positive",  # stub's nominal declared direction for test
-        run_controller_fn=lambda: True,  # real desk path
-        run_controller_with_stub_fn=lambda: True,  # stub swap path
+        run_controller_fn=real_fn,
+        run_controller_with_stub_fn=stub_fn,
     )
 
     assert report.desk_name == "storage_curve"
@@ -71,8 +121,9 @@ def test_storage_curve_stub_fails_skill_passes_hot_swap():
     assert not report.gate1_skill.passed, report.gate1_skill.reason
     # Gate 2 fails: no correlation in either dev or test.
     assert not report.gate2_sign_preservation.passed
-    # Gate 3 passes: lambdas return True.
+    # Gate 3 passes (v1.14 runtime harness): stub-stale + stub-stale → delta=0.
     assert report.gate3_hot_swap.passed
+    assert report.gate3_hot_swap.metrics["failure_mode"] == "passed"
 
 
 def test_storage_curve_stub_conforms_to_desk_protocol():
@@ -162,7 +213,7 @@ def test_classical_model_fits_and_predicts_without_leakage():
     assert model.fingerprint() == model.fingerprint()
 
 
-def test_storage_curve_classical_passes_all_three_gates_on_ar1():
+def test_storage_curve_classical_passes_all_three_gates_on_ar1(tmp_path):
     """End-to-end Week 3 deepen: classical StorageCurveDesk on AR(1) synthetic
     WTI path should (a) beat random-walk RMSE, (b) preserve dev→test Spearman
     sign for its directional score, (c) support hot-swap with a StubDesk.
@@ -193,6 +244,12 @@ def test_storage_curve_classical_passes_all_three_gates_on_ar1():
     # emission i the baseline predicts prices[i-1] (no change over horizon).
     rw_baseline = random_walk_price_baseline(prices=prices, emission_indices=test_em)
 
+    # v1.14: real Gate 3 harness. Non-stale classical forecast drives
+    # the non-stale real + stale stub branch → delta = -weight * point.
+    real_forecast = next((f for f in test_fcasts if not f.staleness), test_fcasts[0])
+    real_fn, stub_fn = _build_storage_curve_gate3_harness(
+        tmp_path, real_forecast=real_forecast, now_utc=datetime(2026, 1, 1, tzinfo=UTC)
+    )
     runner = GateRunner(desk_name="storage_curve")
     report = runner.run(
         desk_forecasts=test_fcasts,
@@ -200,8 +257,8 @@ def test_storage_curve_classical_passes_all_three_gates_on_ar1():
         baseline_fn=rw_baseline,
         directional_split=(dev_scores, test_scores, dev_outcomes, test_outcomes),
         expected_sign="positive",
-        run_controller_fn=lambda: True,
-        run_controller_with_stub_fn=lambda: True,
+        run_controller_fn=real_fn,
+        run_controller_with_stub_fn=stub_fn,
     )
 
     # Gate 1 — classical model beats persistence on AR(1) test.
@@ -215,8 +272,9 @@ def test_storage_curve_classical_passes_all_three_gates_on_ar1():
     assert g2.metrics["test_rho"] > 0.0
     assert "KRONOS-RCA PATTERN" not in g2.reason
 
-    # Gate 3 — hot-swap lambdas return True.
+    # Gate 3 — v1.14 runtime hot-swap.
     assert report.gate3_hot_swap.passed
+    assert report.gate3_hot_swap.metrics["failure_mode"] == "passed"
 
     # And the aggregate property wires correctly.
     assert report.all_passed

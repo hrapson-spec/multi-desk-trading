@@ -1,0 +1,29 @@
+source: eia
+dataset: wpsr
+description: "EIA Weekly Petroleum Status Report (U.S. crude/product balances)"
+publisher: "U.S. Energy Information Administration"
+calendar_version: "1.0.0"
+latency_guard_minutes: 5
+holiday_handling: "official_issue_date_or_schedule"
+release_cadence:
+  type: weekly
+  weekday: wednesday
+  earliest_release_time_et: "10:30"
+  holiday_rule: shift_next_business_day
+observation_semantics:
+  reporting_period: "week_ending_friday_prior"
+  lag_to_publication_days: 5
+revision_policy: "ad_hoc_small_revisions_possible"
+pit_eligibility_rule: |
+  known_by_ts = COALESCE(revision_ts, release_ts)
+  Row eligible at ts iff release_ts <= ts AND known_by_ts <= ts.
+source_confidence:
+  baseline: 0.95
+  degradation_conditions:
+    - "federal shutdown (EIA suspends publication)"
+    - "scheduled methodology change within 2 weeks"
+data_quality_multipliers:
+  fresh: 1.0
+  stale_1week: 0.85
+  stale_2week: 0.60
+  stale_over_2week: 0.0

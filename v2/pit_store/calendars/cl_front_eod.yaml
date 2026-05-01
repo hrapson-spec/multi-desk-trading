@@ -1,0 +1,40 @@
+source: cl_front_eod_pit
+dataset: front_month_eod_pit_spine
+description: "WTI front-month executable target PIT spine (stooq cl.f, free-rehearsal only)"
+publisher: "CME Group via stooq.com redistribution"
+calendar_version: "1.0.0"
+latency_guard_minutes: 0  # EOD already lagged by ~24h
+holiday_handling: "use_cme_holiday_calendar_skip_non_trading_days"
+release_cadence:
+  type: daily
+  earliest_release_time_et: "14:30"  # CME settlement time
+  holiday_rule: skip
+observation_semantics:
+  reporting_period: "trading_day_settlement"
+  lag_to_publication_days: 0
+revision_policy: "settlement_is_authoritative_no_revisions_after_publication"
+pit_eligibility_rule: |
+  known_by_ts = release_ts
+  Row eligible at ts iff release_ts <= ts AND observation_date < today_local.
+source_confidence:
+  baseline: 0.85
+  degradation_conditions:
+    - "stooq redistribution may lag CME official settlement"
+    - "v1.0 historical period is latest_snapshot, not true vintage"
+data_quality_multipliers:
+  fresh: 1.0
+  stale_1week: 0.95
+  stale_2week: 0.85
+  stale_over_2week: 0.50
+notes: |
+  Data plan §D.5 / spec v1 §4: this is the executable-target spine
+  required by spec for Phase 3 candidate audit. v1.0 is a thin
+  wrapper around v2.ingest.wti_prices.WTIPricesIngester with explicit
+  PIT spine namespacing and license caveats.
+
+  Forbidden uses (license clearance):
+  - real_capital_execution
+  - evidence_grade_futures_replay
+  Approved use:
+  - free_source_rehearsal_only (per
+    data/s4_0/free_source/licence_clearance/owner_clearance_decision.md)

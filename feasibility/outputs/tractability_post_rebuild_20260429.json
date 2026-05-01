@@ -1,0 +1,78 @@
+{
+  "created_at_utc": "2026-04-29T07:33:52.492620Z",
+  "decision": {
+    "action": "remove_foundation_models_from_harness",
+    "min_effective_n": 163,
+    "rule": "continue_small_model_only"
+  },
+  "git_commit": "748fdb07a19691132ea13b2ce93885cde8230610",
+  "input_status": {
+    "wpsr": {
+      "available": true,
+      "distinct_release_ts": 327,
+      "manifest_rows_matched": 3924,
+      "path": "data/pit_store/pit.duckdb",
+      "reason": "ok",
+      "sources": [
+        "eia"
+      ]
+    },
+    "wti": {
+      "allowed_use": "tractability_count_only",
+      "available": true,
+      "end": "2026-04-20T00:00:00+00:00",
+      "forbidden_uses": [
+        "executable_futures_replay",
+        "CL_front_month_backtest",
+        "MCL_execution_replay"
+      ],
+      "path": "data/s4_0/free_source/raw/DCOILWTICO.csv",
+      "price_column": "DCOILWTICO",
+      "price_proxy_kind": "fred_wti_spot_proxy",
+      "rows": 10142,
+      "start": "1986-01-02T00:00:00+00:00"
+    }
+  },
+  "parameters": {
+    "embargo_days": 5,
+    "horizon_days": 5,
+    "pit_root": "data/pit_store",
+    "post_2020_start": "2020-01-01T00:00:00+00:00",
+    "purge_days": 5,
+    "wti_path": "data/s4_0/free_source/raw/DCOILWTICO.csv"
+  },
+  "schema_version": "tractability.v0.1",
+  "targets": {
+    "mae_conditional_on_direction_5d": {
+      "effect_unit": "absolute_adverse_5d_log_return",
+      "effective_n_after_purge_embargo": 163,
+      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": {
+        "raw_effect": 0.004706660401646478,
+        "standardized_effect": 0.21943708986187732
+      },
+      "post_2020_effective_n": 163,
+      "raw_n": 326,
+      "sample_std": 0.02144879156303541
+    },
+    "return_magnitude_5d": {
+      "effect_unit": "absolute_5d_log_return",
+      "effective_n_after_purge_embargo": 163,
+      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": {
+        "raw_effect": 0.01203794488275779,
+        "standardized_effect": 0.21943708986187732
+      },
+      "post_2020_effective_n": 163,
+      "raw_n": 326,
+      "sample_std": 0.0548582962448826
+    },
+    "return_sign_5d": {
+      "baseline_rate": 0.5613496932515337,
+      "effect_unit": "absolute_proportion_point_lift",
+      "effective_n_after_purge_embargo": 163,
+      "minimum_detectable_effect_size_for_5pct_significance_80pct_power": 0.10720913128857479,
+      "observed_positive_rate": 0.5613496932515337,
+      "post_2020_effective_n": 163,
+      "raw_n": 326
+    }
+  }
+}

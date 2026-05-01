@@ -1,0 +1,117 @@
+# v2 promotion pre-registration template
+#
+# Tag: v2-governance-0.1
+# Scope: one desk, one promotion cycle, one target state transition.
+#
+# Commit this file BEFORE running the outer walk-forward. Its file-SHA256
+# is persisted to validation_runs.prereg_hash at run time.
+
+prereg_version: "2.0.0"
+
+identity:
+  family:          # e.g. oil_wti_5d
+  desk:            # e.g. prompt_balance_nowcast
+  target_state:    # S2 | S3 | S4 | S5 | S6
+  decision_unit:   # log_return | spread_change | vol_point_change | utility
+  target_variable: # e.g. WTI_FRONT_1W_LOG_RETURN
+  target_horizon:  # e.g. 5d
+
+contract_refs:
+  decision_contract_hash: # SHA-256 of docs/v2/v2_decision_contract.md at fit time
+  data_contract_hash:     # SHA-256 of docs/v2/v2_data_contract.md at fit time
+  governance_hash:        # SHA-256 of docs/v2/governance_model.md at fit time
+
+model:
+  class:           # dynamic_factor_nowcast | gbdt_quantile | conformal_qr | ...
+  version:         # internal semver
+  features:
+    - name:        # e.g. eia_crude_stocks
+      source:      # e.g. eia_wpsr
+      transform:   # e.g. weekly_diff
+      quality_floor: 0.60  # minimum quality_multiplier permitted at read time
+  hyperparameters:
+    # exhaustively enumerated; no "..." allowed
+  training_window:
+    start:         # decided by Layer-1 PIT audit
+    end:           # train_end (strictly before outer-fold start)
+  seed: 42
+
+baselines:
+  - name: B0_ewma_gaussian
+    parameters:
+      halflife_days: 60
+  - name: B1_empirical
+    parameters:
+      window_years: 3
+      time_decay_halflife_years: 1.5
+
+outer_protocol:
+  type: rolling_origin_walk_forward
+  warmup_weeks: 156
+  refit_cadence: monthly
+  forecast_cadence: daily
+  horizon_days: 5
+  regime: A_fully_frozen
+
+challenger_protocol:
+  type: combinatorial_purged_cv
+  blocks: 10
+  test_blocks: 2
+  purge_days: 5
+  embargo_days: 5
+
+metrics:
+  primary:
+    - mean_pinball_loss
+  secondary:
+    - approx_crps_from_quantiles
+    - interval_coverage_50
+    - interval_coverage_80
+    - dm_hac_one_sided_ci
+    - moving_block_bootstrap_ci
+  shadow_rule:
+    form: clip(k * Q(0.50) / max(sigma_pred, sigma_floor), -1, 1)
+    k:           # e.g. 1.0
+    sigma_floor: # e.g. 0.01
+    diagnostics: [deflated_sharpe_ratio, probability_of_backtest_overfitting]
+
+promotion_thresholds:
+  pinball_improvement_vs_b0: "< 0"
+  pinball_improvement_vs_b1: "< 0"
+  coverage_80_band: [0.75, 0.85]
+  coverage_50_band: [0.45, 0.55]
+  fail_month_fraction_max: 0.30
+  dm_alpha: 0.05
+  shadow_dsr_floor:    # e.g. 0.50
+  shadow_pbo_ceiling:  # e.g. 0.50
+  cost_stress_policy:
+    optimistic: "report"
+    pessimistic: "positive_expected_utility_required"
+
+abstention:
+  degradation_ladder:
+    n_soft: 3
+    decay_lambda: 0.20
+  hard_gates:
+    data: true
+    model: true
+    operational: true
+
+allowed_deviations:
+  - data_vendor_outage_with_logged_exception
+  - federal_holiday_release_calendar_shift
+  - scraper_version_patch_bump_within_envelope
+
+forbidden_after_lock:
+  - change_features
+  - change_model_class
+  - change_hyperparameters
+  - change_thresholds
+  - peek_outer_oos
+  - adjust_baseline_configuration
+  - alter_shadow_rule
+
+operator:
+  role: author
+  ts:           # set at tag time
+  fingerprint:  # gpg or ssh key fingerprint; pending for v2.0

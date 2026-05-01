@@ -6,7 +6,8 @@ code changes (retrained on equity-VRP desk outputs).
 
 Phase A uses a ground-truth pass-through classifier (see classical.py)
 to isolate desk-architecture testing from classifier-quality testing.
-A real HMM/HDP-HMM is a v0.2 follow-up.
+The shipped data-driven follow-up is an adaptive-K Gaussian HMM; the
+ground-truth pass-through remains available for isolation tests.
 """
 
 from __future__ import annotations

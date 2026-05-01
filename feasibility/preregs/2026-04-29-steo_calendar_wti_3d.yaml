@@ -1,0 +1,128 @@
+prereg_version: "feasibility-v1.0"
+feasibility_audit_only: true
+
+identity:
+  family: oil_wti
+  desk: steo_calendar_wti_3d_audit_candidate
+  target_state: S2
+  decision_unit: sign
+  target_variable: wti_front_3d_return_sign
+  target_horizon: 3d
+
+contract_refs:
+  decision_contract_hash: TBD_AT_LOCK_TIME
+  data_contract_hash:     TBD_AT_LOCK_TIME
+  governance_hash:        TBD_AT_LOCK_TIME
+  feasibility_spec_v1_hash: TBD_AT_LOCK_TIME
+  feasibility_dependence_analysis_hash: TBD_AT_LOCK_TIME
+
+model:
+  class: feasibility.candidates.steo_calendar_3d.classical.STEOCalendarLogisticModel
+  version: "1.0.0"
+  data_quality_caveat: calendar_only_no_steo_table_values
+  features:
+    - name: issue_month_sin
+      source: eia_steo.steo_calendar
+      transform: sine_month_of_release_date
+      quality_floor: 0.80
+    - name: issue_month_cos
+      source: eia_steo.steo_calendar
+      transform: cosine_month_of_release_date
+      quality_floor: 0.80
+    - name: quarter_start_indicator
+      source: eia_steo.steo_calendar
+      transform: release_month_in_1_4_7_10
+      quality_floor: 0.80
+    - name: release_gap_days_scaled
+      source: eia_steo.steo_calendar
+      transform: days_since_prior_steo_release_centered_at_30_5_scaled_by_5
+      quality_floor: 0.80
+    - name: release_date_override_indicator
+      source: eia_steo.steo_calendar
+      transform: release_date_not_second_tuesday
+      quality_floor: 0.80
+    - name: wti_5d_lagged_return
+      source: fred_wti_spot_proxy
+      transform: log_return_5d_lagged
+      quality_floor: 0.85
+  hyperparameters:
+    penalty: l2
+    C: 1.0
+    fit_intercept: true
+    solver: lbfgs
+    max_iter: 100
+    random_state: 42
+  seed: 42
+
+baselines:
+  - name: zero_return_baseline
+    parameters: {}
+
+outer_protocol:
+  type: rolling_origin_walk_forward
+  warmup_weeks: 52
+  refit_cadence: monthly
+  forecast_cadence: per_steo_release
+  horizon_days: 3
+  regime: A_fully_frozen
+
+challenger_protocol:
+  type: combinatorial_purged_cv
+  blocks: 6
+  test_blocks: 1
+  purge_days: 3
+  embargo_days: 3
+
+metrics:
+  primary:
+    - directional_accuracy
+  secondary:
+    - log_loss
+    - brier_score
+    - dm_hac_one_sided_ci
+    - moving_block_bootstrap_ci
+  shadow_rule:
+    form: feasibility_audit_only_no_capital_implication
+    diagnostics: [residual_autocorrelation_rho_1_2_3, hac_effective_n, block_bootstrap_effective_n]
+
+promotion_thresholds:
+  directional_accuracy_min_vs_zero_return_baseline_pp: 5.0
+  dm_alpha: 0.05
+  hac_effective_n_floor: 250
+  block_bootstrap_effective_n_floor: 250
+
+abstention:
+  degradation_ladder:
+    n_soft: 3
+    decay_lambda: 0.20
+  hard_gates:
+    data: true
+    model: true
+    operational: false
+
+allowed_deviations:
+  - eia_steo_release_calendar_patch_with_logged_reason
+  - steo_table_parser_upgrade_requires_new_prereg
+  - fred_wti_proxy_lag_documented_in_manifest
+
+forbidden_after_lock:
+  - change_features
+  - change_model_class
+  - change_hyperparameters
+  - change_thresholds
+  - peek_outer_oos
+  - adjust_baseline_configuration
+  - alter_shadow_rule
+  - register_as_v2_desk_without_promotion_review
+
+operator:
+  role: author
+  ts: 2026-04-29T00:00:00Z
+  fingerprint: pending_v2.0
+  notes: |
+    This is a deliberately constrained calendar-pulse audit against the v1.0
+    STEO PIT calendar. The current ingester does not parse outlook tables, so
+    this pre-registration cannot support claims about STEO forecast surprises
+    or revisions. A value-bearing STEO candidate must be separately
+    pre-registered after a v1.1 table parser lands.
+

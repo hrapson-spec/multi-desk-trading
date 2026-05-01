@@ -1,7 +1,7 @@
-"""Integration test for the six Week 1-2 stub desks.
+"""Integration test for the v1.16 oil-family stub desks.
 
-Imports all six desks (explicitly permitted for this test), wires them
-through the bus, fires a synthetic schedule, verifies:
+Imports the 3 v1.16 oil forecast-emitting desks (+ regime classifier),
+wires them through the bus, fires a synthetic schedule, verifies:
 
   - Each stub's Forecast / RegimeLabel validates against the contract.
   - Hot-swap: replacing each desk with the generic StubDesk leaves the
@@ -17,25 +17,21 @@ from datetime import UTC, datetime
 
 from contracts.v1 import Forecast, ResearchLoopEvent
 from desks.base import ClassifierProtocol, DeskProtocol, StubDesk
-from desks.demand import DemandDesk
-from desks.geopolitics import GeopoliticsDesk
-from desks.macro import MacroDesk
+from desks.oil_demand_nowcast import OilDemandNowcastDesk
 from desks.regime_classifier import RegimeClassifierStub
 from desks.storage_curve import StorageCurveDesk
-from desks.supply import SupplyDesk
+from desks.supply_disruption_news import SupplyDisruptionNewsDesk
 
-SIX_FORECAST_DESKS: list[type[StubDesk]] = [
-    SupplyDesk,
-    DemandDesk,
+OIL_FORECAST_DESKS: list[type[StubDesk]] = [
+    SupplyDisruptionNewsDesk,
+    OilDemandNowcastDesk,
     StorageCurveDesk,
-    GeopoliticsDesk,
-    MacroDesk,
 ]
 
 
 def test_all_stubs_conform_to_protocols():
     """Structural check: each desk satisfies its Protocol."""
-    for cls in SIX_FORECAST_DESKS:
+    for cls in OIL_FORECAST_DESKS:
         instance = cls()
         assert isinstance(instance, DeskProtocol), f"{cls.__name__} violates DeskProtocol"
 
@@ -47,7 +43,7 @@ def test_all_stubs_conform_to_protocols():
 
 def test_stubs_emit_valid_forecasts(bus_dev, synth_clock: datetime):
     """Each stub emits a Forecast the bus accepts."""
-    for cls in SIX_FORECAST_DESKS:
+    for cls in OIL_FORECAST_DESKS:
         desk = cls()
         forecasts = desk.on_schedule_fire(synth_clock)
         assert len(forecasts) >= 1
@@ -78,7 +74,7 @@ def test_hot_swap_each_desk_against_generic_stub(bus_dev, synth_clock: datetime)
     Concrete check: a generic StubDesk emitting with target_variable from
     the concrete stub passes the same bus validation.
     """
-    for cls in SIX_FORECAST_DESKS:
+    for cls in OIL_FORECAST_DESKS:
         concrete = cls()
         generic = StubDesk()
         generic.name = concrete.name + "_generic_swap"
@@ -121,12 +117,12 @@ def test_desk_staleness_trigger_fires(bus_dev, synth_clock: datetime):
 
     bus_dev.subscribe(Forecast, on_forecast)
 
-    for cls in SIX_FORECAST_DESKS:
+    for cls in OIL_FORECAST_DESKS:
         desk = cls()
         for f in desk.on_schedule_fire(synth_clock):
             bus_dev.publish_forecast(f)
 
-    assert len(staleness_events) == len(SIX_FORECAST_DESKS)
+    assert len(staleness_events) == len(OIL_FORECAST_DESKS)
 
 
 def test_stubs_fail_skill_gate_by_construction(synth_clock: datetime, stub_print_factory):
@@ -137,7 +133,7 @@ def test_stubs_fail_skill_gate_by_construction(synth_clock: datetime, stub_print
     Concrete check: stub's point_estimate is 0 regardless of input —
     persistence baseline emits last print value and typically beats zero.
     """
-    for cls in SIX_FORECAST_DESKS:
+    for cls in OIL_FORECAST_DESKS:
         desk = cls()
         f = desk.on_schedule_fire(synth_clock)[0]
         assert f.point_estimate == 0.0
