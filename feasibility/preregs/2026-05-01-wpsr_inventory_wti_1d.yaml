@@ -1,0 +1,152 @@
+prereg_version: "feasibility-v1.0"
+feasibility_audit_only: true
+
+identity:
+  family: oil_wti
+  desk: wpsr_inventory_wti_1d_audit_candidate
+  target_state: S2
+  decision_unit: sign
+  target_variable: wti_front_1d_return_sign
+  target_horizon: 1d
+
+contract_refs:
+  decision_contract_hash: TBD_AT_LOCK_TIME
+  data_contract_hash:     TBD_AT_LOCK_TIME
+  governance_hash:        TBD_AT_LOCK_TIME
+  feasibility_spec_v1_hash: TBD_AT_LOCK_TIME
+  feasibility_dependence_analysis_hash: TBD_AT_LOCK_TIME
+
+model:
+  class: feasibility.candidates.wpsr_inventory_1d.classical.WPSRInventory1DLogisticModel
+  version: "1.0.0"
+  features:
+    - name: crude_stock_change_z
+      source: eia_wpsr
+      transform: week_over_week_change_zscore_trailing_52_prior_releases
+      expected_sign: negative
+      quality_floor: 0.95
+    - name: cushing_stock_change_z
+      source: eia_wpsr
+      transform: week_over_week_change_zscore_trailing_52_prior_releases
+      expected_sign: negative
+      quality_floor: 0.95
+    - name: product_stock_change_z
+      source: eia_wpsr
+      transform: gasoline_plus_distillate_week_over_week_change_zscore_trailing_52_prior_releases
+      expected_sign: negative
+      quality_floor: 0.95
+    - name: refinery_utilization_change_z
+      source: eia_wpsr
+      transform: week_over_week_change_zscore_trailing_52_prior_releases
+      expected_sign: positive
+      quality_floor: 0.95
+    - name: crude_production_change_z
+      source: eia_wpsr
+      transform: week_over_week_change_zscore_trailing_52_prior_releases
+      expected_sign: positive
+      quality_floor: 0.95
+    - name: net_import_change_z
+      source: eia_wpsr
+      transform: imports_minus_exports_week_over_week_change_zscore_trailing_52_prior_releases
+      expected_sign: negative
+      quality_floor: 0.95
+    - name: products_supplied_change_z
+      source: eia_wpsr
+      transform: week_over_week_change_zscore_trailing_52_prior_releases
+      expected_sign: positive
+      quality_floor: 0.95
+  hyperparameters:
+    penalty: l2
+    C: 0.5
+    fit_intercept: true
+    solver: lbfgs
+    max_iter: 200
+    random_state: 42
+  rolling_feature_window:
+    trailing_releases: 52
+    min_prior_releases: 26
+  seed: 42
+
+baselines:
+  - name: zero_return_baseline
+    parameters: {}
+  - name: majority_sign_baseline
+    parameters:
+      fit_scope: post_2020_scored_events
+
+outer_protocol:
+  type: rolling_origin_walk_forward
+  min_train_events: 52
+  refit_cadence: monthly
+  forecast_cadence: per_wpsr_release
+  horizon_days: 1
+  regime: A_fully_frozen
+  evaluation_start: 2020-01-01T00:00:00Z
+  training_history:
+    pre_2020_observations_allowed_for_warmup: true
+    label_availability_gate_before_each_refit: true
+
+challenger_protocol:
+  type: combinatorial_purged_cv
+  blocks: 6
+  test_blocks: 1
+  purge_days: 1
+  embargo_days: 1
+
+metrics:
+  primary:
+    - directional_accuracy
+  required_comparators:
+    - zero_return_baseline
+    - majority_sign_baseline
+  secondary:
+    - log_loss
+    - brier_score
+    - dm_hac_one_sided_ci
+    - moving_block_bootstrap_ci
+  shadow_rule:
+    form: feasibility_audit_only_no_capital_implication
+    diagnostics: [residual_autocorrelation_rho_1_2_3, hac_effective_n, block_bootstrap_effective_n]
+
+promotion_thresholds:
+  directional_accuracy_min_vs_zero_return_baseline_pp: 5.0
+  directional_accuracy_min_vs_majority_sign_baseline_pp: 0.0
+  preferred_margin_vs_majority_sign_baseline_pp: 2.0
+  dm_alpha: 0.05
+  hac_effective_n_floor: 250
+  block_bootstrap_effective_n_floor: 250
+
+abstention:
+  degradation_ladder:
+    n_soft: 3
+    decay_lambda: 0.20
+  hard_gates:
+    data: true
+    model: true
+    operational: false
+
+allowed_deviations:
+  - eia_holiday_release_calendar_shift
+  - scraper_version_patch_bump_within_envelope
+  - fred_wti_proxy_lag_documented_in_manifest
+
+forbidden_after_lock:
+  - change_features
+  - add_wti_lag_feature_to_primary_claim
+  - change_model_class
+  - change_hyperparameters
+  - change_thresholds
+  - peek_outer_oos
+  - adjust_baseline_configuration
+  - alter_shadow_rule
+  - register_as_v2_desk_without_promotion_review
+
+operator:
+  role: external_expert_candidate
+  ts: 2026-05-01T00:00:00Z
+  fingerprint: pending_v2.0
+  notes: |
+    WPSR-only follow-up to the provisional WTI-lag 1d candidate. The explicit
+    test is whether PIT-safe WPSR physical inventory and flow information can
+    beat both zero-return and majority-sign baselines without relying on a WTI
+    lag feature.
