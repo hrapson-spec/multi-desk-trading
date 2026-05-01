@@ -5,9 +5,24 @@ researcher, or agentic code-review/implementation expert.
 
 ---
 
-You are being commissioned to solve one specific problem in the local repository:
+You are being commissioned to solve one specific problem in this GitHub branch:
 
-`/Users/henrirapson/projects/multi-desk-trading`
+`https://github.com/hrapson-spec/multi-desk-trading/tree/feasibility-harness-v0`
+
+Start from these two files:
+
+1. Full technical handoff:
+   `https://github.com/hrapson-spec/multi-desk-trading/blob/feasibility-harness-v0/docs/operations/wpsr_1d_candidate_handoff.md`
+2. This commission brief:
+   `https://github.com/hrapson-spec/multi-desk-trading/blob/feasibility-harness-v0/docs/operations/wpsr_1d_external_expert_commission.md`
+
+If you clone locally, use:
+
+```bash
+git clone https://github.com/hrapson-spec/multi-desk-trading.git
+cd multi-desk-trading
+git checkout feasibility-harness-v0
+```
 
 The repo contains a feasibility harness and an automated forward-evidence loop
 for a provisional WTI trading-system candidate. The system is not trading
@@ -82,7 +97,7 @@ majority-baseline weakness.
 
 Start with this handoff file:
 
-`/Users/henrirapson/projects/multi-desk-trading/docs/operations/wpsr_1d_candidate_handoff.md`
+`https://github.com/hrapson-spec/multi-desk-trading/blob/feasibility-harness-v0/docs/operations/wpsr_1d_candidate_handoff.md`
 
 It contains the current baseline, relevant files, data surfaces, known prior
 work, locked-file constraints, and expected verification commands.
@@ -90,21 +105,21 @@ work, locked-file constraints, and expected verification commands.
 Important existing artifacts:
 
 - Current forward lock:
-  `feasibility/forward/wti_lag_1d/lock.json`
+  `https://github.com/hrapson-spec/multi-desk-trading/blob/feasibility-harness-v0/feasibility/forward/wti_lag_1d/lock.json`
 - Current locked 1d baseline candidate:
-  `feasibility/candidates/wti_lag_1d/classical.py`
+  `https://github.com/hrapson-spec/multi-desk-trading/blob/feasibility-harness-v0/feasibility/candidates/wti_lag_1d/classical.py`
 - Current 1d audit:
-  `feasibility/scripts/audit_wti_lag_1d_phase3.py`
+  `https://github.com/hrapson-spec/multi-desk-trading/blob/feasibility-harness-v0/feasibility/scripts/audit_wti_lag_1d_phase3.py`
 - Existing WPSR 3d candidate:
-  `feasibility/candidates/wpsr_inventory_3d/classical.py`
+  `https://github.com/hrapson-spec/multi-desk-trading/blob/feasibility-harness-v0/feasibility/candidates/wpsr_inventory_3d/classical.py`
 - Existing WPSR 3d audit:
-  `feasibility/scripts/audit_wpsr_inventory_3d_phase3.py`
+  `https://github.com/hrapson-spec/multi-desk-trading/blob/feasibility-harness-v0/feasibility/scripts/audit_wpsr_inventory_3d_phase3.py`
 - WPSR first-release archive ingester:
-  `v2/ingest/eia_wpsr_archive.py`
+  `https://github.com/hrapson-spec/multi-desk-trading/blob/feasibility-harness-v0/v2/ingest/eia_wpsr_archive.py`
 - Current/latest WPSR EIA API ingester:
-  `v2/ingest/eia_wpsr.py`
+  `https://github.com/hrapson-spec/multi-desk-trading/blob/feasibility-harness-v0/v2/ingest/eia_wpsr.py`
 - Main feasibility harness:
-  `feasibility/tractability_v1.py`
+  `https://github.com/hrapson-spec/multi-desk-trading/blob/feasibility-harness-v0/feasibility/tractability_v1.py`
 
 ## Prior WPSR Result
 
