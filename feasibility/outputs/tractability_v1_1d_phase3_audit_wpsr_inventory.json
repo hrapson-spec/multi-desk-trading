@@ -1,11 +1,11 @@
 {
-  "created_at_utc": "2026-05-01T07:56:39.737723Z",
+  "created_at_utc": "2026-05-01T08:15:55.185525Z",
   "decision": {
     "action": "continue_per_plan",
     "min_effective_n": 318,
     "rule": "continue"
   },
-  "git_commit": "b7676595d4f2e9c12bc1938f1c75d6a0f0d3b35e",
+  "git_commit": "a5e00ab37c8ca502d12d97d90e91893f41f088bc",
   "input_status": {
     "families": {
       "wpsr": {

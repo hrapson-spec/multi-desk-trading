@@ -19,6 +19,8 @@ from feasibility.candidates.wpsr_inventory_1d.classical import (
 )
 from feasibility.scripts.audit_wpsr_inventory_1d_phase3 import (
     MIN_TRAIN_EVENTS,
+    WalkForwardAudit,
+    build_candidate_decision,
     walk_forward_audit,
 )
 
@@ -137,6 +139,12 @@ def test_walk_forward_audit_scores_post_2020_with_pre_2020_training() -> None:
 
     assert result.scored_events > 0
     assert result.residuals.index.min() >= pd.Timestamp("2020-01-01", tz="UTC")
+    assert set(result.scored_frame.columns) == {
+        "decision_ts",
+        "y_true_sign",
+        "y_pred_sign",
+        "residual",
+    }
     assert result.model_accuracy is not None
     assert result.majority_accuracy_gain_pp is not None
 
@@ -161,6 +169,49 @@ def test_walk_forward_audit_respects_label_availability_gate() -> None:
 
     assert result.scored_events == 0
     assert result.majority_accuracy_gain_pp is None
+
+
+def test_candidate_decision_can_pass_n_gate_but_fail_skill_gate() -> None:
+    manifest = {
+        "decision": {"min_effective_n": 318},
+        "targets": {
+            "wti_1d_return_sign": {
+                "n_after_purge_embargo": 327,
+                "n_hac_or_block_adjusted": {
+                    "newey_west": {"point_estimate": 318},
+                    "block_bootstrap": {"point_estimate": 327},
+                },
+            },
+        },
+    }
+    metrics = WalkForwardAudit(
+        residuals=pd.Series(
+            [-2.0, 0.0, 2.0],
+            index=pd.date_range("2020-01-01", periods=3, tz="UTC"),
+            name="residual",
+        ),
+        scored_frame=pd.DataFrame(
+            {
+                "decision_ts": pd.date_range("2020-01-01", periods=3, tz="UTC"),
+                "y_true_sign": [-1, 1, -1],
+                "y_pred_sign": [1, 1, -1],
+                "residual": [-2.0, 0.0, 0.0],
+            },
+        ),
+        model_accuracy=0.474,
+        zero_return_baseline_accuracy=0.4801,
+        majority_baseline_accuracy=0.5199,
+        directional_accuracy_gain_pp=-0.61,
+        majority_accuracy_gain_pp=-4.59,
+        scored_events=327,
+    )
+
+    decision = build_candidate_decision(manifest, metrics)
+
+    assert decision["effective_n_gate_pass"] is True
+    assert decision["skill_gate_pass"] is False
+    assert decision["final_verdict"] == "NON_ADMISSIBLE"
+    assert decision["metrics"]["hac_effective_n"] == 318
 
 
 def test_module_does_not_export_desk_class() -> None:

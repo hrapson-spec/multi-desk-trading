@@ -48,6 +48,9 @@ RESIDUALS_CSV = REPO_ROOT / "feasibility" / "outputs" / "wpsr_inventory_1d_resid
 PHASE3_MANIFEST = (
     REPO_ROOT / "feasibility" / "outputs" / "tractability_v1_1d_phase3_audit_wpsr_inventory.json"
 )
+CANDIDATE_DECISION_JSON = (
+    REPO_ROOT / "feasibility" / "outputs" / "wpsr_inventory_1d_candidate_decision.json"
+)
 PHASE3_REPORT = (
     REPO_ROOT / "feasibility" / "reports" / "terminal_2026-05-01_phase3_audit_wpsr_inventory_1d.md"
 )
@@ -64,6 +67,7 @@ class EventFeatureFrame:
 @dataclass(frozen=True)
 class WalkForwardAudit:
     residuals: pd.Series
+    scored_frame: pd.DataFrame
     model_accuracy: float | None
     zero_return_baseline_accuracy: float | None
     majority_baseline_accuracy: float | None
@@ -235,7 +239,7 @@ def walk_forward_audit(
         raise ValueError("only monthly refit cadence is preregistered for this audit")
     if len(feat_mat) == 0:
         empty = pd.Series(dtype=float, name="residual")
-        return WalkForwardAudit(empty, None, None, None, None, None, 0)
+        return WalkForwardAudit(empty, _empty_scored_frame(), None, None, None, None, None, 0)
 
     month_starts = _month_starts_for_evaluation(decision_ts, evaluation_start=evaluation_start)
     residual_values: list[float] = []
@@ -278,13 +282,21 @@ def walk_forward_audit(
 
     if not residual_values:
         empty = pd.Series(dtype=float, name="residual")
-        return WalkForwardAudit(empty, None, None, None, None, None, 0)
+        return WalkForwardAudit(empty, _empty_scored_frame(), None, None, None, None, None, 0)
 
     residuals = pd.Series(
         residual_values,
         index=pd.DatetimeIndex(residual_ts, tz="UTC"),
         name="residual",
     ).sort_index()
+    scored_frame = pd.DataFrame(
+        {
+            "decision_ts": pd.DatetimeIndex(residual_ts, tz="UTC"),
+            "y_true_sign": true_signs,
+            "y_pred_sign": pred_signs,
+            "residual": residual_values,
+        }
+    ).sort_values("decision_ts")
 
     true_arr = np.array(true_signs, dtype=int)
     pred_arr = np.array(pred_signs, dtype=int)
@@ -297,12 +309,24 @@ def walk_forward_audit(
 
     return WalkForwardAudit(
         residuals=residuals,
+        scored_frame=scored_frame.reset_index(drop=True),
         model_accuracy=model_accuracy,
         zero_return_baseline_accuracy=zero_return_baseline_accuracy,
         majority_baseline_accuracy=majority_baseline_accuracy,
         directional_accuracy_gain_pp=zero_gain_pp,
         majority_accuracy_gain_pp=majority_gain_pp,
         scored_events=int(len(residuals)),
+    )
+
+
+def _empty_scored_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=["decision_ts", "y_true_sign", "y_pred_sign", "residual"]).astype(
+        {
+            "decision_ts": "datetime64[ns, UTC]",
+            "y_true_sign": "int64",
+            "y_pred_sign": "int64",
+            "residual": "float64",
+        },
     )
 
 
@@ -350,56 +374,202 @@ def _fmt_pp(value: float | None) -> str:
     return "N/A" if value is None else f"{value:.2f} pp"
 
 
-def write_report(manifest: dict, metrics: WalkForwardAudit, report_path: Path) -> None:
-    """Write the WPSR 1d Phase 3 audit verdict report."""
-    created_at = manifest.get("created_at_utc", "unknown")
-    decision = manifest.get("decision", {})
-    n_star = decision.get("min_effective_n", "N/A")
+def _target_n_fields(manifest: dict) -> tuple[object, object, object, object]:
     target_info = manifest.get("targets", {}).get("wti_1d_return_sign", {})
     hac_block = target_info.get("n_hac_or_block_adjusted", {})
     hac_n = hac_block.get("newey_west", {}).get("point_estimate", "N/A")
     boot_n = hac_block.get("block_bootstrap", {}).get("point_estimate", "N/A")
     n_after_purge = target_info.get("n_after_purge_embargo", "N/A")
+    n_star = manifest.get("decision", {}).get("min_effective_n", "N/A")
+    return n_after_purge, hac_n, boot_n, n_star
 
+
+def _per_year_diagnostics(metrics: WalkForwardAudit) -> list[dict[str, object]]:
+    frame = metrics.scored_frame
+    if frame.empty:
+        return []
+
+    rows: list[dict[str, object]] = []
+    for year, group in frame.assign(year=frame["decision_ts"].dt.year).groupby("year"):
+        true_sign = group["y_true_sign"].to_numpy(dtype=int)
+        pred_sign = group["y_pred_sign"].to_numpy(dtype=int)
+        model_accuracy = float(np.mean(true_sign == pred_sign))
+        zero_accuracy = float(np.mean(true_sign == -1))
+        positive_rate = float(np.mean(true_sign == 1))
+        majority_accuracy = max(positive_rate, 1.0 - positive_rate)
+        rows.append(
+            {
+                "year": int(year),
+                "scored_events": int(len(group)),
+                "model_accuracy_pct": round(100.0 * model_accuracy, 2),
+                "zero_return_baseline_accuracy_pct": round(100.0 * zero_accuracy, 2),
+                "majority_baseline_accuracy_pct": round(100.0 * majority_accuracy, 2),
+                "gain_vs_zero_pp": round(100.0 * (model_accuracy - zero_accuracy), 2),
+                "gain_vs_majority_pp": round(100.0 * (model_accuracy - majority_accuracy), 2),
+            },
+        )
+    return rows
+
+
+def build_candidate_decision(manifest: dict, metrics: WalkForwardAudit) -> dict[str, object]:
+    """Build candidate-level admissibility decision, separate from harness N decision."""
+    n_after_purge, hac_n, boot_n, n_star = _target_n_fields(manifest)
     zero_floor_pp = 5.0
     majority_floor_pp = 0.0
     majority_preferred_pp = 2.0
     hac_floor = 250
     boot_floor = 250
-    zero_pass = (
+
+    effective_n_gate_pass = (
+        isinstance(hac_n, int)
+        and hac_n >= hac_floor
+        and isinstance(boot_n, int)
+        and boot_n >= boot_floor
+    )
+    zero_skill_gate_pass = (
         metrics.directional_accuracy_gain_pp is not None
         and metrics.directional_accuracy_gain_pp >= zero_floor_pp
     )
-    majority_pass = (
+    majority_skill_gate_pass = (
         metrics.majority_accuracy_gain_pp is not None
         and metrics.majority_accuracy_gain_pp > majority_floor_pp
     )
-    hac_pass = isinstance(hac_n, int) and hac_n >= hac_floor
-    boot_pass = isinstance(boot_n, int) and boot_n >= boot_floor
+    majority_preferred_gate_pass = (
+        metrics.majority_accuracy_gain_pp is not None
+        and metrics.majority_accuracy_gain_pp >= majority_preferred_pp
+    )
+    skill_gate_pass = zero_skill_gate_pass and majority_skill_gate_pass
 
     reasons: list[str] = []
-    if not zero_pass:
+    if not zero_skill_gate_pass:
         reasons.append(
             f"accuracy gain vs zero = {_fmt_pp(metrics.directional_accuracy_gain_pp)} < "
             f"{zero_floor_pp:.2f} pp"
         )
-    if not majority_pass:
+    if not majority_skill_gate_pass:
         reasons.append(
             f"accuracy gain vs majority = {_fmt_pp(metrics.majority_accuracy_gain_pp)} <= "
             f"{majority_floor_pp:.2f} pp"
         )
-    if not hac_pass:
-        reasons.append(f"HAC N = {hac_n} < {hac_floor}")
-    if not boot_pass:
-        reasons.append(f"bootstrap N = {boot_n} < {boot_floor}")
+    if not effective_n_gate_pass:
+        reasons.append(f"effective-N gate failed: HAC N = {hac_n}, bootstrap N = {boot_n}")
 
-    verdict = "ADMISSIBLE_PROVISIONAL" if not reasons else "NON-ADMISSIBLE"
+    final_verdict = (
+        "ADMISSIBLE_PROVISIONAL" if effective_n_gate_pass and skill_gate_pass else "NON_ADMISSIBLE"
+    )
+    inverted_accuracy = None if metrics.model_accuracy is None else 1.0 - metrics.model_accuracy
+    inverted_gain_vs_zero_pp = (
+        None
+        if inverted_accuracy is None or metrics.zero_return_baseline_accuracy is None
+        else 100.0 * (inverted_accuracy - metrics.zero_return_baseline_accuracy)
+    )
+    inverted_gain_vs_majority_pp = (
+        None
+        if inverted_accuracy is None or metrics.majority_baseline_accuracy is None
+        else 100.0 * (inverted_accuracy - metrics.majority_baseline_accuracy)
+    )
+
+    return {
+        "candidate": "wpsr_inventory_1d",
+        "target": "wti_1d_return_sign",
+        "final_verdict": final_verdict,
+        "effective_n_gate_pass": effective_n_gate_pass,
+        "skill_gate_pass": skill_gate_pass,
+        "zero_skill_gate_pass": zero_skill_gate_pass,
+        "majority_skill_gate_pass": majority_skill_gate_pass,
+        "majority_preferred_gate_pass": majority_preferred_gate_pass,
+        "thresholds": {
+            "zero_gain_min_pp": zero_floor_pp,
+            "majority_gain_min_pp": majority_floor_pp,
+            "majority_gain_preferred_pp": majority_preferred_pp,
+            "hac_effective_n_floor": hac_floor,
+            "block_bootstrap_effective_n_floor": boot_floor,
+        },
+        "metrics": {
+            "scored_events": metrics.scored_events,
+            "model_accuracy_pct": (
+                None if metrics.model_accuracy is None else round(100.0 * metrics.model_accuracy, 2)
+            ),
+            "zero_return_baseline_accuracy_pct": (
+                None
+                if metrics.zero_return_baseline_accuracy is None
+                else round(100.0 * metrics.zero_return_baseline_accuracy, 2)
+            ),
+            "majority_baseline_accuracy_pct": (
+                None
+                if metrics.majority_baseline_accuracy is None
+                else round(100.0 * metrics.majority_baseline_accuracy, 2)
+            ),
+            "gain_vs_zero_pp": (
+                None
+                if metrics.directional_accuracy_gain_pp is None
+                else round(metrics.directional_accuracy_gain_pp, 2)
+            ),
+            "gain_vs_majority_pp": (
+                None
+                if metrics.majority_accuracy_gain_pp is None
+                else round(metrics.majority_accuracy_gain_pp, 2)
+            ),
+            "n_after_purge_embargo": n_after_purge,
+            "hac_effective_n": hac_n,
+            "block_bootstrap_effective_n": boot_n,
+            "n_star": n_star,
+        },
+        "diagnostics": {
+            "per_year": _per_year_diagnostics(metrics),
+            "inverted_signal_non_claim": {
+                "accuracy_pct": (
+                    None if inverted_accuracy is None else round(100.0 * inverted_accuracy, 2)
+                ),
+                "gain_vs_zero_pp": (
+                    None if inverted_gain_vs_zero_pp is None else round(inverted_gain_vs_zero_pp, 2)
+                ),
+                "gain_vs_majority_pp": (
+                    None
+                    if inverted_gain_vs_majority_pp is None
+                    else round(inverted_gain_vs_majority_pp, 2)
+                ),
+                "interpretation": (
+                    "diagnostic only; inversion is not a pre-registered rescue model"
+                ),
+            },
+        },
+        "reasons": reasons,
+    }
+
+
+def write_candidate_decision_json(decision: dict[str, object], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(decision, indent=2, sort_keys=True) + "\n")
+
+
+def write_report(
+    manifest: dict,
+    metrics: WalkForwardAudit,
+    candidate_decision: dict[str, object],
+    report_path: Path,
+) -> None:
+    """Write the WPSR 1d Phase 3 audit verdict report."""
+    created_at = manifest.get("created_at_utc", "unknown")
+    decision = manifest.get("decision", {})
+    n_after_purge, hac_n, boot_n, n_star = _target_n_fields(manifest)
+    thresholds = candidate_decision["thresholds"]
+    diagnostics = candidate_decision["diagnostics"]
+    assert isinstance(thresholds, dict)
+    assert isinstance(diagnostics, dict)
+
+    verdict = str(candidate_decision["final_verdict"]).replace("_", "-")
     verdict_detail = (
         "All hard numeric Phase 3 thresholds cleared. The majority-baseline margin "
-        f"is preferred at >= {majority_preferred_pp:.2f} pp before promotion."
-        if not reasons
-        else "; ".join(reasons) + ". Candidate does not clear Phase 3 gate."
+        f"is preferred at >= {thresholds['majority_gain_preferred_pp']:.2f} pp "
+        "before promotion."
+        if not candidate_decision["reasons"]
+        else "; ".join(candidate_decision["reasons"]) + ". Candidate does not clear Phase 3 gate."
     )
+    per_year_rows = diagnostics["per_year"]
+    inverted = diagnostics["inverted_signal_non_claim"]
+    assert isinstance(per_year_rows, list)
+    assert isinstance(inverted, dict)
 
     now_str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     lines = [
@@ -437,11 +607,12 @@ def write_report(manifest: dict, metrics: WalkForwardAudit, report_path: Path) -
         f"| majority_baseline_accuracy | {_fmt_pct(metrics.majority_baseline_accuracy)} |",
         "| accuracy_gain_vs_zero_return_baseline | "
         f"{_fmt_pp(metrics.directional_accuracy_gain_pp)} |",
-        f"| required_gain_vs_zero | {zero_floor_pp:.2f} pp |",
+        f"| required_gain_vs_zero | {thresholds['zero_gain_min_pp']:.2f} pp |",
         "| accuracy_gain_vs_majority_sign_baseline | "
         f"{_fmt_pp(metrics.majority_accuracy_gain_pp)} |",
-        f"| required_gain_vs_majority | > {majority_floor_pp:.2f} pp |",
-        f"| preferred_gain_vs_majority | {majority_preferred_pp:.2f} pp |",
+        f"| required_gain_vs_majority | > {thresholds['majority_gain_min_pp']:.2f} pp |",
+        f"| preferred_gain_vs_majority | {thresholds['majority_gain_preferred_pp']:.2f} pp |",
+        f"| skill_gate_pass | {candidate_decision['skill_gate_pass']} |",
         "",
         "---",
         "",
@@ -453,10 +624,39 @@ def write_report(manifest: dict, metrics: WalkForwardAudit, report_path: Path) -
         f"| HAC effective N (Newey-West, residuals) | {hac_n} |",
         f"| block-bootstrap effective N (residuals) | {boot_n} |",
         f"| n_star (overall, harness decision) | {n_star} |",
+        f"| effective_n_gate_pass | {candidate_decision['effective_n_gate_pass']} |",
         "",
         "---",
         "",
-        "## Phase 3 verdict",
+        "## Diagnostic appendix",
+        "",
+        "These diagnostics are non-claim evidence only. They do not alter the",
+        "pre-registered model, signs, thresholds, feature set, or warmup.",
+        "",
+        "### Per-year skill",
+        "",
+        "| Year | Scored | Accuracy | Gain vs zero | Gain vs majority |",
+        "| --- | ---: | ---: | ---: | ---: |",
+        *[
+            "| {year} | {scored_events} | {model_accuracy_pct:.2f}% | "
+            "{gain_vs_zero_pp:.2f} pp | {gain_vs_majority_pp:.2f} pp |".format(**row)
+            for row in per_year_rows
+        ],
+        "",
+        "### Inverted-signal diagnostic",
+        "",
+        "| Metric | Value |",
+        "| --- | ---: |",
+        f"| inverted_accuracy | {inverted['accuracy_pct']:.2f}% |",
+        f"| inverted_gain_vs_zero | {inverted['gain_vs_zero_pp']:.2f} pp |",
+        f"| inverted_gain_vs_majority | {inverted['gain_vs_majority_pp']:.2f} pp |",
+        "",
+        "Inversion is diagnostic evidence of possible anti-correlation only. It is",
+        "not a pre-registered rescue model and is not promotion-eligible here.",
+        "",
+        "---",
+        "",
+        "## Candidate verdict",
         "",
         f"**{verdict}**",
         "",
@@ -570,7 +770,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Phase 3 manifest: {PHASE3_MANIFEST}")
     print(json.dumps(manifest["decision"], indent=2))
 
-    write_report(manifest, audit, PHASE3_REPORT)
+    candidate_decision = build_candidate_decision(manifest, audit)
+    write_candidate_decision_json(candidate_decision, CANDIDATE_DECISION_JSON)
+    print(f"Candidate decision: {CANDIDATE_DECISION_JSON}")
+
+    write_report(manifest, audit, candidate_decision, PHASE3_REPORT)
     print(f"Phase 3 report: {PHASE3_REPORT}")
     return 0
 
