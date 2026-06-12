@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Oak's Lab — First Person</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body {
+    margin: 0; padding: 0; background: #181820; color: #e8e8e8;
+    font-family: "Courier New", monospace;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; justify-content: center;
+  }
+  h1 { font-size: 18px; letter-spacing: 2px; margin: 12px 0 6px; color: #ffd84a; }
+  #wrap { position: relative; }
+  canvas#screen {
+    display: block;
+    width: 960px; height: 600px;
+    max-width: 96vw; max-height: 60vw;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    border: 4px solid #444;
+    border-radius: 4px;
+    background: #000;
+    cursor: crosshair;
+  }
+  #hint { font-size: 12px; color: #999; margin-top: 8px; text-align: center; line-height: 1.6; }
+  kbd {
+    background: #333; border: 1px solid #555; border-bottom-width: 3px;
+    border-radius: 3px; padding: 0 5px; font-size: 11px; color: #ffd84a;
+  }
+</style>
+</head>
+<body>
+<h1>PROF. OAK'S LAB</h1>
+<div id="wrap"><canvas id="screen" width="960" height="600"></canvas></div>
+<div id="hint">
+  <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;
+  <kbd>←</kbd><kbd>→</kbd> or mouse (click screen) look &nbsp;
+  <kbd>E</kbd>/<kbd>Z</kbd>/<kbd>Enter</kbd> talk / interact &nbsp;
+  <kbd>P</kbd> Game Boy palette &nbsp; <kbd>M</kbd> map
+</div>
+<script>
+"use strict";
+/* ============================================================
+ * OAK'S LAB — a first-person explorer of the Pokémon Yellow lab.
+ * Zero dependencies. Software raycaster (Wolfenstein-style DDA)
+ * rendered at 320x200 into an ImageData buffer, upscaled 3x.
+ * All textures and sprites are procedural pixel art.
+ * ============================================================ */
+
+// ---------- low-res framebuffer ----------
+const SW = 320, SH = 200;
+const screen = document.getElementById("screen");
+const sctx = screen.getContext("2d");
+sctx.imageSmoothingEnabled = false;
+const frame = document.createElement("canvas");
+frame.width = SW; frame.height = SH;
+const fctx = frame.getContext("2d");
+const img = fctx.createImageData(SW, SH);
+const buf = new Uint32Array(img.data.buffer); // little-endian ABGR
+const zbuf = new Float32Array(SW);
+
+function rgb(r, g, b) { return 0xff000000 | (b << 16) | (g << 8) | r; }
+function shade(c, f) {
+  const r = (c & 0xff) * f, g = ((c >> 8) & 0xff) * f, b = ((c >> 16) & 0xff) * f;
+  return rgb(r | 0, g | 0, b | 0);
+}
+
+// ---------- map ----------
+// # wall   M machine   B bookshelf   D exit door   . floor
+const MAP_S = [
+  "##############",
+  "#MMMMMMMMMMMM#",
+  "#............#",
+  "#............#",
+  "#............#",
+  "#.BBBB..BBBB.#",
+  "#............#",
+  "#.BBBB..BBBB.#",
+  "#............#",
+  "#............#",
+  "#............#",
+  "######DD######",
+];
+const MW = MAP_S[0].length, MH = MAP_S.length;
+const MAP = MAP_S.map(r => r.split(""));
+function tile(x, y) {
+  if (x < 0 || y < 0 || x >= MW || y >= MH) return "#";
+  return MAP[y | 0][x | 0];
+}
+function solidTile(x, y) { return tile(x, y) !== "."; }
+
+// ---------- texture helpers ----------
+function makeTex(w, h, painter) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const g = c.getContext("2d");
+  painter(g, w, h);
+  const d = g.getImageData(0, 0, w, h);
+  return { w, h, px: new Uint32Array(d.data.buffer) };
+}
+function px(g, x, y, col) { g.fillStyle = col; g.fillRect(x, y, 1, 1); }
+let rseed = 7;
+function rnd() { rseed = (rseed * 1103515245 + 12345) & 0x7fffffff; return rseed / 0x7fffffff; }
+
+const TS = 32; // wall texture size
+
+const TEX = {
+  // plain lab wall: cream with wood wainscot
+  "#": makeTex(TS, TS, (g) => {
+    g.fillStyle = "#efe6c9"; g.fillRect(0, 0, TS, TS);
+    for (let i = 0; i < 40; i++) px(g, rnd() * TS | 0, rnd() * 22 | 0, "#e6dcba");
+    g.fillStyle = "#b78a52"; g.fillRect(0, 22, TS, 10);
+    g.fillStyle = "#9c7240"; g.fillRect(0, 22, TS, 1); g.fillRect(0, 27, TS, 1);
+    for (let x = 0; x < TS; x += 8) { g.fillStyle = "#a87d48"; g.fillRect(x, 23, 1, 9); }
+  }),
+  // bookshelf crammed full of POKéMON books
+  "B": makeTex(TS, TS, (g) => {
+    g.fillStyle = "#8a5a2c"; g.fillRect(0, 0, TS, TS);
+    g.fillStyle = "#6e4520"; g.fillRect(0, 0, 2, TS); g.fillRect(TS - 2, 0, 2, TS);
+    g.fillRect(0, 0, TS, 2); g.fillRect(0, 15, TS, 2); g.fillRect(0, 30, TS, 2);
+    const spines = ["#c23b3b", "#3b62c2", "#3ba05a", "#c2a23b", "#8a4bb0", "#d27a35", "#377f8f"];
+    for (const top of [3, 18]) {
+      let x = 3;
+      while (x < TS - 3) {
+        const w = 2 + (rnd() * 2 | 0);
+        g.fillStyle = spines[rnd() * spines.length | 0];
+        g.fillRect(x, top, w, 12);
+        g.fillStyle = "rgba(0,0,0,0.25)"; g.fillRect(x + w - 1, top, 1, 12);
+        x += w + 1;
+      }
+    }
+  }),
+  // lab machine / computer console
+  "M": makeTex(TS, TS, (g) => {
+    g.fillStyle = "#8d9aab"; g.fillRect(0, 0, TS, TS);
+    g.fillStyle = "#6f7c8d"; g.fillRect(0, 0, TS, 2); g.fillRect(0, 30, TS, 2);
+    g.fillRect(0, 0, 2, TS); g.fillRect(30, 0, 2, TS);
+    // screen
+    g.fillStyle = "#11241c"; g.fillRect(5, 4, 14, 11);
+    g.fillStyle = "#3be08a";
+    for (let i = 0; i < 5; i++) g.fillRect(7, 6 + i * 2, 3 + (rnd() * 8 | 0), 1);
+    // indicator lights
+    const lights = ["#ff5050", "#ffd84a", "#42d36e", "#52a7ff"];
+    for (let i = 0; i < 4; i++) { g.fillStyle = lights[i]; g.fillRect(23, 5 + i * 3, 2, 2); }
+    // vents
+    g.fillStyle = "#5c6878";
+    for (let i = 0; i < 4; i++) g.fillRect(5, 20 + i * 2, 22, 1);
+  }),
+  // sliding exit door
+  "D": makeTex(TS, TS, (g) => {
+    g.fillStyle = "#cfc6b2"; g.fillRect(0, 0, TS, TS);
+    g.fillStyle = "#9a9180"; g.fillRect(15, 0, 2, TS); g.fillRect(0, 0, TS, 2);
+    g.fillRect(0, 30, TS, 2); g.fillRect(0, 0, 1, TS); g.fillRect(31, 0, 1, TS);
+    g.fillStyle = "#7fc4de"; g.fillRect(4, 6, 8, 10); g.fillRect(20, 6, 8, 10);
+    g.fillStyle = "#b8e2f2"; g.fillRect(5, 7, 2, 8); g.fillRect(21, 7, 2, 8);
+    g.fillStyle = "#6e655a"; g.fillRect(12, 19, 2, 5); g.fillRect(18, 19, 2, 5);
+  }),
+};
+
+const FLOOR = makeTex(TS, TS, (g) => {
+  g.fillStyle = "#ddd2bc"; g.fillRect(0, 0, TS, TS);
+  for (let i = 0; i < 30; i++) px(g, rnd() * TS | 0, rnd() * TS | 0, "#d4c8b0");
+  g.fillStyle = "#bdb098"; g.fillRect(0, 0, TS, 1); g.fillRect(0, 0, 1, TS);
+});
+const CEIL = makeTex(TS, TS, (g) => {
+  g.fillStyle = "#c4cad6"; g.fillRect(0, 0, TS, TS);
+  g.fillStyle = "#aab1c0"; g.fillRect(0, 0, TS, 1); g.fillRect(0, 0, 1, TS);
+  g.fillStyle = "#d6dbe4"; g.fillRect(14, 14, 4, 4);
+});
+
+// ---------- pixel-art sprites from string maps ----------
+function makeSprite(rows, pal, scale) {
+  const w = rows[0].length, h = rows.length;
+  const t = makeTex(w, h, (g) => {
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const ch = rows[y][x];
+        if (ch !== ".") px(g, x, y, pal[ch]);
+      }
+  });
+  t.scale = scale; // world height of the sprite (1.0 = floor to ceiling)
+  return t;
+}
+
+const OAK_IMG = makeSprite([
+  "...GGGGGG...",
+  "..GGGGGGGG..",
+  ".GGGGGGGGGG.",
+  ".GGSSSSSSGG.",
+  ".GSSSSSSSSG.",
+  ".GSKSSSSKSG.",
+  ".GSSSSSSSSG.",
+  "..SSSKKSSS..",
+  "..SSSSSSSS..",
+  "..WWWWWWWW..",
+  ".WWWWWWWWWW.",
+  ".WWWRRRRWWW.",
+  "WWWWRRRRWWWW",
+  "WSWWRRRRWWSW",
+  "WSWWRRRRWWSW",
+  ".WWWWWWWWWW.",
+  ".WWWWWWWWWW.",
+  "..PPP..PPP..",
+  "..PPP..PPP..",
+  "..PPP..PPP..",
+  "..KKK..KKK..",
+], { G: "#cdd2d6", S: "#eebd8e", K: "#262626", W: "#f4f4f0", R: "#7a4f8e", P: "#8a7350" }, 0.74);
+
+const AIDE_IMG = makeSprite([
+  "...KKKKKK...",
+  "..KKKKKKKK..",
+  ".KKSSSSSSKK.",
+  ".KSSSSSSSSK.",
+  ".KSFSFFSFSK.",
+  ".KSFSFFSFSK.",
+  ".KSSSSSSSSK.",
+  "..SSSKKSSS..",
+  "..WWWWWWWW..",
+  ".WWWWWWWWWW.",
+  ".WWWTTTTWWW.",
+  "WWWWTTTTWWWW",
+  "WSWWTTTTWWSW",
+  "WSWWTTTTWWSW",
+  ".WWWWWWWWWW.",
+  "..PPP..PPP..",
+  "..PPP..PPP..",
+  "..KKK..KKK..",
+], { K: "#2b2b2b", S: "#eebd8e", F: "#4a4a52", W: "#f4f4f0", T: "#46743f", P: "#4a5568" }, 0.68);
+
+const PIKA_IMG = makeSprite([
+  ".K............K.",
+  ".KY..........YK.",
+  "..KY........YK..",
+  "..YY........YY..",
+  "...YY......YY...",
+  "...YYYYYYYYYY...",
+  "..YYYYYYYYYYYY..",
+  ".YYKYYYYYYYYKYY.",
+  ".YYYYYKKYYYYYYY.",
+  ".YRRYYYYYYYYRRY.",
+  ".YRRYYYYYYYYRRY.",
+  "..YYYYYYYYYYYYBB",
+  "..YYYYYYYYYYYBB.",
+  "...YYY....YYYBB.",
+  "...KKK....KKK...",
+], { Y: "#ffd84a", K: "#262626", R: "#e2554a", B: "#b08a2a" }, 0.34);
+
+const TABLE_IMG = makeSprite([
+  "......RRRR......",
+  ".....RRRRRR.....",
+  ".....RRRRRR.....",
+  ".....KKKKKK.....",
+  ".....WWKKWW.....",
+  ".....WWWWWW.....",
+  "......WWWW......",
+  "TTTTTTTTTTTTTTTT",
+  "TTTTTTTTTTTTTTTT",
+  "ttTTTTTTTTTTTTtt",
+  ".DD..........DD.",
+  ".DD..........DD.",
+  ".DD..........DD.",
+  ".DD..........DD.",
+], { R: "#e2453a", W: "#f4f4f0", K: "#2b2b2b", T: "#b78a52", t: "#9c7240", D: "#7a5a32" }, 0.52);
+
+const PLANT_IMG = makeSprite([
+  "....LL..LL....",
+  "...LLLLLLLL...",
+  "..LLlLLLLlLL..",
+  ".LLLLLlLLLLLL.",
+  ".LLlLLLLLlLLL.",
+  "..LLLLlLLLL...",
+  "...LLLLLLL....",
+  "....CCCCCC....",
+  "....CcCCcC....",
+  ".....CCCC.....",
+  ".....CCCC.....",
+], { L: "#3f9c4e", l: "#5fc76a", C: "#b3593a", c: "#8f4029" }, 0.42);
+
+// ---------- dialog text ----------
+const T = {
+  intro: [
+    "Welcome to PROF. OAK's POKéMON LAB!",
+    "OBJECTIVE: Find PROF. OAK at the back of the lab and get your first POKéMON.",
+  ],
+  oak0: [
+    "OAK: Oh! Hello there. I've been expecting you!",
+    "OAK: This here is PIKACHU. I caught it in the wild just now — it's a little shy.",
+    "OAK: Go on, say hello to it. I think it likes you already!",
+  ],
+  oak1: ["OAK: Well? Go talk to PIKACHU! It's right beside the table."],
+  oak2: [
+    "OAK: A POKéMON chose YOU. That's rare, you know.",
+    "OAK: Your very own POKéMON journey is about to unfold! Off you go!",
+  ],
+  pika0: ["PIKACHU: ... Pika?", "(It eyes you warily. Maybe PROF. OAK can introduce you.)"],
+  pika1: [
+    "PIKACHU: Pika... pi?",
+    "(PIKACHU sniffs your hand... then leaps up happily!)",
+    "You got PIKACHU! It will follow you around the lab.",
+  ],
+  pika2: ["PIKACHU: Pika pika!", "(It's happily trailing right behind you.)"],
+  aide1: [
+    "AIDE: PROF. OAK is the leading authority on POKéMON.",
+    "AIDE: Many trainers come from far away just to ask his advice.",
+  ],
+  aide2: [
+    "AIDE: I'm entering field data into the POKéDEX project.",
+    "AIDE: Catching them all... that's 151 entries. We'll need help.",
+  ],
+  table: ["It's a POKé BALL on the table.", "OAK: Sorry! That one is spoken for — my grandson claimed it earlier."],
+  plant: ["It's a leafy potted plant. Someone waters it every day."],
+  shelf: ["Crammed full of POKéMON books!"],
+  machineA: ["There's a message blinking on the PC...", "\"OAK — the conference is on. Bring the POKéDEX data! — S.\""],
+  machineB: ["Complicated machines line the wall. Best not to touch anything."],
+  doorLocked: ["OAK: Hey! Wait! Don't go out yet —", "OAK: it's dangerous outside without a POKéMON of your own!"],
+  doorEnd: [
+    "The glass door slides open. Pallet Town air drifts in.",
+    "With PIKACHU at your heels, your journey begins...",
+  ],
+};
+
+// ---------- entities ----------
+const sprites = [
+  { id: "oak",   img: OAK_IMG,   x: 5.5,  y: 3.0,  solid: true, r: 0.5 },
+  { id: "table", img: TABLE_IMG, x: 8.5,  y: 2.9,  solid: true, r: 0.55 },
+  { id: "pika",  img: PIKA_IMG,  x: 8.5,  y: 4.1,  solid: true, r: 0.85 },
+  { id: "aide1", img: AIDE_IMG,  x: 4.0,  y: 6.4,  solid: true, r: 0.5 },
+  { id: "aide2", img: AIDE_IMG,  x: 10.0, y: 8.4,  solid: true, r: 0.5 },
+  { id: "plantL", img: PLANT_IMG, x: 1.6,  y: 10.4, solid: true, r: 0.6 },
+  { id: "plantR", img: PLANT_IMG, x: 12.4, y: 10.4, solid: true, r: 0.6 },
+];
+const pika = sprites.find(s => s.id === "pika");
+
+// ---------- player & game state ----------
+const player = { x: 7.0, y: 10.2, ang: -Math.PI / 2 }; // facing north (into the lab)
+const FOV_PLANE = 0.66;
+let stage = 0;            // 0 find Oak, 1 talk to Pikachu, 2 leave, 3 done
+let gbMode = false;
+let showMap = false;
+let ended = false;
+let endFade = 0;
+const keys = {};
+
+// ---------- audio (tiny WebAudio blips) ----------
+let actx = null;
+function beep(freq, dur, type, vol) {
+  try {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type || "square"; o.frequency.value = freq;
+    g.gain.value = vol || 0.04;
+    g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
+    o.connect(g); g.connect(actx.destination);
+    o.start(); o.stop(actx.currentTime + dur);
+  } catch (e) { /* audio unavailable; stay silent */ }
+}
+function jingle() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.18, "square", 0.05), i * 110)); }
+function pikaCry() { beep(880, 0.07, "square", 0.05); setTimeout(() => beep(1320, 0.12, "square", 0.05), 80); }
+
+// ---------- dialog system ----------
+const dialog = { pages: null, page: 0, chars: 0, onClose: null };
+function say(pages, onClose) {
+  dialog.pages = pages; dialog.page = 0; dialog.chars = 0; dialog.onClose = onClose || null;
+  beep(740, 0.05);
+}
+function dialogOpen() { return dialog.pages !== null; }
+function advanceDialog() {
+  if (!dialogOpen()) return;
+  const text = dialog.pages[dialog.page];
+  if (dialog.chars < text.length) { dialog.chars = text.length; return; }
+  dialog.page++;
+  dialog.chars = 0;
+  beep(620, 0.04);
+  if (dialog.page >= dialog.pages.length) {
+    const cb = dialog.onClose;
+    dialog.pages = null; dialog.onClose = null;
+    if (cb) cb();
+  }
+}
+
+// ---------- interaction ----------
+function interact() {
+  if (ended) return;
+  if (dialogOpen()) { advanceDialog(); return; }
+  const dx = Math.cos(player.ang), dy = Math.sin(player.ang);
+  for (let d = 0.3; d <= 1.8; d += 0.12) {
+    const ix = player.x + dx * d, iy = player.y + dy * d;
+    // sprites first
+    let best = null, bestD = 0.5;
+    for (const s of sprites) {
+      const dd = Math.hypot(s.x - ix, s.y - iy);
+      if (dd < bestD) { best = s; bestD = dd; }
+    }
+    if (best) { interactSprite(best); return; }
+    const t = tile(ix, iy);
+    if (t !== ".") { interactTile(t, ix | 0); return; }
+  }
+}
+function interactSprite(s) {
+  switch (s.id) {
+    case "oak":
+      if (stage === 0) say(T.oak0, () => { stage = 1; });
+      else if (stage === 1) say(T.oak1);
+      else say(T.oak2);
+      break;
+    case "pika":
+      if (stage === 0) { say(T.pika0); pikaCry(); }
+      else if (stage === 1) {
+        pikaCry();
+        say(T.pika1, () => { stage = 2; s.solid = false; jingle(); });
+      } else { say(T.pika2); pikaCry(); }
+      break;
+    case "table": say(T.table); break;
+    case "aide1": say(T.aide1); break;
+    case "aide2": say(T.aide2); break;
+    default: say(T.plant);
+  }
+}
+function interactTile(t, col) {
+  if (t === "B") say(T.shelf);
+  else if (t === "M") say(col <= 4 ? T.machineA : T.machineB);
+  else if (t === "D") {
+    if (stage >= 2) { say(T.doorEnd, () => { ended = true; stage = 3; jingle(); }); }
+    else say(T.doorLocked);
+  }
+}
+
+// ---------- input ----------
+addEventListener("keydown", (e) => {
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) e.preventDefault();
+  keys[e.key.toLowerCase()] = true;
+  const k = e.key.toLowerCase();
+  if (k === "e" || k === "z" || k === "enter" || k === " ") interact();
+  if (k === "p") gbMode = !gbMode;
+  if (k === "m") showMap = !showMap;
+  if (k === "r" && ended) location.reload();
+});
+addEventListener("keyup", (e) => { keys[e.key.toLowerCase()] = false; });
+screen.addEventListener("click", () => {
+  if (dialogOpen()) { advanceDialog(); return; }
+  if (document.pointerLockElement !== screen) screen.requestPointerLock();
+  else interact();
+});
+addEventListener("mousemove", (e) => {
+  if (document.pointerLockElement === screen && !dialogOpen() && !ended)
+    player.ang += e.movementX * 0.0032;
+});
+
+// ---------- movement ----------
+function tryMove(nx, ny) {
+  const R = 0.22;
+  const blocked = (x, y) =>
+    solidTile(x - R, y - R) || solidTile(x + R, y - R) ||
+    solidTile(x - R, y + R) || solidTile(x + R, y + R) ||
+    sprites.some(s => s.solid && Math.hypot(s.x - x, s.y - y) < s.r);
+  if (!blocked(nx, player.y)) player.x = nx;
+  if (!blocked(player.x, ny)) player.y = ny;
+}
+function update(dt) {
+  if (dialogOpen() || ended) {
+    if (ended && endFade < 1) endFade = Math.min(1, endFade + dt * 0.5);
+  } else {
+    const sp = 2.4 * dt, rot = 2.2 * dt;
+    if (keys["arrowleft"]) player.ang -= rot;
+    if (keys["arrowright"]) player.ang += rot;
+    const dx = Math.cos(player.ang), dy = Math.sin(player.ang);
+    let mx = 0, my = 0;
+    if (keys["w"] || keys["arrowup"]) { mx += dx; my += dy; }
+    if (keys["s"] || keys["arrowdown"]) { mx -= dx; my -= dy; }
+    if (keys["a"]) { mx += dy; my -= dx; }
+    if (keys["d"]) { mx -= dy; my += dx; }
+    const m = Math.hypot(mx, my);
+    if (m > 0) tryMove(player.x + (mx / m) * sp, player.y + (my / m) * sp);
+  }
+  // Pikachu follows once obtained
+  if (stage >= 2) {
+    const tx = player.x - Math.cos(player.ang) * 0.9;
+    const ty = player.y - Math.sin(player.ang) * 0.9;
+    const dx = tx - pika.x, dy = ty - pika.y, d = Math.hypot(dx, dy);
+    if (d > 0.15) {
+      const sp = Math.min(d * 3.5, 2.8) * dt;
+      const nx = pika.x + (dx / d) * sp, ny = pika.y + (dy / d) * sp;
+      if (!solidTile(nx, pika.y)) pika.x = nx;
+      if (!solidTile(pika.x, ny)) pika.y = ny;
+    }
+  }
+}
+
+// ---------- renderer ----------
+function render(time) {
+  const dirX = Math.cos(player.ang), dirY = Math.sin(player.ang);
+  const plX = -dirY * FOV_PLANE, plY = dirX * FOV_PLANE;
+  const half = SH / 2;
+
+  // floor & ceiling casting
+  for (let y = half | 0; y < SH; y++) {
+    const rowDist = half / (y - half + 0.5);
+    const stepX = rowDist * 2 * plX / SW, stepY = rowDist * 2 * plY / SW;
+    let fx = player.x + rowDist * (dirX - plX);
+    let fy = player.y + rowDist * (dirY - plY);
+    const fshade = Math.max(0.45, 1 - rowDist * 0.07);
+    for (let x = 0; x < SW; x++) {
+      const tx = ((fx * TS) | 0) & (TS - 1), ty = ((fy * TS) | 0) & (TS - 1);
+      buf[y * SW + x] = shade(FLOOR.px[ty * TS + tx], fshade);
+      buf[(SH - 1 - y) * SW + x] = shade(CEIL.px[ty * TS + tx], fshade * 0.9);
+      fx += stepX; fy += stepY;
+    }
+  }
+
+  // walls (DDA)
+  for (let x = 0; x < SW; x++) {
+    const camX = 2 * x / SW - 1;
+    const rdX = dirX + plX * camX, rdY = dirY + plY * camX;
+    let mapX = player.x | 0, mapY = player.y | 0;
+    const ddX = Math.abs(1 / (rdX || 1e-9)), ddY = Math.abs(1 / (rdY || 1e-9));
+    let stepX, stepY, sdX, sdY;
+    if (rdX < 0) { stepX = -1; sdX = (player.x - mapX) * ddX; } else { stepX = 1; sdX = (mapX + 1 - player.x) * ddX; }
+    if (rdY < 0) { stepY = -1; sdY = (player.y - mapY) * ddY; } else { stepY = 1; sdY = (mapY + 1 - player.y) * ddY; }
+    let side = 0, hit = ".";
+    for (let i = 0; i < 64; i++) {
+      if (sdX < sdY) { sdX += ddX; mapX += stepX; side = 0; } else { sdY += ddY; mapY += stepY; side = 1; }
+      hit = tile(mapX, mapY);
+      if (hit !== ".") break;
+    }
+    const dist = side === 0 ? sdX - ddX : sdY - ddY;
+    zbuf[x] = dist;
+    const lineH = SH / dist;
+    let y0 = (half - lineH / 2) | 0, y1 = (half + lineH / 2) | 0;
+    const drawY0 = Math.max(0, y0), drawY1 = Math.min(SH - 1, y1);
+    let wallX = side === 0 ? player.y + dist * rdY : player.x + dist * rdX;
+    wallX -= wallX | 0;
+    let texX = (wallX * TS) | 0;
+    if ((side === 0 && rdX > 0) || (side === 1 && rdY < 0)) texX = TS - texX - 1;
+    const tex = TEX[hit] || TEX["#"];
+    const step = TS / lineH;
+    let texPos = (drawY0 - half + lineH / 2) * step;
+    const f = (side === 1 ? 0.75 : 1) * Math.max(0.4, 1 - dist * 0.06);
+    for (let y = drawY0; y <= drawY1; y++) {
+      const texY = Math.min(TS - 1, texPos | 0);
+      texPos += step;
+      buf[y * SW + x] = shade(tex.px[texY * TS + texX], f);
+    }
+  }
+
+  // sprites (far to near)
+  const order = sprites
+    .map(s => ({ s, d: (s.x - player.x) ** 2 + (s.y - player.y) ** 2 }))
+    .sort((a, b) => b.d - a.d);
+  const invDet = 1 / (plX * dirY - dirX * plY);
+  for (const { s } of order) {
+    const rx = s.x - player.x, ry = s.y - player.y;
+    const trX = invDet * (dirY * rx - dirX * ry);
+    const trY = invDet * (-plY * rx + plX * ry);
+    if (trY <= 0.1) continue;
+    const sx = ((SW / 2) * (1 + trX / trY)) | 0;
+    const lineH = SH / trY;
+    const bob = (s === pika && stage >= 2) ? Math.sin(time * 0.012) * lineH * 0.02 : 0;
+    const hpx = lineH * s.img.scale;
+    const wpx = hpx * (s.img.w / s.img.h);
+    const bottom = half + lineH / 2 - bob;
+    const top = bottom - hpx;
+    const x0 = Math.max(0, (sx - wpx / 2) | 0), x1 = Math.min(SW - 1, (sx + wpx / 2) | 0);
+    const y0 = Math.max(0, top | 0), y1 = Math.min(SH - 1, bottom | 0);
+    const f = Math.max(0.45, 1 - trY * 0.06);
+    for (let x = x0; x <= x1; x++) {
+      if (trY >= zbuf[x]) continue;
+      const tx = ((x - (sx - wpx / 2)) / wpx * s.img.w) | 0;
+      if (tx < 0 || tx >= s.img.w) continue;
+      for (let y = y0; y <= y1; y++) {
+        const ty = ((y - top) / hpx * s.img.h) | 0;
+        if (ty < 0 || ty >= s.img.h) continue;
+        const c = s.img.px[ty * s.img.w + tx];
+        if ((c >>> 24) === 0) continue;
+        buf[y * SW + x] = shade(c, f);
+      }
+    }
+  }
+
+  // optional Game Boy 4-shade palette
+  if (gbMode) {
+    const pal = [rgb(15, 56, 15), rgb(48, 98, 48), rgb(139, 172, 15), rgb(155, 188, 15)];
+    for (let i = 0; i < buf.length; i++) {
+      const c = buf[i];
+      const lum = ((c & 0xff) * 3 + ((c >> 8) & 0xff) * 6 + ((c >> 16) & 0xff)) / 10;
+      buf[i] = pal[Math.min(3, lum / 64 | 0)];
+    }
+  }
+
+  fctx.putImageData(img, 0, 0);
+  sctx.imageSmoothingEnabled = false;
+  sctx.drawImage(frame, 0, 0, SW, SH, 0, 0, screen.width, screen.height);
+  drawHud(time);
+}
+
+// ---------- HUD (drawn at full resolution) ----------
+const OBJECTIVES = ["Find PROF. OAK", "Talk to PIKACHU", "Leave the LAB", "Journey begins!"];
+function drawHud(time) {
+  const W = screen.width, H = screen.height;
+
+  if (!ended) {
+    // crosshair
+    sctx.fillStyle = "rgba(255,255,255,0.7)";
+    sctx.fillRect(W / 2 - 1, H / 2 - 1, 3, 3);
+    // objective chip
+    sctx.font = "bold 16px 'Courier New', monospace";
+    const txt = "▸ " + OBJECTIVES[stage];
+    sctx.fillStyle = "rgba(0,0,0,0.55)";
+    sctx.fillRect(10, 10, sctx.measureText(txt).width + 20, 28);
+    sctx.fillStyle = "#ffd84a";
+    sctx.fillText(txt, 20, 29);
+  }
+
+  // minimap
+  if (showMap && !ended) {
+    const cs = 9, ox = W - MW * cs - 12, oy = 12;
+    sctx.fillStyle = "rgba(0,0,0,0.6)";
+    sctx.fillRect(ox - 4, oy - 4, MW * cs + 8, MH * cs + 8);
+    const cols = { "#": "#777", "M": "#7d8da3", "B": "#8a5a2c", "D": "#7fc4de", ".": "#2c2c34" };
+    for (let y = 0; y < MH; y++)
+      for (let x = 0; x < MW; x++) {
+        sctx.fillStyle = cols[MAP[y][x]];
+        sctx.fillRect(ox + x * cs, oy + y * cs, cs - 1, cs - 1);
+      }
+    for (const s of sprites) {
+      sctx.fillStyle = s.id === "pika" ? "#ffd84a" : s.id === "oak" ? "#e8e8e8" : "#7fbf7f";
+      sctx.fillRect(ox + s.x * cs - 2, oy + s.y * cs - 2, 4, 4);
+    }
+    sctx.fillStyle = "#ff5050";
+    sctx.beginPath();
+    sctx.arc(ox + player.x * cs, oy + player.y * cs, 3, 0, 7);
+    sctx.fill();
+    sctx.strokeStyle = "#ff5050";
+    sctx.beginPath();
+    sctx.moveTo(ox + player.x * cs, oy + player.y * cs);
+    sctx.lineTo(ox + (player.x + Math.cos(player.ang)) * cs, oy + (player.y + Math.sin(player.ang)) * cs);
+    sctx.stroke();
+  }
+
+  // dialog box (Gen-1 style)
+  if (dialogOpen()) {
+    const text = dialog.pages[dialog.page];
+    if (dialog.chars < text.length) dialog.chars += 0.9;
+    const shown = text.slice(0, dialog.chars | 0);
+    const bh = 120, by = H - bh - 14;
+    sctx.fillStyle = "#f8f8f8"; sctx.fillRect(18, by, W - 36, bh);
+    sctx.strokeStyle = "#222"; sctx.lineWidth = 4; sctx.strokeRect(20, by + 2, W - 40, bh - 4);
+    sctx.strokeStyle = "#888"; sctx.lineWidth = 2; sctx.strokeRect(26, by + 8, W - 52, bh - 16);
+    sctx.fillStyle = "#222";
+    sctx.font = "bold 19px 'Courier New', monospace";
+    // word wrap
+    const words = shown.split(" ");
+    let line = "", ty = by + 38;
+    for (const w of words) {
+      const t = line ? line + " " + w : w;
+      if (sctx.measureText(t).width > W - 100) { sctx.fillText(line, 40, ty); ty += 28; line = w; }
+      else line = t;
+    }
+    sctx.fillText(line, 40, ty);
+    if ((dialog.chars | 0) >= text.length && (time / 400 | 0) % 2 === 0) {
+      sctx.fillText("▼", W - 56, by + bh - 18);
+    }
+  }
+
+  // ending
+  if (ended) {
+    sctx.fillStyle = `rgba(0,0,0,${endFade * 0.85})`;
+    sctx.fillRect(0, 0, W, H);
+    if (endFade > 0.6) {
+      sctx.textAlign = "center";
+      sctx.fillStyle = "#ffd84a";
+      sctx.font = "bold 34px 'Courier New', monospace";
+      sctx.fillText("YOUR JOURNEY BEGINS!", W / 2, H / 2 - 20);
+      sctx.fillStyle = "#e8e8e8";
+      sctx.font = "bold 17px 'Courier New', monospace";
+      sctx.fillText("You explored OAK's LAB and got PIKACHU.", W / 2, H / 2 + 20);
+      sctx.fillText("Press R to play again", W / 2, H / 2 + 56);
+      sctx.textAlign = "left";
+    }
+  }
+}
+
+// ---------- main loop ----------
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  update(dt);
+  render(now);
+  requestAnimationFrame(loop);
+}
+say(T.intro);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
